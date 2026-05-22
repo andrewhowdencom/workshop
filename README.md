@@ -8,28 +8,55 @@ This project demonstrates how to build a fully fledged agentic application outsi
 
 - [Go](https://go.dev/) 1.26+
 - An OpenAI API key (or compatible API endpoint)
+- [Task](https://taskfile.dev/) (optional, for development tasks)
 
 ## Usage
 
 ```bash
-export ORE_API_KEY=sk-...
-export ORE_MODEL=gpt-4o   # optional; defaults to gpt-4o
-go run .
+export WORKSHOP_API_KEY=sk-...
+export WORKSHOP_MODEL=gpt-4o   # optional; defaults to gpt-4o
+go run ./cmd/workshop
 ```
 
 ### Resume an existing thread
 
 ```bash
-go run . --thread <uuid>
+go run ./cmd/workshop --thread <uuid>
 ```
 
 ### Persistent JSON store
 
 ```bash
-STORE_DIR=/tmp/ore-store go run .
+WORKSHOP_STORE_DIR=/tmp/ore-store go run ./cmd/workshop
 ```
 
-### Available tools
+### Adjust log level
+
+```bash
+go run ./cmd/workshop --log-level debug
+```
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `workshop` | Open the interactive TUI (default) |
+| `workshop version` | Print the build version |
+
+## Flags
+
+| Flag | Environment Variable | Default | Description |
+|---|---|---|---|
+| `--api.key` | `WORKSHOP_API_KEY` | — | OpenAI-compatible API key (**required**) |
+| `--model` | `WORKSHOP_MODEL` | `gpt-4o` | Model name |
+| `--base.url` | `WORKSHOP_BASE_URL` | — | Custom API base URL |
+| `--store.dir` | `WORKSHOP_STORE_DIR` | — | Directory for persistent JSON thread storage |
+| `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
+| `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+
+> **Note:** Environment variables use the `WORKSHOP_` prefix. The previous `ORE_*` and `STORE_DIR` variables are no longer supported.
+
+## Available tools
 
 | Tool | Description |
 |---|---|
@@ -43,6 +70,22 @@ STORE_DIR=/tmp/ore-store go run .
 ## Built with
 
 - [`ore`](https://github.com/andrewhowdencom/ore) — A Go-native framework for building agentic applications
+- [`cobra`](https://github.com/spf13/cobra) — CLI framework
+- [`viper`](https://github.com/spf13/viper) — Configuration management
+
+## Development
+
+Run all validation checks (lint, test, build) before committing:
+
+```bash
+task validate
+```
+
+Available tasks:
+
+```bash
+task --list
+```
 
 ## Development setup
 

@@ -1,79 +1,81 @@
-// Package main provides a terminal-based coding assistant built with ore.
-//
-// It wires together the TUI conduit, a system prompt transform that injects
-// a coding-specific persona, and guardrails that enforce formatting rules.
-// All composition is done directly in Go — there is no YAML blueprint layer.
-//
-// Usage:
-//
-//	export ORE_API_KEY=...
-//	export ORE_MODEL=gpt-4o
-//	go run .
-//
-// Resume an existing thread:
-//
-//	go run . --thread <uuid>
-//
-// With persistent JSON store:
-//
-//	STORE_DIR=/tmp/ore-store go run .
-package main
+// Package app provides the core TUI application logic for the workshop coding
+// assistant. It wires together the ore framework's TUI conduit, system prompt
+// transforms, guardrails, and tool registry to create an interactive coding agent.
+package app
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"log/slog"
-	"os"
-	"os/signal"
 
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
-	"github.com/andrewhowdencom/ore/x/provider/openai"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/thread"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/ore/x/guardrails"
+	"github.com/andrewhowdencom/ore/x/provider/openai"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 )
 
-func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	slog.SetDefault(logger)
-
-	if err := run(); err != nil {
-		slog.Error("fatal error", "err", err)
-		os.Exit(1)
-	}
+// config holds the runtime configuration for the application.
+type config struct {
+	threadID string
+	apiKey   string
+	model    string
+	baseURL  string
+	storeDir string
 }
 
-func run() error {
-	// Parse command-line flags.
-	var threadID string
-	flag.StringVar(&threadID, "thread", "", "existing thread UUID to resume")
-	flag.Parse()
+// Option configures the application via functional options.
+type Option func(*config)
 
-	// Environment configuration.
-	apiKey := os.Getenv("ORE_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("ORE_API_KEY not set")
+// WithThreadID sets the thread UUID to resume an existing conversation.
+func WithThreadID(id string) Option {
+	return func(c *config) { c.threadID = id }
+}
+
+// WithAPIKey sets the OpenAI-compatible API key.
+func WithAPIKey(key string) Option {
+	return func(c *config) { c.apiKey = key }
+}
+
+// WithModel sets the model name. Defaults to "gpt-4o" if not provided.
+func WithModel(model string) Option {
+	return func(c *config) { c.model = model }
+}
+
+// WithBaseURL sets a custom base URL for the API provider.
+func WithBaseURL(url string) Option {
+	return func(c *config) { c.baseURL = url }
+}
+
+// WithStoreDir sets the directory for persistent JSON thread storage.
+// If empty, an in-memory store is used.
+func WithStoreDir(dir string) Option {
+	return func(c *config) { c.storeDir = dir }
+}
+
+// Run initializes and starts the TUI application.
+func Run(ctx context.Context, opts ...Option) error {
+	cfg := &config{
+		model: "gpt-4o",
+	}
+	for _, opt := range opts {
+		opt(cfg)
 	}
 
-	modelName := os.Getenv("ORE_MODEL")
-	if modelName == "" {
-		modelName = "gpt-4o"
+	if cfg.apiKey == "" {
+		return fmt.Errorf("api key not set")
 	}
-
-	baseURL := os.Getenv("ORE_BASE_URL")
 
 	// Create thread store.
 	var store thread.Store
-	if storeDir := os.Getenv("STORE_DIR"); storeDir != "" {
+	if cfg.storeDir != "" {
 		var err error
-		store, err = thread.NewJSONStore(storeDir)
+		store, err = thread.NewJSONStore(cfg.storeDir)
 		if err != nil {
 			return fmt.Errorf("create JSON store: %w", err)
 		}
@@ -82,14 +84,14 @@ func run() error {
 	}
 
 	// Build OpenAI provider.
-	var opts []openai.Option
-	if baseURL != "" {
-		opts = append(opts, openai.WithBaseURL(baseURL))
+	var provOpts []openai.Option
+	if cfg.baseURL != "" {
+		provOpts = append(provOpts, openai.WithBaseURL(cfg.baseURL))
 	}
 	prov, err := openai.New(append([]openai.Option{
-		openai.WithAPIKey(apiKey),
-		openai.WithModel(modelName),
-	}, opts...)...)
+		openai.WithAPIKey(cfg.apiKey),
+		openai.WithModel(cfg.model),
+	}, provOpts...)...)
 	if err != nil {
 		return fmt.Errorf("create openai provider: %w", err)
 	}
@@ -137,14 +139,11 @@ func run() error {
 	mgr := session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor())
 
 	// Create the TUI conduit, passing the thread ID via functional option.
-	c, err := tui.New(mgr, tui.WithThreadID(threadID))
+	conduit, err := tui.New(mgr, tui.WithThreadID(cfg.threadID))
 	if err != nil {
 		return fmt.Errorf("create TUI conduit: %w", err)
 	}
 
-	// Start the TUI and block until the user quits (Ctrl+C) or the
-	// context is cancelled.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	return c.Start(ctx)
+	// Start the TUI and block until the context is cancelled.
+	return conduit.Start(ctx)
 }
