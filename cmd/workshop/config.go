@@ -32,20 +32,11 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve config file path: %w", err)
 	}
+	return runConfigInitWithPath(cmd, args, configPath)
+}
 
-	settings := map[string]interface{}{
-		"log-level": viper.GetString("log-level"),
-		"api": map[string]interface{}{
-			"key": viper.GetString("api.key"),
-		},
-		"model": viper.GetString("model"),
-		"base": map[string]interface{}{
-			"url": viper.GetString("base.url"),
-		},
-		"store": map[string]interface{}{
-			"dir": viper.GetString("store.dir"),
-		},
-	}
+func runConfigInitWithPath(cmd *cobra.Command, args []string, configPath string) error {
+	settings := buildConfigMap()
 
 	data, err := yaml.Marshal(settings)
 	if err != nil {
@@ -58,4 +49,20 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Configuration written to %s\n", configPath)
 	return nil
+}
+
+func buildConfigMap() map[string]interface{} {
+	return map[string]interface{}{
+		"log-level": viper.GetString("log-level"),
+		"api": map[string]interface{}{
+			"key": viper.GetString("api.key"),
+		},
+		"model": viper.GetString("model"),
+		"base": map[string]interface{}{
+			"url": viper.GetString("base.url"),
+		},
+		"store": map[string]interface{}{
+			"dir": viper.GetString("store.dir"),
+		},
+	}
 }
