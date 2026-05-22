@@ -36,11 +36,42 @@ WORKSHOP_STORE_DIR=/tmp/ore-store go run ./cmd/workshop
 go run ./cmd/workshop --log-level debug
 ```
 
+### Configuration file
+
+Workshop reads an optional YAML configuration file from the XDG config directory:
+
+```bash
+# Generate the config file from current env/flag values
+go run ./cmd/workshop config init
+```
+
+The default path is `$XDG_CONFIG_HOME/workshop/config.yaml`. If `XDG_CONFIG_HOME` is unset, the fallback is `~/.config/workshop/config.yaml`.
+
+**Precedence** (highest to lowest): flag → environment variable → config file → default.
+
+> **Security note:** `config init` writes `api.key` as plaintext into the config file. Review the generated file before sharing or committing it.
+
+Example `config.yaml`:
+
+```yaml
+log-level: info
+api:
+  key: sk-...
+model: gpt-4o
+base:
+  url: ""
+store:
+  dir: ""
+```
+
+`thread` is a per-invocation flag and is never persisted to the config file.
+
 ## Commands
 
 | Command | Description |
 |---|---|
 | `workshop` | Open the interactive TUI (default) |
+| `workshop config init` | Initialize a configuration file from current settings |
 | `workshop version` | Print the build version |
 
 ## Flags
@@ -54,7 +85,7 @@ go run ./cmd/workshop --log-level debug
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 
-> **Note:** Environment variables use the `WORKSHOP_` prefix. The previous `ORE_*` and `STORE_DIR` variables are no longer supported.
+> **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `api.key`, `log-level`). The previous `ORE_*` and `STORE_DIR` variables are no longer supported.
 
 ## Available tools
 
