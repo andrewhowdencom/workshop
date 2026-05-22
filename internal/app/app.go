@@ -9,6 +9,7 @@ import (
 
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
+	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/thread"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
@@ -20,13 +21,19 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 )
 
+// ProviderConfig holds the user-supplied configuration for a concrete provider.
+type ProviderConfig struct {
+	Kind    string // e.g. "openai"
+	APIKey  string
+	Model   string
+	BaseURL string
+}
+
 // config holds the runtime configuration for the application.
 type config struct {
 	threadID string
-	apiKey   string
-	model    string
-	baseURL  string
 	storeDir string
+	provider ProviderConfig
 }
 
 // Option configures the application via functional options.
@@ -37,19 +44,9 @@ func WithThreadID(id string) Option {
 	return func(c *config) { c.threadID = id }
 }
 
-// WithAPIKey sets the OpenAI-compatible API key.
-func WithAPIKey(key string) Option {
-	return func(c *config) { c.apiKey = key }
-}
-
-// WithModel sets the model name. Defaults to "gpt-4o" if not provided.
-func WithModel(model string) Option {
-	return func(c *config) { c.model = model }
-}
-
-// WithBaseURL sets a custom base URL for the API provider.
-func WithBaseURL(url string) Option {
-	return func(c *config) { c.baseURL = url }
+// WithProvider sets the provider configuration.
+func WithProvider(p ProviderConfig) Option {
+	return func(c *config) { c.provider = p }
 }
 
 // WithStoreDir sets the directory for persistent JSON thread storage.
@@ -60,15 +57,9 @@ func WithStoreDir(dir string) Option {
 
 // Run initializes and starts the TUI application.
 func Run(ctx context.Context, opts ...Option) error {
-	cfg := &config{
-		model: "gpt-4o",
-	}
+	cfg := &config{}
 	for _, opt := range opts {
 		opt(cfg)
-	}
-
-	if cfg.apiKey == "" {
-		return fmt.Errorf("api key not set")
 	}
 
 	// Create thread store.
@@ -83,17 +74,10 @@ func Run(ctx context.Context, opts ...Option) error {
 		store = thread.NewMemoryStore()
 	}
 
-	// Build OpenAI provider.
-	var provOpts []openai.Option
-	if cfg.baseURL != "" {
-		provOpts = append(provOpts, openai.WithBaseURL(cfg.baseURL))
-	}
-	prov, err := openai.New(append([]openai.Option{
-		openai.WithAPIKey(cfg.apiKey),
-		openai.WithModel(cfg.model),
-	}, provOpts...)...)
+	// Build provider from generic config.
+	prov, err := newProvider(cfg.provider)
 	if err != nil {
-		return fmt.Errorf("create openai provider: %w", err)
+		return fmt.Errorf("create provider: %w", err)
 	}
 
 	// Step factory: inject system prompt and guardrails as transforms.
@@ -146,4 +130,25 @@ func Run(ctx context.Context, opts ...Option) error {
 
 	// Start the TUI and block until the context is cancelled.
 	return conduit.Start(ctx)
+}
+
+// newProvider constructs a provider.Provider from generic ProviderConfig.
+func newProvider(pc ProviderConfig) (provider.Provider, error) {
+	switch pc.Kind {
+	case "", "openai":
+		if pc.APIKey == "" {
+			return nil, fmt.Errorf("missing required provider config: api_key")
+		}
+		if pc.Model == "" {
+			return nil, fmt.Errorf("missing required provider config: model")
+		}
+		var opts []openai.Option
+		opts = append(opts, openai.WithAPIKey(pc.APIKey), openai.WithModel(pc.Model))
+		if pc.BaseURL != "" {
+			opts = append(opts, openai.WithBaseURL(pc.BaseURL))
+		}
+		return openai.New(opts...)
+	default:
+		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
+	}
 }

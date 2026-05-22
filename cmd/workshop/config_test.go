@@ -26,9 +26,10 @@ func TestBuildConfigMap_ExcludesThread(t *testing.T) {
 
 func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	setViperValue(t, "log-level", "debug")
-	setViperValue(t, "api.key", "test-key")
-	setViperValue(t, "model", "gpt-4o")
-	setViperValue(t, "base.url", "http://test")
+	setViperValue(t, "provider.kind", "openai")
+	setViperValue(t, "provider.api-key", "test-key")
+	setViperValue(t, "provider.model", "gpt-4o")
+	setViperValue(t, "provider.base-url", "http://test")
 	setViperValue(t, "store.dir", "/tmp/store")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
@@ -49,24 +50,22 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	if got, want := settings["log-level"], "debug"; got != want {
 		t.Errorf("log-level = %v, want %v", got, want)
 	}
-	if got, want := settings["model"], "gpt-4o"; got != want {
-		t.Errorf("model = %v, want %v", got, want)
-	}
 
-	api, ok := settings["api"].(map[string]interface{})
+	prov, ok := settings["provider"].(map[string]interface{})
 	if !ok {
-		t.Fatal("api section missing or not a map")
+		t.Fatal("provider section missing or not a map")
 	}
-	if got, want := api["key"], "test-key"; got != want {
-		t.Errorf("api.key = %v, want %v", got, want)
+	if got, want := prov["kind"], "openai"; got != want {
+		t.Errorf("provider.kind = %v, want %v", got, want)
 	}
-
-	base, ok := settings["base"].(map[string]interface{})
-	if !ok {
-		t.Fatal("base section missing or not a map")
+	if got, want := prov["api-key"], "test-key"; got != want {
+		t.Errorf("provider.api-key = %v, want %v", got, want)
 	}
-	if got, want := base["url"], "http://test"; got != want {
-		t.Errorf("base.url = %v, want %v", got, want)
+	if got, want := prov["model"], "gpt-4o"; got != want {
+		t.Errorf("provider.model = %v, want %v", got, want)
+	}
+	if got, want := prov["base-url"], "http://test"; got != want {
+		t.Errorf("provider.base-url = %v, want %v", got, want)
 	}
 
 	store, ok := settings["store"].(map[string]interface{})
@@ -79,7 +78,7 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 }
 
 func TestRunConfigInitWithPath_FilePermissions(t *testing.T) {
-	setViperValue(t, "model", "gpt-4o")
+	setViperValue(t, "provider.model", "gpt-4o")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
 	if err := runConfigInitWithPath(nil, nil, tmpFile); err != nil {
@@ -100,13 +99,13 @@ func TestRunConfigInitWithPath_OverwritesExisting(t *testing.T) {
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
 
 	// First write.
-	setViperValue(t, "model", "first-model")
+	setViperValue(t, "provider.model", "first-model")
 	if err := runConfigInitWithPath(nil, nil, tmpFile); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
 
 	// Second write with different value.
-	setViperValue(t, "model", "second-model")
+	setViperValue(t, "provider.model", "second-model")
 	if err := runConfigInitWithPath(nil, nil, tmpFile); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
@@ -121,7 +120,11 @@ func TestRunConfigInitWithPath_OverwritesExisting(t *testing.T) {
 		t.Fatalf("unmarshal YAML: %v", err)
 	}
 
-	if got, want := settings["model"], "second-model"; got != want {
-		t.Errorf("model after overwrite = %v, want %v", got, want)
+	prov, ok := settings["provider"].(map[string]interface{})
+	if !ok {
+		t.Fatal("provider section missing or not a map")
+	}
+	if got, want := prov["model"], "second-model"; got != want {
+		t.Errorf("provider.model after overwrite = %v, want %v", got, want)
 	}
 }

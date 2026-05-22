@@ -13,8 +13,8 @@ This project demonstrates how to build a fully fledged agentic application outsi
 ## Usage
 
 ```bash
-export WORKSHOP_API_KEY=sk-...
-export WORKSHOP_MODEL=gpt-4o   # optional; defaults to gpt-4o
+export WORKSHOP_PROVIDER_API_KEY=sk-...
+export WORKSHOP_PROVIDER_MODEL=gpt-4o   # optional; defaults to gpt-4o
 go run ./cmd/workshop
 ```
 
@@ -79,24 +79,24 @@ Workshop supports an optional YAML configuration file stored in the XDG config d
 
 | Source | Priority | Example |
 |---|---|---|
-| Flag | 1 (highest) | `--model=gpt-4o` |
-| Environment | 2 | `WORKSHOP_MODEL=gpt-4o` |
-| Config file | 3 | `model: gpt-4o` |
+| Flag | 1 (highest) | `--provider.model=gpt-4o` |
+| Environment | 2 | `WORKSHOP_PROVIDER_MODEL=gpt-4o` |
+| Config file | 3 | `provider.model: gpt-4o` |
 | Default | 4 | Built-in defaults |
 
 For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in the config file, unless `--log-level` is also supplied.
 
-> **Security notice:** `config init` writes `api.key` in plaintext. Ensure the generated file is stored securely and never committed to a public repository.
+> **Security notice:** `config init` writes `provider.api-key` in plaintext. Ensure the generated file is stored securely and never committed to a public repository.
 
 Example `config.yaml`:
 
 ```yaml
 log-level: info
-api:
-  key: sk-...
-model: gpt-4o
-base:
-  url: ""
+provider:
+  kind: openai
+  api-key: sk-...
+  model: gpt-4o
+  base-url: ""
 store:
   dir: ""
 ```
@@ -117,14 +117,15 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 
 | Flag | Environment Variable | Default | Description |
 |---|---|---|---|
-| `--api.key` | `WORKSHOP_API_KEY` | — | OpenAI-compatible API key (**required**) |
-| `--model` | `WORKSHOP_MODEL` | `gpt-4o` | Model name |
-| `--base.url` | `WORKSHOP_BASE_URL` | — | Custom API base URL |
+| `--provider.kind` | `WORKSHOP_PROVIDER_KIND` | `openai` | Provider kind (e.g. openai) |
+| `--provider.api-key` | `WORKSHOP_PROVIDER_API_KEY` | — | API key for the provider (**required**) |
+| `--provider.model` | `WORKSHOP_PROVIDER_MODEL` | `gpt-4o` | Model name |
+| `--provider.base-url` | `WORKSHOP_PROVIDER_BASE_URL` | — | Custom API base URL |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | — | Directory for persistent JSON thread storage |
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 
-> **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `api.key`, `log-level`).
+> **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `provider.api-key`, `log-level`).
 
 `--thread` is a per-invocation flag. It is never persisted to the config file and must be supplied on each run that resumes an existing thread.
 
