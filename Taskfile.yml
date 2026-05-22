@@ -1,0 +1,35 @@
+version: '3'
+
+tasks:
+  setup:
+    desc: Install required development tools and dependencies
+    cmds:
+      - go mod download
+      - go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+  build:
+    desc: Compile the workshop binary
+    cmds:
+      - go build ./cmd/workshop
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test -race ./...
+
+  lint:
+    desc: Run code linters
+    cmds:
+      - golangci-lint run ./...
+
+  validate:
+    desc: Run all validation checks (lint, test, build) before committing
+    deps:
+      - lint
+      - test
+      - build
+
+  generate:
+    desc: Generate code as required (placeholder)
+    cmds:
+      - echo "No code generation configured yet."
