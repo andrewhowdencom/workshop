@@ -169,10 +169,13 @@ Each role is a `.md` file with YAML frontmatter delimited by `---`:
 name: reviewer
 description: A critical code reviewer focused on bugs and performance
 ---
-You are a senior code reviewer. Your job is to find bugs, security
-issues, and performance problems. Be direct and actionable. Suggest
-concrete fixes.
+You are a senior code reviewer. Identify bugs, security issues, and
+performance problems. Provide direct, actionable fixes with concrete
+code suggestions.
 ```
+
+> The example above is illustrative. Create your own role files in the
+> XDG data directory to customize the assistant's behavior.
 
 The frontmatter fields are:
 - `name` — Display name for the role (optional; defaults to filename).

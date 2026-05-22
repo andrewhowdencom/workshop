@@ -145,3 +145,24 @@ func TestListRoleDefinitions_SkipsMalformed(t *testing.T) {
 		t.Errorf("role[0].Name = %q, want %q", roles[0].Name, "good")
 	}
 }
+
+func TestListRoleDefinitions_SkipsMalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "invalid.md"), []byte("---\ninvalid: : yaml\n---\nPrompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "valid.md"), []byte("Valid prompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	roles, err := listRoleDefinitions(dir)
+	if err != nil {
+		t.Fatalf("listRoleDefinitions error: %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("len(roles) = %d, want 1", len(roles))
+	}
+	if roles[0].Name != "valid" {
+		t.Errorf("role[0].Name = %q, want %q", roles[0].Name, "valid")
+	}
+}

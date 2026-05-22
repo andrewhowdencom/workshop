@@ -135,18 +135,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		rdir := roleDir()
 
 		// Build dynamic system prompt that reads from thread metadata.
-		currentPrompt := func() string {
-			if roleName, ok := thr.GetMetadata("workshop.role"); ok && roleName != "" {
-				if role, err := loadRole(rdir, roleName); err == nil {
-					return role.Prompt
-				}
-			}
-			return "You are a terminal-based coding assistant. " +
-				"You help users write, review, refactor, and debug code across any language or framework. " +
-				"You have access to filesystem tools (read_file, write_file, edit_file, list_directory, search_files) and a bash tool for running shell commands. " +
-				"Use these tools proactively to explore the codebase, make changes, run tests, and verify your work. " +
-				"Prefer concise explanations and actionable suggestions."
-		}
+		currentPrompt := makeCurrentPrompt(rdir, thr)
 
 		sp, err := systemprompt.New(systemprompt.WithContentFunc(currentPrompt))
 		if err != nil {
@@ -173,61 +162,14 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		registry.Register(bash.BashTool.Name, bash.BashTool.Description, bash.BashTool.Schema, bash.Bash)
 
 		// Role management tools.
-		registry.Register("list_roles", "List all available role definitions.", map[string]any{}, func(ctx context.Context, args map[string]any) (any, error) {
-			roles, err := listRoleDefinitions(rdir)
-			if err != nil {
-				return nil, err
-			}
-			result := make([]map[string]any, 0, len(roles))
-			for _, r := range roles {
-				result = append(result, map[string]any{
-					"name":        r.Name,
-					"description": r.Description,
-				})
-			}
-			return result, nil
-		})
-
-		registry.Register("get_current_role", "Get the currently active role for this thread.", map[string]any{}, func(ctx context.Context, args map[string]any) (any, error) {
-			roleName := "default"
-			if v, ok := thr.GetMetadata("workshop.role"); ok && v != "" {
-				roleName = v
-			}
-			role, err := loadRole(rdir, roleName)
-			if err != nil {
-				return map[string]any{
-					"role":           roleName,
-					"description":    "",
-					"prompt_preview": "",
-				}, nil
-			}
-			preview := role.Prompt
-			if len(preview) > 200 {
-				preview = preview[:200] + "..."
-			}
-			return map[string]any{
-				"role":           role.Name,
-				"description":    role.Description,
-				"prompt_preview": preview,
-			}, nil
-		})
-
+		registry.Register("list_roles", "List all available role definitions.", map[string]any{}, makeListRolesHandler(rdir))
+		registry.Register("get_current_role", "Get the currently active role for this thread.", map[string]any{}, makeGetCurrentRoleHandler(rdir, thr))
 		registry.Register("switch_role", "Switch to a different role for this thread.", map[string]any{
 			"name": map[string]any{
 				"type":        "string",
 				"description": "Name of the role to activate",
 			},
-		}, func(ctx context.Context, args map[string]any) (any, error) {
-			name, ok := args["name"].(string)
-			if !ok || name == "" {
-				return nil, fmt.Errorf("missing required argument: name")
-			}
-			if _, err := loadRole(rdir, name); err != nil {
-				return nil, fmt.Errorf("role %q not found", name)
-			}
-			thr.SetMetadata("workshop.role", name)
-			return fmt.Sprintf("Switched to role: %s", name), nil
-		})
+		}, makeSwitchRoleHandler(rdir, thr))
 
 		return loop.New(
 			loop.WithTransforms(sp, gr),
@@ -258,5 +200,88 @@ func newProvider(pc ProviderConfig) (provider.Provider, error) {
 		return openai.New(opts...)
 	default:
 		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
+	}
+}
+
+// defaultPrompt is the baked-in system prompt used when no role is active.
+const defaultPrompt = "You are a terminal-based coding assistant. " +
+	"You help users write, review, refactor, and debug code across any language or framework. " +
+	"You have access to filesystem tools (read_file, write_file, edit_file, list_directory, search_files) and a bash tool for running shell commands. " +
+	"Use these tools proactively to explore the codebase, make changes, run tests, and verify your work. " +
+	"Prefer concise explanations and actionable suggestions."
+
+// makeCurrentPrompt returns a closure that reads the active role from thread
+// metadata and returns the corresponding prompt, falling back to defaultPrompt.
+func makeCurrentPrompt(rdir string, thr *thread.Thread) func() string {
+	return func() string {
+		if roleName, ok := thr.GetMetadata("workshop.role"); ok && roleName != "" {
+			if role, err := loadRole(rdir, roleName); err == nil {
+				return role.Prompt
+			}
+		}
+		return defaultPrompt
+	}
+}
+
+// makeListRolesHandler returns a tool handler that lists available role
+// definitions from the given directory.
+func makeListRolesHandler(rdir string) tool.ToolFunc {
+	return func(ctx context.Context, args map[string]any) (any, error) {
+		roles, err := listRoleDefinitions(rdir)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]map[string]any, 0, len(roles))
+		for _, r := range roles {
+			result = append(result, map[string]any{
+				"name":        r.Name,
+				"description": r.Description,
+			})
+		}
+		return result, nil
+	}
+}
+
+// makeGetCurrentRoleHandler returns a tool handler that returns the currently
+// active role for the given thread.
+func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
+	return func(ctx context.Context, args map[string]any) (any, error) {
+		roleName := "default"
+		if v, ok := thr.GetMetadata("workshop.role"); ok && v != "" {
+			roleName = v
+		}
+		role, err := loadRole(rdir, roleName)
+		if err != nil {
+			return map[string]any{
+				"role":           roleName,
+				"description":    "",
+				"prompt_preview": "",
+			}, nil
+		}
+		preview := role.Prompt
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		return map[string]any{
+			"role":           role.Name,
+			"description":    role.Description,
+			"prompt_preview": preview,
+		}, nil
+	}
+}
+
+// makeSwitchRoleHandler returns a tool handler that validates and switches
+// the active role for the given thread.
+func makeSwitchRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
+	return func(ctx context.Context, args map[string]any) (any, error) {
+		name, ok := args["name"].(string)
+		if !ok || name == "" {
+			return nil, fmt.Errorf("missing required argument: name")
+		}
+		if _, err := loadRole(rdir, name); err != nil {
+			return nil, fmt.Errorf("role %q not found", name)
+		}
+		thr.SetMetadata("workshop.role", name)
+		return fmt.Sprintf("Switched to role: %s", name), nil
 	}
 }
