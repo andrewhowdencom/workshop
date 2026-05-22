@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
+	"github.com/adrg/xdg"
 	"github.com/andrewhowdencom/workshop/internal/app"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -33,12 +35,37 @@ func init() {
 	rootCmd.Flags().String("base.url", "", "Custom API base URL")
 	rootCmd.Flags().String("store.dir", "", "Directory for persistent JSON thread storage")
 
-	viper.SetEnvPrefix("WORKSHOP")
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
-	viper.AutomaticEnv()
+	setupViper(viper.GetViper())
+	if err := loadViperConfig(viper.GetViper()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
 
 	cobra.CheckErr(viper.BindPFlags(rootCmd.PersistentFlags()))
 	cobra.CheckErr(viper.BindPFlags(rootCmd.Flags()))
+}
+
+func setupViper(v *viper.Viper) {
+	v.SetEnvPrefix("WORKSHOP")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	v.AutomaticEnv()
+}
+
+func loadViperConfig(v *viper.Viper) error {
+	return loadViperConfigWithPath(v, xdg.ConfigHome)
+}
+
+func loadViperConfigWithPath(v *viper.Viper, configHome string) error {
+	configDir := filepath.Join(configHome, "workshop")
+	v.AddConfigPath(configDir)
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+	}
+	return nil
 }
 
 func configureLogging(cmd *cobra.Command, args []string) error {

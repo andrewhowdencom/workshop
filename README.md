@@ -36,11 +36,81 @@ WORKSHOP_STORE_DIR=/tmp/ore-store go run ./cmd/workshop
 go run ./cmd/workshop --log-level debug
 ```
 
+### Configuration file
+
+Workshop supports an optional YAML configuration file stored in the XDG config directory.
+
+**Quick start**
+
+1. Generate the file from your current environment:
+
+   ```bash
+   go run ./cmd/workshop config init
+   ```
+
+2. Open the generated file and replace the placeholder API key:
+
+   ```bash
+   # Linux / macOS
+   $EDITOR ~/.config/workshop/config.yaml
+
+   # Windows
+   notepad %APPDATA%\workshop\config.yaml
+   ```
+
+3. Secure the file:
+
+   ```bash
+   chmod 600 ~/.config/workshop/config.yaml
+   ```
+
+4. Verify by running with a different log level:
+
+   ```bash
+   go run ./cmd/workshop --log-level debug
+   ```
+
+**Default path**
+
+- Linux / macOS: `$XDG_CONFIG_HOME/workshop/config.yaml` (fallback: `~/.config/workshop/config.yaml`)
+- Windows: `%APPDATA%\workshop\config.yaml`
+
+**Precedence**
+
+| Source | Priority | Example |
+|---|---|---|
+| Flag | 1 (highest) | `--model=gpt-4o` |
+| Environment | 2 | `WORKSHOP_MODEL=gpt-4o` |
+| Config file | 3 | `model: gpt-4o` |
+| Default | 4 | Built-in defaults |
+
+For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in the config file, unless `--log-level` is also supplied.
+
+> **Security notice:** `config init` writes `api.key` in plaintext. Ensure the generated file is stored securely and never committed to a public repository.
+
+Example `config.yaml`:
+
+```yaml
+log-level: info
+api:
+  key: sk-...
+model: gpt-4o
+base:
+  url: ""
+store:
+  dir: ""
+```
+
+### Deprecated variables
+
+The previous `ORE_*` and `STORE_DIR` environment variables are no longer supported. Use the `WORKSHOP_` prefix instead.
+
 ## Commands
 
 | Command | Description |
 |---|---|
 | `workshop` | Open the interactive TUI (default) |
+| `workshop config init` | Initialize a configuration file from current settings |
 | `workshop version` | Print the build version |
 
 ## Flags
@@ -54,7 +124,9 @@ go run ./cmd/workshop --log-level debug
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 
-> **Note:** Environment variables use the `WORKSHOP_` prefix. The previous `ORE_*` and `STORE_DIR` variables are no longer supported.
+> **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `api.key`, `log-level`).
+
+`--thread` is a per-invocation flag. It is never persisted to the config file and must be supplied on each run that resumes an existing thread.
 
 ## Available tools
 
