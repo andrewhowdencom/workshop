@@ -10,13 +10,38 @@ This project demonstrates how to build a fully fledged agentic application outsi
 - An OpenAI API key (or compatible API endpoint)
 - [Task](https://taskfile.dev/) (optional, for development tasks)
 
+## Commands
+
+| Command | Description |
+|---|---|
+| `workshop` | Open the interactive TUI (default) |
+| `workshop http` | Run the web UI HTTP server |
+| `workshop config init` | Initialize a configuration file from current settings |
+| `workshop version` | Print the build version |
+
 ## Usage
+
+### TUI (default)
 
 ```bash
 export WORKSHOP_PROVIDER_API_KEY=sk-...
 export WORKSHOP_PROVIDER_MODEL=gpt-4o   # optional; defaults to gpt-4o
 go run ./cmd/workshop
 ```
+
+### Web UI (HTTP server)
+
+```bash
+go run ./cmd/workshop http
+```
+
+With custom port:
+
+```bash
+go run ./cmd/workshop http --http.addr :7654
+```
+
+The web chat UI is available at `http://localhost:8080/` (or the configured address).
 
 ### Resume an existing thread
 
@@ -99,19 +124,13 @@ provider:
   base-url: ""
 store:
   dir: ""
+http:
+  addr: ":8080"
 ```
 
 ### Deprecated variables
 
 The previous `ORE_*` and `STORE_DIR` environment variables are no longer supported. Use the `WORKSHOP_` prefix instead.
-
-## Commands
-
-| Command | Description |
-|---|---|
-| `workshop` | Open the interactive TUI (default) |
-| `workshop config init` | Initialize a configuration file from current settings |
-| `workshop version` | Print the build version |
 
 ## Flags
 
@@ -124,6 +143,7 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 | `--store.dir` | `WORKSHOP_STORE_DIR` | — | Directory for persistent JSON thread storage |
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
 
 > **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `provider.api-key`, `log-level`).
 

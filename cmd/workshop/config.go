@@ -63,5 +63,8 @@ func buildConfigMap() map[string]interface{} {
 		"store": map[string]interface{}{
 			"dir": viper.GetString("store.dir"),
 		},
+		"http": map[string]interface{}{
+			"addr": viper.GetString("http.addr"),
+		},
 	}
 }
