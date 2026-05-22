@@ -13,9 +13,9 @@ func TestSetupViper(t *testing.T) {
 	setupViper(v)
 
 	// Verify the env prefix and replacer are wired by setting an env var.
-	t.Setenv("WORKSHOP_MODEL", "env-model")
-	if got := v.GetString("model"); got != "env-model" {
-		t.Errorf("setupViper: model from env = %q, want %q", got, "env-model")
+	t.Setenv("WORKSHOP_PROVIDER_MODEL", "env-model")
+	if got := v.GetString("provider.model"); got != "env-model" {
+		t.Errorf("setupViper: provider.model from env = %q, want %q", got, "env-model")
 	}
 }
 
@@ -27,8 +27,8 @@ func TestLoadViperConfig_MissingFile(t *testing.T) {
 		t.Fatalf("missing config file should not error, got: %v", err)
 	}
 
-	if got := v.GetString("model"); got != "" {
-		t.Errorf("missing config: model = %q, want empty", got)
+	if got := v.GetString("provider.model"); got != "" {
+		t.Errorf("missing config: provider.model = %q, want empty", got)
 	}
 }
 
@@ -40,7 +40,7 @@ func TestLoadViperConfig_ValidYAML(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	content := []byte("model: gpt-4o-mini\n")
+	content := []byte("provider:\n  model: gpt-4o-mini\n")
 	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), content, 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -49,8 +49,8 @@ func TestLoadViperConfig_ValidYAML(t *testing.T) {
 		t.Fatalf("valid config should not error, got: %v", err)
 	}
 
-	if got := v.GetString("model"); got != "gpt-4o-mini" {
-		t.Errorf("valid config: model = %q, want %q", got, "gpt-4o-mini")
+	if got := v.GetString("provider.model"); got != "gpt-4o-mini" {
+		t.Errorf("valid config: provider.model = %q, want %q", got, "gpt-4o-mini")
 	}
 }
 
@@ -80,7 +80,7 @@ func TestPrecedence_ConfigFileThenDefault(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	content := []byte("model: file-model\n")
+	content := []byte("provider:\n  model: file-model\n")
 	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), content, 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
@@ -89,13 +89,13 @@ func TestPrecedence_ConfigFileThenDefault(t *testing.T) {
 		t.Fatalf("valid config should not error, got: %v", err)
 	}
 
-	if got := v.GetString("model"); got != "file-model" {
-		t.Errorf("config file value: model = %q, want %q", got, "file-model")
+	if got := v.GetString("provider.model"); got != "file-model" {
+		t.Errorf("config file value: provider.model = %q, want %q", got, "file-model")
 	}
 
 	// Simulate a flag override via Set.
-	v.Set("model", "flag-model")
-	if got := v.GetString("model"); got != "flag-model" {
-		t.Errorf("flag override: model = %q, want %q", got, "flag-model")
+	v.Set("provider.model", "flag-model")
+	if got := v.GetString("provider.model"); got != "flag-model" {
+		t.Errorf("flag override: provider.model = %q, want %q", got, "flag-model")
 	}
 }

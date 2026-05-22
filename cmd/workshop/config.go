@@ -54,12 +54,11 @@ func runConfigInitWithPath(cmd *cobra.Command, args []string, configPath string)
 func buildConfigMap() map[string]interface{} {
 	return map[string]interface{}{
 		"log-level": viper.GetString("log-level"),
-		"api": map[string]interface{}{
-			"key": viper.GetString("api.key"),
-		},
-		"model": viper.GetString("model"),
-		"base": map[string]interface{}{
-			"url": viper.GetString("base.url"),
+		"provider": map[string]interface{}{
+			"kind":     viper.GetString("provider.kind"),
+			"api-key":  viper.GetString("provider.api-key"),
+			"model":    viper.GetString("provider.model"),
+			"base-url": viper.GetString("provider.base-url"),
 		},
 		"store": map[string]interface{}{
 			"dir": viper.GetString("store.dir"),

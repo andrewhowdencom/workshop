@@ -30,9 +30,10 @@ func init() {
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (debug, info, warn, error)")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
-	rootCmd.Flags().String("api.key", "", "OpenAI-compatible API key")
-	rootCmd.Flags().String("model", "gpt-4o", "Model name (e.g. gpt-4o)")
-	rootCmd.Flags().String("base.url", "", "Custom API base URL")
+	rootCmd.Flags().String("provider.kind", "openai", "Provider kind (e.g. openai)")
+	rootCmd.Flags().String("provider.api-key", "", "API key for the provider")
+	rootCmd.Flags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
+	rootCmd.Flags().String("provider.base-url", "", "Custom API base URL")
 	rootCmd.Flags().String("store.dir", "", "Directory for persistent JSON thread storage")
 
 	setupViper(viper.GetViper())
@@ -81,9 +82,16 @@ func configureLogging(cmd *cobra.Command, args []string) error {
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
-	apiKey := viper.GetString("api.key")
+	apiKey := viper.GetString("provider.api-key")
 	if apiKey == "" {
-		return fmt.Errorf("api key is required; set --api.key or WORKSHOP_API_KEY environment variable")
+		return fmt.Errorf("api key is required; set --provider.api-key or WORKSHOP_PROVIDER_API_KEY environment variable")
+	}
+
+	pc := app.ProviderConfig{
+		Kind:    viper.GetString("provider.kind"),
+		APIKey:  apiKey,
+		Model:   viper.GetString("provider.model"),
+		BaseURL: viper.GetString("provider.base-url"),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -91,9 +99,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	return app.Run(ctx,
 		app.WithThreadID(viper.GetString("thread")),
-		app.WithAPIKey(apiKey),
-		app.WithModel(viper.GetString("model")),
-		app.WithBaseURL(viper.GetString("base.url")),
+		app.WithProvider(pc),
 		app.WithStoreDir(viper.GetString("store.dir")),
 	)
 }
