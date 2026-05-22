@@ -131,15 +131,24 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 	// Step factory: inject system prompt and guardrails as transforms.
 	stepFactory := func(thr *thread.Thread) (*loop.Step, error) {
-		_ = thr // reserved for future per-thread configuration
+		// Resolve the roles directory once for this step.
+		rdir := roleDir()
 
-		sp, err := systemprompt.New(systemprompt.WithContentFunc(func() string {
+		// Build dynamic system prompt that reads from thread metadata.
+		currentPrompt := func() string {
+			if roleName, ok := thr.GetMetadata("workshop.role"); ok && roleName != "" {
+				if role, err := loadRole(rdir, roleName); err == nil {
+					return role.Prompt
+				}
+			}
 			return "You are a terminal-based coding assistant. " +
 				"You help users write, review, refactor, and debug code across any language or framework. " +
 				"You have access to filesystem tools (read_file, write_file, edit_file, list_directory, search_files) and a bash tool for running shell commands. " +
 				"Use these tools proactively to explore the codebase, make changes, run tests, and verify your work. " +
 				"Prefer concise explanations and actionable suggestions."
-		}))
+		}
+
+		sp, err := systemprompt.New(systemprompt.WithContentFunc(currentPrompt))
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -162,6 +171,63 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		registry.Register(filesystem.ListDirectoryTool.Name, filesystem.ListDirectoryTool.Description, filesystem.ListDirectoryTool.Schema, filesystem.ListDirectory)
 		registry.Register(filesystem.SearchFilesTool.Name, filesystem.SearchFilesTool.Description, filesystem.SearchFilesTool.Schema, filesystem.SearchFiles)
 		registry.Register(bash.BashTool.Name, bash.BashTool.Description, bash.BashTool.Schema, bash.Bash)
+
+		// Role management tools.
+		registry.Register("list_roles", "List all available role definitions.", map[string]any{}, func(ctx context.Context, args map[string]any) (any, error) {
+			roles, err := listRoleDefinitions(rdir)
+			if err != nil {
+				return nil, err
+			}
+			result := make([]map[string]any, 0, len(roles))
+			for _, r := range roles {
+				result = append(result, map[string]any{
+					"name":        r.Name,
+					"description": r.Description,
+				})
+			}
+			return result, nil
+		})
+
+		registry.Register("get_current_role", "Get the currently active role for this thread.", map[string]any{}, func(ctx context.Context, args map[string]any) (any, error) {
+			roleName := "default"
+			if v, ok := thr.GetMetadata("workshop.role"); ok && v != "" {
+				roleName = v
+			}
+			role, err := loadRole(rdir, roleName)
+			if err != nil {
+				return map[string]any{
+					"role":           roleName,
+					"description":    "",
+					"prompt_preview": "",
+				}, nil
+			}
+			preview := role.Prompt
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			return map[string]any{
+				"role":           role.Name,
+				"description":    role.Description,
+				"prompt_preview": preview,
+			}, nil
+		})
+
+		registry.Register("switch_role", "Switch to a different role for this thread.", map[string]any{
+			"name": map[string]any{
+				"type":        "string",
+				"description": "Name of the role to activate",
+			},
+		}, func(ctx context.Context, args map[string]any) (any, error) {
+			name, ok := args["name"].(string)
+			if !ok || name == "" {
+				return nil, fmt.Errorf("missing required argument: name")
+			}
+			if _, err := loadRole(rdir, name); err != nil {
+				return nil, fmt.Errorf("role %q not found", name)
+			}
+			thr.SetMetadata("workshop.role", name)
+			return fmt.Sprintf("Switched to role: %s", name), nil
+		})
 
 		return loop.New(
 			loop.WithTransforms(sp, gr),
