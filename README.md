@@ -149,6 +149,44 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 
 `--thread` is a per-invocation flag. It is never persisted to the config file and must be supplied on each run that resumes an existing thread.
 
+## Roles
+
+Workshop supports dynamic system prompts via role definitions stored as
+YAML-frontmatter markdown files in the XDG data directory.
+
+**Role directory**
+
+- Linux / macOS: `$XDG_DATA_HOME/workshop/roles/`
+  (fallback: `~/.local/share/workshop/roles/`)
+- Windows: `%LOCALAPPDATA%\workshop\roles\`
+
+**File format**
+
+Each role is a `.md` file with YAML frontmatter delimited by `---`:
+
+```markdown
+---
+name: reviewer
+description: A critical code reviewer focused on bugs and performance
+---
+You are a senior code reviewer. Your job is to find bugs, security
+issues, and performance problems. Be direct and actionable. Suggest
+concrete fixes.
+```
+
+The frontmatter fields are:
+- `name` — Display name for the role (optional; defaults to filename).
+- `description` — Short summary shown in `list_roles` (optional).
+
+Everything after the closing `---` becomes the system prompt body.
+
+**Persistence**
+
+Roles are stored per-thread in thread metadata. When you call
+`switch_role`, the active role persists across session restarts. Resume a
+thread with `--thread <uuid>` to continue with the previously selected
+persona.
+
 ## Available tools
 
 | Tool | Description |
@@ -159,6 +197,9 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 | `list_directory` | List files in a directory |
 | `search_files` | Search file contents with a query string |
 | `bash` | Execute shell commands with optional working directory and timeout |
+| `list_roles` | List available role definitions |
+| `get_current_role` | Show the currently active role for this thread |
+| `switch_role` | Switch to a different role by name |
 
 ## Built with
 
