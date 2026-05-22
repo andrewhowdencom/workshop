@@ -38,18 +38,55 @@ go run ./cmd/workshop --log-level debug
 
 ### Configuration file
 
-Workshop reads an optional YAML configuration file from the XDG config directory:
+Workshop supports an optional YAML configuration file stored in the XDG config directory.
 
-```bash
-# Generate the config file from current env/flag values
-go run ./cmd/workshop config init
-```
+**Quick start**
 
-The default path is `$XDG_CONFIG_HOME/workshop/config.yaml`. If `XDG_CONFIG_HOME` is unset, the fallback is `~/.config/workshop/config.yaml`.
+1. Generate the file from your current environment:
 
-**Precedence** (highest to lowest): flag → environment variable → config file → default.
+   ```bash
+   go run ./cmd/workshop config init
+   ```
 
-> **Security note:** `config init` writes `api.key` as plaintext into the config file. Review the generated file before sharing or committing it.
+2. Open the generated file and replace the placeholder API key:
+
+   ```bash
+   # Linux / macOS
+   $EDITOR ~/.config/workshop/config.yaml
+
+   # Windows
+   notepad %APPDATA%\workshop\config.yaml
+   ```
+
+3. Secure the file:
+
+   ```bash
+   chmod 600 ~/.config/workshop/config.yaml
+   ```
+
+4. Verify by running with a different log level:
+
+   ```bash
+   go run ./cmd/workshop --log-level debug
+   ```
+
+**Default path**
+
+- Linux / macOS: `$XDG_CONFIG_HOME/workshop/config.yaml` (fallback: `~/.config/workshop/config.yaml`)
+- Windows: `%APPDATA%\workshop\config.yaml`
+
+**Precedence**
+
+| Source | Priority | Example |
+|---|---|---|
+| Flag | 1 (highest) | `--model=gpt-4o` |
+| Environment | 2 | `WORKSHOP_MODEL=gpt-4o` |
+| Config file | 3 | `model: gpt-4o` |
+| Default | 4 | Built-in defaults |
+
+For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in the config file, unless `--log-level` is also supplied.
+
+> **Security notice:** `config init` writes `api.key` in plaintext. Ensure the generated file is stored securely and never committed to a public repository.
 
 Example `config.yaml`:
 
@@ -64,7 +101,9 @@ store:
   dir: ""
 ```
 
-`thread` is a per-invocation flag and is never persisted to the config file.
+### Deprecated variables
+
+The previous `ORE_*` and `STORE_DIR` environment variables are no longer supported. Use the `WORKSHOP_` prefix instead.
 
 ## Commands
 
@@ -85,7 +124,9 @@ store:
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 
-> **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `api.key`, `log-level`). The previous `ORE_*` and `STORE_DIR` variables are no longer supported.
+> **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `api.key`, `log-level`).
+
+`--thread` is a per-invocation flag. It is never persisted to the config file and must be supplied on each run that resumes an existing thread.
 
 ## Available tools
 
