@@ -75,6 +75,14 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	if got, want := store["dir"], "/tmp/store"; got != want {
 		t.Errorf("store.dir = %v, want %v", got, want)
 	}
+
+	http, ok := settings["http"].(map[string]interface{})
+	if !ok {
+		t.Fatal("http section missing or not a map")
+	}
+	if got, want := http["addr"], ":8080"; got != want {
+		t.Errorf("http.addr = %v, want %v", got, want)
+	}
 }
 
 func TestRunConfigInitWithPath_FilePermissions(t *testing.T) {

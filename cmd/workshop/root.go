@@ -15,6 +15,25 @@ import (
 	"github.com/spf13/viper"
 )
 
+func init() {
+	rootCmd.PersistentFlags().String("log-level", "info", "Log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().String("provider.kind", "openai", "Provider kind (e.g. openai)")
+	rootCmd.PersistentFlags().String("provider.api-key", "", "API key for the provider")
+	rootCmd.PersistentFlags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
+	rootCmd.PersistentFlags().String("provider.base-url", "", "Custom API base URL")
+	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage")
+
+	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
+
+	setupViper(viper.GetViper())
+	if err := loadViperConfig(viper.GetViper()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+
+	cobra.CheckErr(viper.BindPFlags(rootCmd.PersistentFlags()))
+	cobra.CheckErr(viper.BindPFlags(rootCmd.Flags()))
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "workshop",
 	Short: "A terminal-based coding assistant",
@@ -24,25 +43,6 @@ filesystem tools, and a bash execution tool to create an interactive coding
 agent that can read, write, edit, search, and execute shell commands.`,
 	PersistentPreRunE: configureLogging,
 	RunE:              runRoot,
-}
-
-func init() {
-	rootCmd.PersistentFlags().String("log-level", "info", "Log level (debug, info, warn, error)")
-
-	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
-	rootCmd.Flags().String("provider.kind", "openai", "Provider kind (e.g. openai)")
-	rootCmd.Flags().String("provider.api-key", "", "API key for the provider")
-	rootCmd.Flags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
-	rootCmd.Flags().String("provider.base-url", "", "Custom API base URL")
-	rootCmd.Flags().String("store.dir", "", "Directory for persistent JSON thread storage")
-
-	setupViper(viper.GetViper())
-	if err := loadViperConfig(viper.GetViper()); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
-	}
-
-	cobra.CheckErr(viper.BindPFlags(rootCmd.PersistentFlags()))
-	cobra.CheckErr(viper.BindPFlags(rootCmd.Flags()))
 }
 
 func setupViper(v *viper.Viper) {
@@ -97,7 +97,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	return app.Run(ctx,
+	return app.RunTUI(ctx,
 		app.WithThreadID(viper.GetString("thread")),
 		app.WithProvider(pc),
 		app.WithStoreDir(viper.GetString("store.dir")),
