@@ -13,6 +13,7 @@ replace github.com/andrewhowdencom/ore/x/tool/filesystem => ../ore/x/tool/filesy
 replace github.com/andrewhowdencom/ore/x/tool/bash => ../ore/x/tool/bash
 
 require (
+	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.0.0
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.0.0-00010101000000-000000000000
 	github.com/andrewhowdencom/ore/x/provider/openai v0.0.0-00010101000000-000000000000

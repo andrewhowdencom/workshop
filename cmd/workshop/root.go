@@ -6,8 +6,10 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 
+	"github.com/adrg/xdg"
 	"github.com/andrewhowdencom/workshop/internal/app"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -36,6 +38,17 @@ func init() {
 	viper.SetEnvPrefix("WORKSHOP")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	viper.AutomaticEnv()
+
+	configDir := filepath.Join(xdg.ConfigHome, "workshop")
+	viper.AddConfigPath(configDir)
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			fmt.Fprintf(os.Stderr, "warning: failed to read config file: %v\n", err)
+		}
+	}
 
 	cobra.CheckErr(viper.BindPFlags(rootCmd.PersistentFlags()))
 	cobra.CheckErr(viper.BindPFlags(rootCmd.Flags()))
