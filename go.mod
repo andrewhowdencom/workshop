@@ -12,6 +12,10 @@ replace github.com/andrewhowdencom/ore/x/tool/filesystem => ../ore/x/tool/filesy
 
 replace github.com/andrewhowdencom/ore/x/conduit/http => ../ore/x/conduit/http
 
+replace github.com/andrewhowdencom/ore/x/tool => ../ore/x/tool
+
+replace github.com/andrewhowdencom/ore/x/conduit => ../ore/x/conduit
+
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.0.0
