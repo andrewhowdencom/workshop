@@ -12,7 +12,7 @@ import (
 
 // RoleDefinition holds a parsed role file with YAML frontmatter and prompt body.
 type RoleDefinition struct {
-	Name        string `yaml:"name"`
+	Name        string `yaml:"-"`
 	Description string `yaml:"description"`
 	Prompt      string
 }
