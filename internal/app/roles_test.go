@@ -91,6 +91,36 @@ Just a prompt.
 	}
 }
 
+func TestLoadRole_FrontmatterNameDoesNotOverrideFilename(t *testing.T) {
+	dir := t.TempDir()
+	content := `---
+name: strategist
+description: A strategic planner
+---
+You are a strategic planner.
+`
+	path := filepath.Join(dir, "planner.md")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	role, err := loadRole(dir, "planner")
+	if err != nil {
+		t.Fatalf("loadRole error: %v", err)
+	}
+
+	if role.Name != "planner" {
+		t.Errorf("Name = %q, want %q", role.Name, "planner")
+	}
+	if role.Description != "A strategic planner" {
+		t.Errorf("Description = %q, want %q", role.Description, "A strategic planner")
+	}
+	wantPrompt := "You are a strategic planner."
+	if role.Prompt != wantPrompt {
+		t.Errorf("Prompt = %q, want %q", role.Prompt, wantPrompt)
+	}
+}
+
 func TestListRoleDefinitions_MultipleFiles(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
