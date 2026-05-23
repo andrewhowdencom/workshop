@@ -212,6 +212,53 @@ func TestMakeSwitchRoleHandler_Success(t *testing.T) {
 	}
 }
 
+func TestMakeSwitchRoleHandler_FrontmatterNameMismatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "planner.md"), []byte("---\nname: strategist\ndescription: Strategic planning role\n---\nYou are a strategic planner.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// list_roles should return the filename "planner", not the frontmatter "strategist"
+	listHandler := makeListRolesHandler(dir)
+	result, err := listHandler(context.Background(), map[string]any{})
+	if err != nil {
+		t.Fatalf("list handler error: %v", err)
+	}
+
+	roles, ok := result.([]map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want []map[string]any", result)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("len(roles) = %d, want 1", len(roles))
+	}
+	if roles[0]["name"] != "planner" {
+		t.Errorf("role name = %q, want planner", roles[0]["name"])
+	}
+
+	// switch_role should succeed with "planner"
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	switchHandler := makeSwitchRoleHandler(dir, thr)
+	switchResult, err := switchHandler(context.Background(), map[string]any{"name": "planner"})
+	if err != nil {
+		t.Fatalf("switch handler error: %v", err)
+	}
+	want := "Switched to role: planner"
+	if switchResult != want {
+		t.Errorf("switch result = %q, want %q", switchResult, want)
+	}
+
+	v, ok := thr.GetMetadata("workshop.role")
+	if !ok || v != "planner" {
+		t.Errorf("metadata = %q, want planner", v)
+	}
+}
+
 func TestRoleToolSchemas(t *testing.T) {
 	tests := []struct {
 		name   string
