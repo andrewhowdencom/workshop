@@ -8,10 +8,6 @@ github.com/alecthomas/chroma/v2 v2.24.1 h1:m5ffpfZbIb++k8AqFEKy9uVgY12xIQtBsQlc6
 github.com/alecthomas/chroma/v2 v2.24.1/go.mod h1:l+ohZ9xRXIbGe7cIW+YZgOGbvuVLjMps/FYN/CwuabI=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
-github.com/andrewhowdencom/ore/x/conduit v0.0.0-20260522200942-1391eb953a7e h1:+LBT3u1UBjjaBT7eSzITBt6laAqsK3jpDgOQfhrahus=
-github.com/andrewhowdencom/ore/x/conduit v0.0.0-20260522200942-1391eb953a7e/go.mod h1:83aDeFABkaP1x98A9jxkqIr3zN4XsiprPnpAxHGpPFw=
-github.com/andrewhowdencom/ore/x/tool v0.0.0-20260522200942-1391eb953a7e h1:HOF1wVaaBDHG/xE1qIqMrJ8KRlOx7AILIC4ge/aBxq8=
-github.com/andrewhowdencom/ore/x/tool v0.0.0-20260522200942-1391eb953a7e/go.mod h1:BrU017utSyiwmSmHqvxswD7scr7sm3sd8N8JbQqmiTE=
 github.com/andrewhowdencom/ore/x/tool/bash v0.0.0-20260522200942-1391eb953a7e h1:vv28krC/uG/uqZ7w4BphLNxGjwqhtO9pN2Kz9qKN3Ag=
 github.com/andrewhowdencom/ore/x/tool/bash v0.0.0-20260522200942-1391eb953a7e/go.mod h1:niGTzVQoGvbfnz8Rh2o/GKvu/XnK2wgZfPJvnse8p0c=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
