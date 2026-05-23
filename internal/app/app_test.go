@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -208,5 +209,96 @@ func TestMakeSwitchRoleHandler_Success(t *testing.T) {
 	v, ok := thr.GetMetadata("workshop.role")
 	if !ok || v != "reviewer" {
 		t.Errorf("metadata = %q, want reviewer", v)
+	}
+}
+
+func TestRoleToolSchemas(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema map[string]any
+		checks func(t *testing.T, schema map[string]any)
+	}{
+		{
+			name:   "listRolesSchema",
+			schema: listRolesSchema,
+			checks: func(t *testing.T, schema map[string]any) {
+				if schema["type"] != "object" {
+					t.Errorf("listRolesSchema.type = %v, want object", schema["type"])
+				}
+			},
+		},
+		{
+			name:   "getCurrentRoleSchema",
+			schema: getCurrentRoleSchema,
+			checks: func(t *testing.T, schema map[string]any) {
+				if schema["type"] != "object" {
+					t.Errorf("getCurrentRoleSchema.type = %v, want object", schema["type"])
+				}
+			},
+		},
+		{
+			name:   "switchRoleSchema",
+			schema: switchRoleSchema,
+			checks: func(t *testing.T, schema map[string]any) {
+				if schema["type"] != "object" {
+					t.Errorf("switchRoleSchema.type = %v, want object", schema["type"])
+				}
+				props, ok := schema["properties"].(map[string]any)
+				if !ok {
+					t.Fatal("switchRoleSchema missing properties")
+				}
+				nameProp, ok := props["name"].(map[string]any)
+				if !ok {
+					t.Fatal("switchRoleSchema.properties missing name")
+				}
+				if nameProp["type"] != "string" {
+					t.Errorf("properties.name.type = %v, want string", nameProp["type"])
+				}
+				reqRaw, ok := schema["required"].([]interface{})
+				if !ok {
+					t.Fatalf("switchRoleSchema.required is not an array: %T", schema["required"])
+				}
+				found := false
+				for _, r := range reqRaw {
+					if s, ok := r.(string); ok && s == "name" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("required does not contain 'name': %v", reqRaw)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := json.Marshal(tt.schema)
+			if err != nil {
+				t.Fatalf("marshal schema: %v", err)
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal(data, &parsed); err != nil {
+				t.Fatalf("unmarshal schema: %v", err)
+			}
+			tt.checks(t, parsed)
+		})
+	}
+}
+
+func TestBuildManager_Smoke(t *testing.T) {
+	mgr, err := buildManager(&config{
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test-dummy",
+			Model:  "test-model",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildManager error: %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildManager returned nil manager")
 	}
 }

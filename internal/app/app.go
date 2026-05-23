@@ -162,14 +162,9 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		registry.Register(bash.BashTool.Name, bash.BashTool.Description, bash.BashTool.Schema, bash.Bash)
 
 		// Role management tools.
-		registry.Register("list_roles", "List all available role definitions.", map[string]any{}, makeListRolesHandler(rdir))
-		registry.Register("get_current_role", "Get the currently active role for this thread.", map[string]any{}, makeGetCurrentRoleHandler(rdir, thr))
-		registry.Register("switch_role", "Switch to a different role for this thread.", map[string]any{
-			"name": map[string]any{
-				"type":        "string",
-				"description": "Name of the role to activate",
-			},
-		}, makeSwitchRoleHandler(rdir, thr))
+		registry.Register("list_roles", "List all available role definitions.", listRolesSchema, makeListRolesHandler(rdir))
+		registry.Register("get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, thr))
+		registry.Register("switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, thr))
 
 		return loop.New(
 			loop.WithTransforms(sp, gr),
