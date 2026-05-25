@@ -7,6 +7,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
@@ -21,6 +23,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
+	"github.com/andrewhowdencom/ore/x/tool/skills"
 )
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
@@ -154,6 +157,18 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 		// Create tool registry with filesystem and bash functions.
 		registry := tool.NewRegistry()
+
+		// Set up progressive skill discovery from repo and home directories.
+		var discoverers []skills.Discoverer
+		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills"))
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			discoverers = append(discoverers, skills.NewFSDiscoverer(filepath.Join(homeDir, ".agents", "skills")))
+		}
+		skillsToolkit := skills.NewToolkit(discoverers...)
+		if err := skillsToolkit.Register(registry); err != nil {
+			return nil, fmt.Errorf("register skills toolkit: %w", err)
+		}
+
 		registry.Register(filesystem.ReadFileTool.Name, filesystem.ReadFileTool.Description, filesystem.ReadFileTool.Schema, filesystem.ReadFile)
 		registry.Register(filesystem.WriteFileTool.Name, filesystem.WriteFileTool.Description, filesystem.WriteFileTool.Schema, filesystem.WriteFile)
 		registry.Register(filesystem.EditFileTool.Name, filesystem.EditFileTool.Description, filesystem.EditFileTool.Schema, filesystem.EditFile)
@@ -202,6 +217,7 @@ func newProvider(pc ProviderConfig) (provider.Provider, error) {
 const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"You help users write, review, refactor, and debug code across any language or framework. " +
 	"You have access to filesystem tools (read_file, write_file, edit_file, list_directory, search_files) and a bash tool for running shell commands. " +
+	"You also have access to skills tools (list_skills, read_skill, search_skills) that let you discover and load specialized instructions for specific tasks. " +
 	"Use these tools proactively to explore the codebase, make changes, run tests, and verify your work. " +
 	"Prefer concise explanations and actionable suggestions."
 
