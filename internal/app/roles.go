@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/adrg/xdg"
-	"go.yaml.in/yaml/v3"
+	"gopkg.in/yaml.v3"
 )
 
 // RoleDefinition holds a parsed role file with YAML frontmatter and prompt body.

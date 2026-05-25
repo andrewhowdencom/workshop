@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/spf13/viper"
-	"go.yaml.in/yaml/v3"
+	"gopkg.in/yaml.v3"
 )
 
 func setViperValue(t *testing.T, key, value string) {
