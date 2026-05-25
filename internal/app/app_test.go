@@ -3,11 +3,16 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/andrewhowdencom/ore/artifact"
+	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/thread"
+	"github.com/andrewhowdencom/ore/x/systemprompt"
 )
 
 func TestNewProvider_MissingAPIKey(t *testing.T) {
@@ -347,5 +352,137 @@ func TestBuildManager_Smoke(t *testing.T) {
 	}
 	if mgr == nil {
 		t.Fatal("buildManager returned nil manager")
+	}
+}
+
+func TestBuildManager_WithWorkingDir(t *testing.T) {
+	mgr, err := buildManager(&config{
+		workingDir: "/test/project",
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test-dummy",
+			Model:  "test-model",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildManager error: %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildManager returned nil manager")
+	}
+}
+
+func TestSystemPrompt_WithCWD(t *testing.T) {
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config{
+		workingDir: "/test/project",
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test",
+			Model:  "test-model",
+		},
+	}
+
+	rdir := t.TempDir()
+	currentPrompt := makeCurrentPrompt(rdir, thr)
+
+	sp, err := systemprompt.New(
+		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(func() string {
+			if cfg.workingDir == "" {
+				return ""
+			}
+			return fmt.Sprintf("You are running in: %s. This is the user's active project directory; explore it proactively.", cfg.workingDir)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("create system prompt: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
+	}
+	if turns[0].Role != state.RoleSystem {
+		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
+	}
+	if len(turns[0].Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(turns[0].Artifacts))
+	}
+
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	if !strings.Contains(text.Content, "You are running in: /test/project") {
+		t.Errorf("prompt does not contain cwd context: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, defaultPrompt) {
+		t.Errorf("prompt does not contain default prompt: %q", text.Content)
+	}
+}
+
+func TestSystemPrompt_WithoutCWD(t *testing.T) {
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config{
+		workingDir: "",
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test",
+			Model:  "test-model",
+		},
+	}
+
+	rdir := t.TempDir()
+	currentPrompt := makeCurrentPrompt(rdir, thr)
+
+	sp, err := systemprompt.New(
+		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(func() string {
+			if cfg.workingDir == "" {
+				return ""
+			}
+			return fmt.Sprintf("You are running in: %s. This is the user's active project directory; explore it proactively.", cfg.workingDir)
+		}),
+	)
+	if err != nil {
+		t.Fatalf("create system prompt: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
+	}
+
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	if strings.Contains(text.Content, "You are running in:") {
+		t.Errorf("prompt should not contain cwd context when workingDir is empty: %q", text.Content)
 	}
 }
