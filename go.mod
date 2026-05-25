@@ -14,6 +14,8 @@ replace github.com/andrewhowdencom/ore/x/conduit/http => ../ore/x/conduit/http
 
 replace github.com/andrewhowdencom/ore/x/tool => ../ore/x/tool
 
+replace github.com/andrewhowdencom/ore/x/tool/skills => ../ore/x/tool/skills
+
 replace github.com/andrewhowdencom/ore/x/conduit => ../ore/x/conduit
 
 require (
@@ -25,6 +27,7 @@ require (
 	github.com/andrewhowdencom/ore/x/tool v0.0.0-20260523091752-cbd14a4f6b5f
 	github.com/andrewhowdencom/ore/x/tool/bash v0.0.0-20260523091752-cbd14a4f6b5f
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.0.0-20260523091752-cbd14a4f6b5f
+	github.com/andrewhowdencom/ore/x/tool/skills v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	go.yaml.in/yaml/v3 v3.0.4
@@ -83,4 +86,5 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
