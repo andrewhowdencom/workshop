@@ -15,12 +15,13 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/thread"
+	"github.com/andrewhowdencom/ore/tool"
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/ore/x/guardrails"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
-	"github.com/andrewhowdencom/ore/x/tool"
+	xtool "github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
@@ -169,21 +170,21 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			return nil, fmt.Errorf("register skills toolkit: %w", err)
 		}
 
-		registry.Register(filesystem.ReadFileTool.Name, filesystem.ReadFileTool.Description, filesystem.ReadFileTool.Schema, filesystem.ReadFile)
-		registry.Register(filesystem.WriteFileTool.Name, filesystem.WriteFileTool.Description, filesystem.WriteFileTool.Schema, filesystem.WriteFile)
-		registry.Register(filesystem.EditFileTool.Name, filesystem.EditFileTool.Description, filesystem.EditFileTool.Schema, filesystem.EditFile)
-		registry.Register(filesystem.ListDirectoryTool.Name, filesystem.ListDirectoryTool.Description, filesystem.ListDirectoryTool.Schema, filesystem.ListDirectory)
-		registry.Register(filesystem.SearchFilesTool.Name, filesystem.SearchFilesTool.Description, filesystem.SearchFilesTool.Schema, filesystem.SearchFiles)
-		registry.Register(bash.BashTool.Name, bash.BashTool.Description, bash.BashTool.Schema, bash.Bash)
+		mustRegister(registry, filesystem.ReadFileTool, filesystem.ReadFile)
+		mustRegister(registry, filesystem.WriteFileTool, filesystem.WriteFile)
+		mustRegister(registry, filesystem.EditFileTool, filesystem.EditFile)
+		mustRegister(registry, filesystem.ListDirectoryTool, filesystem.ListDirectory)
+		mustRegister(registry, filesystem.SearchFilesTool, filesystem.SearchFiles)
+		mustRegister(registry, bash.BashTool, bash.Bash)
 
 		// Role management tools.
-		registry.Register("list_roles", "List all available role definitions.", listRolesSchema, makeListRolesHandler(rdir))
-		registry.Register("get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, thr))
-		registry.Register("switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, thr))
+		mustRegisterRaw(registry, "list_roles", "List all available role definitions.", listRolesSchema, makeListRolesHandler(rdir))
+		mustRegisterRaw(registry, "get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, thr))
+		mustRegisterRaw(registry, "switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, thr))
 
 		return loop.New(
 			loop.WithTransforms(sp, gr),
-			loop.WithHandlers(registry.Handler()),
+			loop.WithHandlers(xtool.NewHandler(registry)),
 			loop.WithInvokeOptions(openai.WithTools(registry.Tools())),
 		), nil
 	}
@@ -213,6 +214,22 @@ func newProvider(pc ProviderConfig) (provider.Provider, error) {
 	}
 }
 
+// mustRegister panics if tool registration fails. Used for built-in tools
+// whose schemas are baked-in and valid.
+func mustRegister(registry tool.Registry, t provider.Tool, fn tool.ToolFunc) {
+	if err := registry.Register(t.Name, t.Description, t.Schema, fn); err != nil {
+		panic(fmt.Sprintf("register %s: %v", t.Name, err))
+	}
+}
+
+// mustRegisterRaw is a convenience variant for tools that do not have a
+// provider.Tool struct (e.g., ad-hoc role management tools).
+func mustRegisterRaw(registry tool.Registry, name, description string, schema map[string]any, fn tool.ToolFunc) {
+	if err := registry.Register(name, description, schema, fn); err != nil {
+		panic(fmt.Sprintf("register %s: %v", name, err))
+	}
+}
+
 // defaultPrompt is the baked-in system prompt used when no role is active.
 const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"You help users write, review, refactor, and debug code across any language or framework. " +
@@ -237,7 +254,7 @@ func makeCurrentPrompt(rdir string, thr *thread.Thread) func() string {
 // makeListRolesHandler returns a tool handler that lists available role
 // definitions from the given directory.
 func makeListRolesHandler(rdir string) tool.ToolFunc {
-	return func(ctx context.Context, args map[string]any) (any, error) {
+	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
 		roles, err := listRoleDefinitions(rdir)
 		if err != nil {
 			return nil, err
@@ -256,7 +273,7 @@ func makeListRolesHandler(rdir string) tool.ToolFunc {
 // makeGetCurrentRoleHandler returns a tool handler that returns the currently
 // active role for the given thread.
 func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
-	return func(ctx context.Context, args map[string]any) (any, error) {
+	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
 		roleName := "default"
 		if v, ok := thr.GetMetadata("workshop.role"); ok && v != "" {
 			roleName = v
@@ -284,7 +301,7 @@ func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 // makeSwitchRoleHandler returns a tool handler that validates and switches
 // the active role for the given thread.
 func makeSwitchRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
-	return func(ctx context.Context, args map[string]any) (any, error) {
+	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
 			return nil, fmt.Errorf("missing required argument: name")

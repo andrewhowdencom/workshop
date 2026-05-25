@@ -89,7 +89,7 @@ func TestMakeListRolesHandler(t *testing.T) {
 	}
 
 	handler := makeListRolesHandler(dir)
-	result, err := handler(context.Background(), map[string]any{})
+	result, err := handler(context.Background(), nil, map[string]any{})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestMakeGetCurrentRoleHandler_Default(t *testing.T) {
 	}
 
 	handler := makeGetCurrentRoleHandler(t.TempDir(), thr)
-	result, err := handler(context.Background(), map[string]any{})
+	result, err := handler(context.Background(), nil, map[string]any{})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestMakeGetCurrentRoleHandler_WithRole(t *testing.T) {
 	thr.SetMetadata("workshop.role", "writer")
 
 	handler := makeGetCurrentRoleHandler(dir, thr)
-	result, err := handler(context.Background(), map[string]any{})
+	result, err := handler(context.Background(), nil, map[string]any{})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestMakeSwitchRoleHandler_MissingName(t *testing.T) {
 	}
 
 	handler := makeSwitchRoleHandler(t.TempDir(), thr)
-	_, err = handler(context.Background(), map[string]any{})
+	_, err = handler(context.Background(), nil, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing name argument")
 	}
@@ -178,7 +178,7 @@ func TestMakeSwitchRoleHandler_InvalidRole(t *testing.T) {
 	}
 
 	handler := makeSwitchRoleHandler(t.TempDir(), thr)
-	_, err = handler(context.Background(), map[string]any{"name": "nonexistent"})
+	_, err = handler(context.Background(), nil, map[string]any{"name": "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent role")
 	}
@@ -197,7 +197,7 @@ func TestMakeSwitchRoleHandler_Success(t *testing.T) {
 	}
 
 	handler := makeSwitchRoleHandler(dir, thr)
-	result, err := handler(context.Background(), map[string]any{"name": "reviewer"})
+	result, err := handler(context.Background(), nil, map[string]any{"name": "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestMakeSwitchRoleHandler_FrontmatterNameMismatch(t *testing.T) {
 
 	// list_roles should return the filename "planner", not the frontmatter "strategist"
 	listHandler := makeListRolesHandler(dir)
-	result, err := listHandler(context.Background(), map[string]any{})
+	result, err := listHandler(context.Background(), nil, map[string]any{})
 	if err != nil {
 		t.Fatalf("list handler error: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestMakeSwitchRoleHandler_FrontmatterNameMismatch(t *testing.T) {
 	}
 
 	switchHandler := makeSwitchRoleHandler(dir, thr)
-	switchResult, err := switchHandler(context.Background(), map[string]any{"name": "planner"})
+	switchResult, err := switchHandler(context.Background(), nil, map[string]any{"name": "planner"})
 	if err != nil {
 		t.Fatalf("switch handler error: %v", err)
 	}

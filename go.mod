@@ -2,35 +2,19 @@ module github.com/andrewhowdencom/workshop
 
 go 1.26.2
 
-replace github.com/andrewhowdencom/ore => ../ore
-
-replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
-
-replace github.com/andrewhowdencom/ore/x/provider/openai => ../ore/x/provider/openai
-
-replace github.com/andrewhowdencom/ore/x/tool/filesystem => ../ore/x/tool/filesystem
-
-replace github.com/andrewhowdencom/ore/x/conduit/http => ../ore/x/conduit/http
-
-replace github.com/andrewhowdencom/ore/x/tool => ../ore/x/tool
-
-replace github.com/andrewhowdencom/ore/x/tool/skills => ../ore/x/tool/skills
-
-replace github.com/andrewhowdencom/ore/x/conduit => ../ore/x/conduit
-
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.0.0
-	github.com/andrewhowdencom/ore/x/conduit/http v0.0.0-20260523091752-cbd14a4f6b5f
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.0.0-20260523091752-cbd14a4f6b5f
-	github.com/andrewhowdencom/ore/x/provider/openai v0.0.0-20260523091752-cbd14a4f6b5f
-	github.com/andrewhowdencom/ore/x/tool v0.0.0-20260523091752-cbd14a4f6b5f
-	github.com/andrewhowdencom/ore/x/tool/bash v0.0.0-20260523091752-cbd14a4f6b5f
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.0.0-20260523091752-cbd14a4f6b5f
-	github.com/andrewhowdencom/ore/x/tool/skills v0.0.0-00010101000000-000000000000
+	github.com/andrewhowdencom/ore v0.0.3
+	github.com/andrewhowdencom/ore/x/conduit/http v0.2.0
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.2.0
+	github.com/andrewhowdencom/ore/x/provider/openai v0.2.0
+	github.com/andrewhowdencom/ore/x/tool v0.2.0
+	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.0
+	github.com/andrewhowdencom/ore/x/tool/skills v0.2.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	go.yaml.in/yaml/v3 v3.0.4
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -38,7 +22,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.6 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.24.1 // indirect
-	github.com/andrewhowdencom/ore/x/conduit v0.0.0-20260523091752-cbd14a4f6b5f // indirect
+	github.com/andrewhowdencom/ore/x/conduit v0.1.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -81,10 +65,10 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
+	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
