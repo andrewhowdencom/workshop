@@ -194,7 +194,14 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 		// Set the default sandbox to the unsafe sandbox. This satisfies the
 		// ToolFunc contract so tools fall through to raw OS operations with no
-		// isolation. A real sandbox should replace this in production.
+		// isolation. The unsafe sandbox intentionally implements only
+		// tool.Sandbox (Name), not FileSandbox or ExecSandbox, so path
+		// resolution and command execution remain unconstrained.
+		//
+		// NOTE: This is deliberately insecure – it allows tools to execute raw
+		// OS commands and access any filesystem path. Use ONLY for local
+		// development. Swap for a secure sandbox (e.g., container-based)
+		// before running untrusted code or in production.
 		if sbr, ok := registry.(tool.SandboxRegistry); ok {
 			sbr.SetDefaultSandbox(unsandbox.New("default"))
 		}
@@ -303,7 +310,8 @@ func makeWorkingDirContent(dir string) func() string {
 }
 
 // makeListRolesHandler returns a tool handler that lists available role
-// definitions from the given directory.
+// definitions from the given directory. The sandbox argument is received
+// from the tool framework and passed through to the role I/O layer.
 func makeListRolesHandler(rdir string) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		roles, err := listRoleDefinitions(rdir, sb)
@@ -322,7 +330,8 @@ func makeListRolesHandler(rdir string) tool.ToolFunc {
 }
 
 // makeGetCurrentRoleHandler returns a tool handler that returns the currently
-// active role for the given thread.
+// active role for the given thread. The sandbox argument is received from the
+// tool framework and passed through to the role I/O layer.
 func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		roleName := "default"
@@ -350,7 +359,8 @@ func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 }
 
 // makeSwitchRoleHandler returns a tool handler that validates and switches
-// the active role for the given thread.
+// the active role for the given thread. The sandbox argument is received
+// from the tool framework and passed through to the role I/O layer.
 func makeSwitchRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		name, ok := args["name"].(string)
