@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -393,12 +392,7 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 
 	sp, err := systemprompt.New(
 		systemprompt.WithContentFunc(currentPrompt),
-		systemprompt.WithContentFunc(func() string {
-			if cfg.workingDir == "" {
-				return ""
-			}
-			return fmt.Sprintf("You are running in: %s. This is the user's active project directory; explore it proactively.", cfg.workingDir)
-		}),
+		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 	)
 	if err != nil {
 		t.Fatalf("create system prompt: %v", err)
@@ -455,12 +449,7 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 
 	sp, err := systemprompt.New(
 		systemprompt.WithContentFunc(currentPrompt),
-		systemprompt.WithContentFunc(func() string {
-			if cfg.workingDir == "" {
-				return ""
-			}
-			return fmt.Sprintf("You are running in: %s. This is the user's active project directory; explore it proactively.", cfg.workingDir)
-		}),
+		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 	)
 	if err != nil {
 		t.Fatalf("create system prompt: %v", err)
