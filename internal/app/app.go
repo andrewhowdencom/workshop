@@ -37,10 +37,11 @@ type ProviderConfig struct {
 
 // config holds the runtime configuration for the application.
 type config struct {
-	threadID string
-	storeDir string
-	httpAddr string
-	provider ProviderConfig
+	threadID   string
+	storeDir   string
+	httpAddr   string
+	provider   ProviderConfig
+	workingDir string
 }
 
 // Option configures the application via functional options.
@@ -65,6 +66,11 @@ func WithStoreDir(dir string) Option {
 // WithHTTPAddr sets the TCP address for the HTTP server (e.g. ":8080").
 func WithHTTPAddr(addr string) Option {
 	return func(c *config) { c.httpAddr = addr }
+}
+
+// WithWorkingDir sets the current working directory to include in the system prompt.
+func WithWorkingDir(dir string) Option {
+	return func(c *config) { c.workingDir = dir }
 }
 
 // RunTUI initializes and starts the TUI application.
