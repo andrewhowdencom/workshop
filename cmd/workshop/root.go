@@ -13,6 +13,7 @@ import (
 	"github.com/andrewhowdencom/workshop/internal/app"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/term"
 )
 
 func init() {
@@ -102,12 +103,17 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		cwd = d
 	}
 
-	return app.RunTUI(ctx,
+	opts := []app.Option{
 		app.WithThreadID(viper.GetString("thread")),
 		app.WithProvider(pc),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithWorkingDir(cwd),
-	)
+	}
+
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		return app.RunTUI(ctx, opts...)
+	}
+	return app.RunStdio(ctx, opts...)
 }
 
 // Execute runs the root command.
