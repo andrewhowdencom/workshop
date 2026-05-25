@@ -37,10 +37,11 @@ type ProviderConfig struct {
 
 // config holds the runtime configuration for the application.
 type config struct {
-	threadID string
-	storeDir string
-	httpAddr string
-	provider ProviderConfig
+	threadID   string
+	storeDir   string
+	httpAddr   string
+	provider   ProviderConfig
+	workingDir string
 }
 
 // Option configures the application via functional options.
@@ -65,6 +66,11 @@ func WithStoreDir(dir string) Option {
 // WithHTTPAddr sets the TCP address for the HTTP server (e.g. ":8080").
 func WithHTTPAddr(addr string) Option {
 	return func(c *config) { c.httpAddr = addr }
+}
+
+// WithWorkingDir sets the current working directory to include in the system prompt.
+func WithWorkingDir(dir string) Option {
+	return func(c *config) { c.workingDir = dir }
 }
 
 // RunTUI initializes and starts the TUI application.
@@ -141,7 +147,10 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// Build dynamic system prompt that reads from thread metadata.
 		currentPrompt := makeCurrentPrompt(rdir, thr)
 
-		sp, err := systemprompt.New(systemprompt.WithContentFunc(currentPrompt))
+		sp, err := systemprompt.New(
+			systemprompt.WithContentFunc(currentPrompt),
+			systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -151,6 +160,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			"Prefer concise explanations; show code rather than prose where possible.",
 			"When suggesting changes, explain the rationale briefly.",
 			"Before writing or editing files, verify the target path and confirm the change is intended.",
+			"Before writing or editing files outside the current working directory, be especially cautious and confirm the change is intended.",
 		))
 		if err != nil {
 			return nil, fmt.Errorf("create guardrails transform: %w", err)
@@ -248,6 +258,17 @@ func makeCurrentPrompt(rdir string, thr *thread.Thread) func() string {
 			}
 		}
 		return defaultPrompt
+	}
+}
+
+// makeWorkingDirContent returns a closure that emits a sentence describing
+// the current working directory, or an empty string if none is set.
+func makeWorkingDirContent(dir string) func() string {
+	return func() string {
+		if dir == "" {
+			return ""
+		}
+		return fmt.Sprintf("You are running in: %s. This is the user's active project directory; explore it proactively.", dir)
 	}
 }
 

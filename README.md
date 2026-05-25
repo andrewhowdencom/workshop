@@ -190,6 +190,13 @@ Roles are stored per-thread in thread metadata. When you call
 thread with `--thread <uuid>` to continue with the previously selected
 persona.
 
+**Runtime context**
+
+The system prompt automatically includes the current working directory so
+the AI knows which project directory it is operating in. This helps the
+assistant resolve relative paths correctly and proactively explore the
+codebase.
+
 ## Available tools
 
 | Tool | Description |
