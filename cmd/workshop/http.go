@@ -49,9 +49,15 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	cwd := ""
+	if d, err := os.Getwd(); err == nil {
+		cwd = d
+	}
+
 	return app.RunHTTP(ctx,
 		app.WithProvider(pc),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithHTTPAddr(viper.GetString("http.addr")),
+		app.WithWorkingDir(cwd),
 	)
 }

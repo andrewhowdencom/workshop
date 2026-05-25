@@ -97,10 +97,16 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	cwd := ""
+	if d, err := os.Getwd(); err == nil {
+		cwd = d
+	}
+
 	return app.RunTUI(ctx,
 		app.WithThreadID(viper.GetString("thread")),
 		app.WithProvider(pc),
 		app.WithStoreDir(viper.GetString("store.dir")),
+		app.WithWorkingDir(cwd),
 	)
 }
 
