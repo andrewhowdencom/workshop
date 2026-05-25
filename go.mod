@@ -12,6 +12,7 @@ require (
 	github.com/andrewhowdencom/ore/x/tool v0.2.0
 	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.0
+	github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.0
 	github.com/andrewhowdencom/ore/x/tool/skills v0.2.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0

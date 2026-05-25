@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/adrg/xdg"
+	"github.com/andrewhowdencom/ore/tool"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,8 +27,16 @@ func roleDir() string {
 // If the file starts with "---" on its own line, YAML frontmatter between the
 // first and second "---" delimiters is parsed; everything after the second
 // "---" is the prompt body.
-func loadRole(dir, name string) (*RoleDefinition, error) {
+// The sandbox is used for path resolution when a FileSandbox is available.
+func loadRole(dir, name string, sb tool.Sandbox) (*RoleDefinition, error) {
 	path := filepath.Join(dir, name+".md")
+	if fsb, ok := sb.(tool.FileSandbox); ok {
+		var err error
+		path, err = fsb.ResolvePath(path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve path: %w", err)
+		}
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read role file: %w", err)
@@ -67,7 +76,15 @@ func loadRole(dir, name string) (*RoleDefinition, error) {
 // Returns an empty slice if the directory does not exist. Files that fail to
 // load are skipped silently so that one malformed role does not block
 // discovery of the others.
-func listRoleDefinitions(dir string) ([]RoleDefinition, error) {
+// The sandbox is used for path resolution when a FileSandbox is available.
+func listRoleDefinitions(dir string, sb tool.Sandbox) ([]RoleDefinition, error) {
+	if fsb, ok := sb.(tool.FileSandbox); ok {
+		var err error
+		dir, err = fsb.ResolvePath(dir)
+		if err != nil {
+			return nil, fmt.Errorf("resolve path: %w", err)
+		}
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -86,7 +103,7 @@ func listRoleDefinitions(dir string) ([]RoleDefinition, error) {
 			continue
 		}
 		roleName := strings.TrimSuffix(fname, ".md")
-		role, err := loadRole(dir, roleName)
+		role, err := loadRole(dir, roleName, sb)
 		if err != nil {
 			continue // skip malformed files silently
 		}

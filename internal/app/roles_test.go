@@ -19,7 +19,7 @@ You are a code reviewer. Focus on bugs.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "reviewer")
+	role, err := loadRole(dir, "reviewer", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestLoadRole_WithoutFrontmatter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "default")
+	role, err := loadRole(dir, "default", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestLoadRole_WithoutFrontmatter(t *testing.T) {
 
 func TestLoadRole_MissingFile(t *testing.T) {
 	dir := t.TempDir()
-	_, err := loadRole(dir, "nonexistent")
+	_, err := loadRole(dir, "nonexistent", nil)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -80,7 +80,7 @@ Just a prompt.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "empty")
+	role, err := loadRole(dir, "empty", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -104,7 +104,7 @@ You are a strategic planner.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "planner")
+	role, err := loadRole(dir, "planner", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestListRoleDefinitions_MultipleFiles(t *testing.T) {
 		}
 	}
 
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestListRoleDefinitions_MultipleFiles(t *testing.T) {
 
 func TestListRoleDefinitions_MissingDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "does-not-exist")
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestListRoleDefinitions_SkipsMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestListRoleDefinitions_SkipsMalformedYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}

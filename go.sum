@@ -32,6 +32,8 @@ github.com/andrewhowdencom/ore/x/tool/bash v0.2.0 h1:fAn6NbQihrkqd7nG1FKH4qPdMDK
 github.com/andrewhowdencom/ore/x/tool/bash v0.2.0/go.mod h1:92UbW1DWuGZBZNTa2ZwLMjMXhKw1YMY6QH5qfO59x9w=
 github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.0 h1:4o4lZA1d2/wibQIrWc/oQXaQaOS2/+kVIG98/VtX+3o=
 github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.0/go.mod h1:+JsV2qx0hJXPy4o3OXeo63GkFBQApj40tePeRfKycxA=
+github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.0 h1:qWiTZkoma9I60j2IUboB+mLmbdq39ITkgfzJm0O/PEo=
+github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.0/go.mod h1:Gh+lKisqMyePhE+yfvyTGrfx1dKz7lWgKn1HyGqkGCU=
 github.com/andrewhowdencom/ore/x/tool/skills v0.2.0 h1:NPnyVgynm5rR6a8tACNsoYsxEdTPV0rJm6/WCTl9VP0=
 github.com/andrewhowdencom/ore/x/tool/skills v0.2.0/go.mod h1:a4uw3LLuYRRFtDx74l18guuUdoHUJu7xu4uUmWUNgJo=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
