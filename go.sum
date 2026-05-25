@@ -14,12 +14,14 @@ github.com/alecthomas/chroma/v2 v2.24.1 h1:m5ffpfZbIb++k8AqFEKy9uVgY12xIQtBsQlc6
 github.com/alecthomas/chroma/v2 v2.24.1/go.mod h1:l+ohZ9xRXIbGe7cIW+YZgOGbvuVLjMps/FYN/CwuabI=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
-github.com/andrewhowdencom/ore v0.0.3 h1:DlvCSuKpxgMQa4TeIl/Vq/mxHV90Ui4GLKfZ6u2vFMA=
-github.com/andrewhowdencom/ore v0.0.3/go.mod h1:ZjBqmtdKSK3S+iv5QXUOWfoLw3tHND0RinPL8If7PDA=
+github.com/andrewhowdencom/ore v0.1.0 h1:d1lrUlFRCjPX9O0UxmeiR6NbLdY0k/8ifugWk86hDu4=
+github.com/andrewhowdencom/ore v0.1.0/go.mod h1:ZjBqmtdKSK3S+iv5QXUOWfoLw3tHND0RinPL8If7PDA=
 github.com/andrewhowdencom/ore/x/conduit v0.1.0 h1:TkogN9hOxVMFE4F4SDOMZOEL+PJ/Wi0vW0l5wx+dtGM=
 github.com/andrewhowdencom/ore/x/conduit v0.1.0/go.mod h1:83aDeFABkaP1x98A9jxkqIr3zN4XsiprPnpAxHGpPFw=
 github.com/andrewhowdencom/ore/x/conduit/http v0.2.0 h1:A1/ycewHkafUoXjURGnj8ooK//GbYFw/e2c+W2LLmD8=
 github.com/andrewhowdencom/ore/x/conduit/http v0.2.0/go.mod h1:bsClV+/mPfRX5BD8GUpIe7TsKi04swBKhDbRLivWj4s=
+github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.0 h1:tLxnbnffd8fpUR32x04QVwa6dU5TaiGMuJugcDqfxjo=
+github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.0/go.mod h1:aC47U2oi7Tbb2CDBCDoCahPHzqsQy51ZbRZEH9CGSF8=
 github.com/andrewhowdencom/ore/x/conduit/tui v0.2.0 h1:IprKplW/RAP1vSaxomFGK12Ezp7UV3u1TALMlRPg2/M=
 github.com/andrewhowdencom/ore/x/conduit/tui v0.2.0/go.mod h1:7Iyp0ycV6zp2NcVykIuEF9YB/4coLQi94OkVj2eRBYE=
 github.com/andrewhowdencom/ore/x/provider/openai v0.2.0 h1:pAPb5XfTuXB/A3RqyrHxGPZcgqRMoV1qrb8gVOQVrQE=

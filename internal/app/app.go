@@ -17,6 +17,7 @@ import (
 	"github.com/andrewhowdencom/ore/thread"
 	"github.com/andrewhowdencom/ore/tool"
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
+	stdioc "github.com/andrewhowdencom/ore/x/conduit/stdio"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/ore/x/guardrails"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
@@ -117,6 +118,27 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 	}
 
 	return httpConduit.Start(ctx)
+}
+
+// RunStdio initializes and starts the stdio single-shot application.
+func RunStdio(ctx context.Context, opts ...Option) error {
+	cfg := &config{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	mgr, err := buildManager(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Create the stdio conduit.
+	stdioConduit, err := stdioc.New(mgr, stdioc.WithThreadID(cfg.threadID))
+	if err != nil {
+		return fmt.Errorf("create stdio conduit: %w", err)
+	}
+
+	return stdioConduit.Start(ctx)
 }
 
 // buildManager creates the shared session manager from configuration.
