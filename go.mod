@@ -14,6 +14,8 @@ replace github.com/andrewhowdencom/ore/x/conduit/http => ../ore/x/conduit/http
 
 replace github.com/andrewhowdencom/ore/x/tool => ../ore/x/tool
 
+replace github.com/andrewhowdencom/ore/x/tool/skills => ../ore/x/tool/skills
+
 replace github.com/andrewhowdencom/ore/x/conduit => ../ore/x/conduit
 
 require (
