@@ -19,12 +19,12 @@ replace github.com/andrewhowdencom/ore/x/conduit => ../ore/x/conduit
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.0.0
-	github.com/andrewhowdencom/ore/x/conduit/http v0.0.0-20260523074344-7b845f256872
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.0.0-20260523074344-7b845f256872
-	github.com/andrewhowdencom/ore/x/provider/openai v0.0.0-20260523074344-7b845f256872
-	github.com/andrewhowdencom/ore/x/tool v0.0.0-20260523074344-7b845f256872
-	github.com/andrewhowdencom/ore/x/tool/bash v0.0.0-20260523074344-7b845f256872
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.0.0-20260523074344-7b845f256872
+	github.com/andrewhowdencom/ore/x/conduit/http v0.0.0-20260523091752-cbd14a4f6b5f
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.0.0-20260523091752-cbd14a4f6b5f
+	github.com/andrewhowdencom/ore/x/provider/openai v0.0.0-20260523091752-cbd14a4f6b5f
+	github.com/andrewhowdencom/ore/x/tool v0.0.0-20260523091752-cbd14a4f6b5f
+	github.com/andrewhowdencom/ore/x/tool/bash v0.0.0-20260523091752-cbd14a4f6b5f
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.0.0-20260523091752-cbd14a4f6b5f
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	go.yaml.in/yaml/v3 v3.0.4
@@ -35,17 +35,17 @@ require (
 	charm.land/bubbletea/v2 v2.0.6 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.24.1 // indirect
-	github.com/andrewhowdencom/ore/x/conduit v0.0.0-20260523074344-7b845f256872 // indirect
+	github.com/andrewhowdencom/ore/x/conduit v0.0.0-20260523091752-cbd14a4f6b5f // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260416155717-489999b90468 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260511121909-c840852527f3 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260519012233-798e623c8447 // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260524005558-961435f30453 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
