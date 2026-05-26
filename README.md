@@ -122,6 +122,8 @@ provider:
   api-key: sk-...
   model: gpt-4o
   base-url: ""
+  temperature: 0          # 0 = provider default; range 0–2 for OpenAI
+  reasoning-effort: ""    # "low", "medium", or "high" for o1 models
 store:
   dir: ""
 http:
@@ -140,6 +142,8 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 | `--provider.api-key` | `WORKSHOP_PROVIDER_API_KEY` | — | API key for the provider (**required**) |
 | `--provider.model` | `WORKSHOP_PROVIDER_MODEL` | `gpt-4o` | Model name |
 | `--provider.base-url` | `WORKSHOP_PROVIDER_BASE_URL` | — | Custom API base URL |
+| `--provider.temperature` | `WORKSHOP_PROVIDER_TEMPERATURE` | `0` | Sampling temperature (0 = default) |
+| `--provider.reasoning-effort` | `WORKSHOP_PROVIDER_REASONING_EFFORT` | — | Reasoning effort (low, medium, high) |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | — | Directory for persistent JSON thread storage |
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |

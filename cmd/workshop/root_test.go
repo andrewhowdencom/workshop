@@ -8,6 +8,45 @@ import (
 	"github.com/spf13/viper"
 )
 
+func TestMakeProviderConfig(t *testing.T) {
+	viper.Set("provider.kind", "openai")
+	viper.Set("provider.api-key", "sk-test")
+	viper.Set("provider.model", "gpt-4o")
+	viper.Set("provider.base-url", "http://test")
+	viper.Set("provider.temperature", 0.7)
+	viper.Set("provider.reasoning-effort", "medium")
+
+	t.Cleanup(func() {
+		viper.Set("provider.kind", "openai")
+		viper.Set("provider.api-key", "")
+		viper.Set("provider.model", "gpt-4o")
+		viper.Set("provider.base-url", "")
+		viper.Set("provider.temperature", 0)
+		viper.Set("provider.reasoning-effort", "")
+	})
+
+	pc := makeProviderConfig()
+
+	if pc.Kind != "openai" {
+		t.Errorf("Kind = %q, want openai", pc.Kind)
+	}
+	if pc.APIKey != "sk-test" {
+		t.Errorf("APIKey = %q, want sk-test", pc.APIKey)
+	}
+	if pc.Model != "gpt-4o" {
+		t.Errorf("Model = %q, want gpt-4o", pc.Model)
+	}
+	if pc.BaseURL != "http://test" {
+		t.Errorf("BaseURL = %q, want http://test", pc.BaseURL)
+	}
+	if pc.Temperature != 0.7 {
+		t.Errorf("Temperature = %v, want 0.7", pc.Temperature)
+	}
+	if pc.ReasoningEffort != "medium" {
+		t.Errorf("ReasoningEffort = %q, want medium", pc.ReasoningEffort)
+	}
+}
+
 func TestSetupViper(t *testing.T) {
 	v := viper.New()
 	setupViper(v)

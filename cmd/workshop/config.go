@@ -55,10 +55,12 @@ func buildConfigMap() map[string]interface{} {
 	return map[string]interface{}{
 		"log-level": viper.GetString("log-level"),
 		"provider": map[string]interface{}{
-			"kind":     viper.GetString("provider.kind"),
-			"api-key":  viper.GetString("provider.api-key"),
-			"model":    viper.GetString("provider.model"),
-			"base-url": viper.GetString("provider.base-url"),
+			"kind":             viper.GetString("provider.kind"),
+			"api-key":          viper.GetString("provider.api-key"),
+			"model":            viper.GetString("provider.model"),
+			"base-url":         viper.GetString("provider.base-url"),
+			"temperature":      viper.GetFloat64("provider.temperature"),
+			"reasoning-effort": viper.GetString("provider.reasoning-effort"),
 		},
 		"store": map[string]interface{}{
 			"dir": viper.GetString("store.dir"),

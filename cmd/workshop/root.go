@@ -22,6 +22,8 @@ func init() {
 	rootCmd.PersistentFlags().String("provider.api-key", "", "API key for the provider")
 	rootCmd.PersistentFlags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
 	rootCmd.PersistentFlags().String("provider.base-url", "", "Custom API base URL")
+	rootCmd.PersistentFlags().Float64("provider.temperature", 0, "Sampling temperature for the provider (0 = default)")
+	rootCmd.PersistentFlags().String("provider.reasoning-effort", "", "Reasoning effort for the provider (low, medium, high)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
@@ -82,17 +84,21 @@ func configureLogging(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runRoot(cmd *cobra.Command, args []string) error {
-	apiKey := viper.GetString("provider.api-key")
-	if apiKey == "" {
-		return fmt.Errorf("api key is required; set --provider.api-key or WORKSHOP_PROVIDER_API_KEY environment variable")
+func makeProviderConfig() app.ProviderConfig {
+	return app.ProviderConfig{
+		Kind:            viper.GetString("provider.kind"),
+		APIKey:          viper.GetString("provider.api-key"),
+		Model:           viper.GetString("provider.model"),
+		BaseURL:         viper.GetString("provider.base-url"),
+		Temperature:     viper.GetFloat64("provider.temperature"),
+		ReasoningEffort: viper.GetString("provider.reasoning-effort"),
 	}
+}
 
-	pc := app.ProviderConfig{
-		Kind:    viper.GetString("provider.kind"),
-		APIKey:  apiKey,
-		Model:   viper.GetString("provider.model"),
-		BaseURL: viper.GetString("provider.base-url"),
+func runRoot(cmd *cobra.Command, args []string) error {
+	pc := makeProviderConfig()
+	if pc.APIKey == "" {
+		return fmt.Errorf("api key is required; set --provider.api-key or WORKSHOP_PROVIDER_API_KEY environment variable")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
