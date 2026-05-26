@@ -24,7 +24,7 @@ func init() {
 	rootCmd.PersistentFlags().String("provider.base-url", "", "Custom API base URL")
 	rootCmd.PersistentFlags().Float64("provider.temperature", 0, "Sampling temperature for the provider (0 = default)")
 	rootCmd.PersistentFlags().String("provider.reasoning-effort", "", "Reasoning effort for the provider (low, medium, high)")
-	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage")
+	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
 
