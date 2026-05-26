@@ -5,10 +5,10 @@ go 1.26.2
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.1.0
-	github.com/andrewhowdencom/ore/x/conduit/http v0.2.0
+	github.com/andrewhowdencom/ore/x/conduit/http v0.2.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.0
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.2.0
-	github.com/andrewhowdencom/ore/x/provider/openai v0.2.0
+	github.com/andrewhowdencom/ore/x/provider/openai v0.2.1
 	github.com/andrewhowdencom/ore/x/tool v0.2.0
 	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.0
@@ -24,7 +24,7 @@ require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
 	charm.land/bubbletea/v2 v2.0.6 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
-	github.com/alecthomas/chroma/v2 v2.24.1 // indirect
+	github.com/alecthomas/chroma/v2 v2.25.0 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -32,16 +32,16 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260511121909-c840852527f3 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260524005558-961435f30453 // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260525135217-abeec2b8bf0b // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
