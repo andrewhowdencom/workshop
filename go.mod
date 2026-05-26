@@ -4,16 +4,16 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.1.2
-	github.com/andrewhowdencom/ore/x/conduit/http v0.2.3
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.0
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.2.2
-	github.com/andrewhowdencom/ore/x/provider/openai v0.2.1
-	github.com/andrewhowdencom/ore/x/tool v0.2.1
-	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.1
-	github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.0
-	github.com/andrewhowdencom/ore/x/tool/skills v0.2.0
+	github.com/andrewhowdencom/ore v0.1.2-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/conduit/http v0.2.3-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.1-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.2.2-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/provider/openai v0.2.2-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/tool v0.2.2-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/tool/bash v0.2.1-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.2-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.1-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore/x/tool/skills v0.2.1-0.20260526095021-7ee934990e62
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/term v0.43.0
