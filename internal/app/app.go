@@ -230,6 +230,11 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		mustRegisterRaw(registry, "switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, thr))
 
 		return loop.New(
+			loop.WithOnEmit(func(ctx context.Context, event loop.OutputEvent) {
+				if tc, ok := event.(loop.TurnCompleteEvent); ok {
+					thr.State.Append(tc.Turn.Role, tc.Turn.Artifacts...)
+				}
+			}),
 			loop.WithTransforms(sp, gr),
 			loop.WithHandlers(xtool.NewHandler(registry)),
 			loop.WithInvokeOptions(openai.WithTools(registry.Tools())),
