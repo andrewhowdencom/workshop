@@ -26,6 +26,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
+	unsandbox "github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe"
 )
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
@@ -191,6 +192,20 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// Create tool registry with filesystem and bash functions.
 		registry := tool.NewRegistry()
 
+		// Set the default sandbox to the unsafe sandbox. This satisfies the
+		// ToolFunc contract so tools fall through to raw OS operations with no
+		// isolation. The unsafe sandbox intentionally implements only
+		// tool.Sandbox (Name), not FileSandbox or ExecSandbox, so path
+		// resolution and command execution remain unconstrained.
+		//
+		// NOTE: This is deliberately insecure – it allows tools to execute raw
+		// OS commands and access any filesystem path. Use ONLY for local
+		// development. Swap for a secure sandbox (e.g., container-based)
+		// before running untrusted code or in production.
+		if sbr, ok := registry.(tool.SandboxRegistry); ok {
+			sbr.SetDefaultSandbox(unsandbox.New("default"))
+		}
+
 		// Set up progressive skill discovery from repo and home directories.
 		var discoverers []skills.Discoverer
 		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills"))
@@ -275,7 +290,7 @@ const defaultPrompt = "You are a terminal-based coding assistant. " +
 func makeCurrentPrompt(rdir string, thr *thread.Thread) func() string {
 	return func() string {
 		if roleName, ok := thr.GetMetadata("workshop.role"); ok && roleName != "" {
-			if role, err := loadRole(rdir, roleName); err == nil {
+			if role, err := loadRole(rdir, roleName, nil); err == nil {
 				return role.Prompt
 			}
 		}
@@ -295,10 +310,11 @@ func makeWorkingDirContent(dir string) func() string {
 }
 
 // makeListRolesHandler returns a tool handler that lists available role
-// definitions from the given directory.
+// definitions from the given directory. The sandbox argument is received
+// from the tool framework and passed through to the role I/O layer.
 func makeListRolesHandler(rdir string) tool.ToolFunc {
-	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
-		roles, err := listRoleDefinitions(rdir)
+	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
+		roles, err := listRoleDefinitions(rdir, sb)
 		if err != nil {
 			return nil, err
 		}
@@ -314,14 +330,15 @@ func makeListRolesHandler(rdir string) tool.ToolFunc {
 }
 
 // makeGetCurrentRoleHandler returns a tool handler that returns the currently
-// active role for the given thread.
+// active role for the given thread. The sandbox argument is received from the
+// tool framework and passed through to the role I/O layer.
 func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
-	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
+	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		roleName := "default"
 		if v, ok := thr.GetMetadata("workshop.role"); ok && v != "" {
 			roleName = v
 		}
-		role, err := loadRole(rdir, roleName)
+		role, err := loadRole(rdir, roleName, sb)
 		if err != nil {
 			return map[string]any{
 				"role":           roleName,
@@ -342,14 +359,15 @@ func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 }
 
 // makeSwitchRoleHandler returns a tool handler that validates and switches
-// the active role for the given thread.
+// the active role for the given thread. The sandbox argument is received
+// from the tool framework and passed through to the role I/O layer.
 func makeSwitchRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
-	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
+	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
 			return nil, fmt.Errorf("missing required argument: name")
 		}
-		if _, err := loadRole(rdir, name); err != nil {
+		if _, err := loadRole(rdir, name, sb); err != nil {
 			return nil, fmt.Errorf("role %q not found", name)
 		}
 		thr.SetMetadata("workshop.role", name)

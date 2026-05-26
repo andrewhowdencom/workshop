@@ -1,8 +1,10 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -19,7 +21,7 @@ You are a code reviewer. Focus on bugs.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "reviewer")
+	role, err := loadRole(dir, "reviewer", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -44,7 +46,7 @@ func TestLoadRole_WithoutFrontmatter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "default")
+	role, err := loadRole(dir, "default", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -63,7 +65,7 @@ func TestLoadRole_WithoutFrontmatter(t *testing.T) {
 
 func TestLoadRole_MissingFile(t *testing.T) {
 	dir := t.TempDir()
-	_, err := loadRole(dir, "nonexistent")
+	_, err := loadRole(dir, "nonexistent", nil)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -80,7 +82,7 @@ Just a prompt.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "empty")
+	role, err := loadRole(dir, "empty", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -104,7 +106,7 @@ You are a strategic planner.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "planner")
+	role, err := loadRole(dir, "planner", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -134,7 +136,7 @@ func TestListRoleDefinitions_MultipleFiles(t *testing.T) {
 		}
 	}
 
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -146,7 +148,7 @@ func TestListRoleDefinitions_MultipleFiles(t *testing.T) {
 
 func TestListRoleDefinitions_MissingDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "does-not-exist")
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -164,7 +166,7 @@ func TestListRoleDefinitions_SkipsMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -185,7 +187,7 @@ func TestListRoleDefinitions_SkipsMalformedYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	roles, err := listRoleDefinitions(dir)
+	roles, err := listRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -194,5 +196,108 @@ func TestListRoleDefinitions_SkipsMalformedYAML(t *testing.T) {
 	}
 	if roles[0].Name != "valid" {
 		t.Errorf("role[0].Name = %q, want %q", roles[0].Name, "valid")
+	}
+}
+
+// mockFileSandbox is a test double that implements tool.FileSandbox.
+type mockFileSandbox struct {
+	resolveFunc func(string) (string, error)
+	wd          string
+}
+
+func (m *mockFileSandbox) Name() string { return "mock" }
+
+func (m *mockFileSandbox) ResolvePath(path string) (string, error) {
+	if m.resolveFunc != nil {
+		return m.resolveFunc(path)
+	}
+	return path, nil
+}
+
+func (m *mockFileSandbox) WorkingDirectory() string {
+	if m.wd != "" {
+		return m.wd
+	}
+	return "/mock"
+}
+
+func TestLoadRole_FileSandbox(t *testing.T) {
+	dir := t.TempDir()
+	content := "Prompt from resolved path.\n"
+	resolvedPath := filepath.Join(dir, "resolved.md")
+	if err := os.WriteFile(resolvedPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sb := &mockFileSandbox{
+		resolveFunc: func(path string) (string, error) {
+			if strings.HasSuffix(path, "original.md") {
+				return resolvedPath, nil
+			}
+			return path, nil
+		},
+	}
+
+	role, err := loadRole(dir, "original", sb)
+	if err != nil {
+		t.Fatalf("loadRole error: %v", err)
+	}
+	if role.Prompt != "Prompt from resolved path." {
+		t.Errorf("Prompt = %q, want %q", role.Prompt, "Prompt from resolved path.")
+	}
+}
+
+func TestLoadRole_FileSandboxError(t *testing.T) {
+	sb := &mockFileSandbox{
+		resolveFunc: func(path string) (string, error) {
+			return "", fmt.Errorf("sandbox error")
+		},
+	}
+
+	_, err := loadRole(t.TempDir(), "test", sb)
+	if err == nil {
+		t.Fatal("expected error for sandbox resolve failure")
+	}
+}
+
+func TestListRoleDefinitions_FileSandbox(t *testing.T) {
+	originalDir := t.TempDir()
+	resolvedDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(resolvedDir, "role.md"), []byte("Prompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sb := &mockFileSandbox{
+		resolveFunc: func(path string) (string, error) {
+			if path == originalDir {
+				return resolvedDir, nil
+			}
+			return path, nil
+		},
+	}
+
+	roles, err := listRoleDefinitions(originalDir, sb)
+	if err != nil {
+		t.Fatalf("listRoleDefinitions error: %v", err)
+	}
+	if len(roles) != 1 {
+		t.Fatalf("len(roles) = %d, want 1", len(roles))
+	}
+	if roles[0].Name != "role" {
+		t.Errorf("role[0].Name = %q, want %q", roles[0].Name, "role")
+	}
+}
+
+func TestListRoleDefinitions_FileSandboxError(t *testing.T) {
+	sb := &mockFileSandbox{
+		resolveFunc: func(path string) (string, error) {
+			return "", fmt.Errorf("sandbox error")
+		},
+	}
+
+	_, err := listRoleDefinitions(t.TempDir(), sb)
+	if err == nil {
+		t.Fatal("expected error for sandbox resolve failure")
 	}
 }

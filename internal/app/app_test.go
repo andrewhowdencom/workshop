@@ -475,3 +475,91 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 		t.Errorf("prompt should not contain cwd context when workingDir is empty: %q", text.Content)
 	}
 }
+
+func TestMakeListRolesHandler_SandboxPropagation(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("Prompt A.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var resolveCalled bool
+	sb := &mockFileSandbox{
+		resolveFunc: func(path string) (string, error) {
+			resolveCalled = true
+			return path, nil
+		},
+	}
+
+	handler := makeListRolesHandler(dir)
+	_, err := handler(context.Background(), sb, map[string]any{})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if !resolveCalled {
+		t.Error("handler did not pass sandbox to listRoleDefinitions")
+	}
+}
+
+func TestMakeGetCurrentRoleHandler_SandboxPropagation(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "writer.md"), []byte("---\nname: writer\ndescription: W\n---\nYou write.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.role", "writer")
+
+	var resolveCalled bool
+	sb := &mockFileSandbox{
+		resolveFunc: func(path string) (string, error) {
+			resolveCalled = true
+			return path, nil
+		},
+	}
+
+	handler := makeGetCurrentRoleHandler(dir, thr)
+	_, err = handler(context.Background(), sb, map[string]any{})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if !resolveCalled {
+		t.Error("handler did not pass sandbox to loadRole")
+	}
+}
+
+func TestMakeSwitchRoleHandler_SandboxPropagation(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var resolveCalled bool
+	sb := &mockFileSandbox{
+		resolveFunc: func(path string) (string, error) {
+			resolveCalled = true
+			return path, nil
+		},
+	}
+
+	handler := makeSwitchRoleHandler(dir, thr)
+	_, err = handler(context.Background(), sb, map[string]any{"name": "reviewer"})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if !resolveCalled {
+		t.Error("handler did not pass sandbox to loadRole")
+	}
+}

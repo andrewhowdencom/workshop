@@ -183,6 +183,9 @@ The frontmatter fields are:
 
 Everything after the closing `---` becomes the system prompt body.
 
+> **Note:** Role file loading is sandbox-aware. When a custom `FileSandbox` is
+> configured, role paths are resolved through the sandbox before reading.
+
 **Persistence**
 
 Roles are stored per-thread in thread metadata. When you call
@@ -210,6 +213,15 @@ codebase.
 | `list_roles` | List available role definitions |
 | `get_current_role` | Show the currently active role for this thread |
 | `switch_role` | Switch to a different role by name |
+
+## Security notice
+
+Workshop uses an **unsafe sandbox** by default, which means the `bash` tool can
+execute arbitrary shell commands on the host without isolation. This is
+convenient for local development but must not be used where untrusted code
+could be executed. Replace the default sandbox with a secure implementation
+(e.g., container-based) before running in any production or multi-tenant
+environment.
 
 ## Built with
 
