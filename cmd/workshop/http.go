@@ -40,10 +40,12 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 	}
 
 	pc := app.ProviderConfig{
-		Kind:    viper.GetString("provider.kind"),
-		APIKey:  apiKey,
-		Model:   viper.GetString("provider.model"),
-		BaseURL: viper.GetString("provider.base-url"),
+		Kind:            viper.GetString("provider.kind"),
+		APIKey:          apiKey,
+		Model:           viper.GetString("provider.model"),
+		BaseURL:         viper.GetString("provider.base-url"),
+		Temperature:     viper.GetFloat64("provider.temperature"),
+		ReasoningEffort: viper.GetString("provider.reasoning-effort"),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

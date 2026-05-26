@@ -31,10 +31,12 @@ import (
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
 type ProviderConfig struct {
-	Kind    string // e.g. "openai"
-	APIKey  string
-	Model   string
-	BaseURL string
+	Kind            string  // e.g. "openai"
+	APIKey          string
+	Model           string
+	BaseURL         string
+	Temperature     float64
+	ReasoningEffort string
 }
 
 // config holds the runtime configuration for the application.
@@ -229,6 +231,14 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		mustRegisterRaw(registry, "get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, thr))
 		mustRegisterRaw(registry, "switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, thr))
 
+		invokeOpts := []provider.InvokeOption{openai.WithTools(registry.Tools())}
+		if cfg.provider.Temperature != 0 {
+			invokeOpts = append(invokeOpts, openai.WithTemperature(cfg.provider.Temperature))
+		}
+		if cfg.provider.ReasoningEffort != "" {
+			invokeOpts = append(invokeOpts, openai.WithReasoningEffort(cfg.provider.ReasoningEffort))
+		}
+
 		return loop.New(
 			loop.WithOnEmit(func(ctx context.Context, event loop.OutputEvent) {
 				if tc, ok := event.(loop.TurnCompleteEvent); ok {
@@ -237,7 +247,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			}),
 			loop.WithTransforms(sp, gr),
 			loop.WithHandlers(xtool.NewHandler(registry)),
-			loop.WithInvokeOptions(openai.WithTools(registry.Tools())),
+			loop.WithInvokeOptions(invokeOpts...),
 		), nil
 	}
 

@@ -22,6 +22,8 @@ func init() {
 	rootCmd.PersistentFlags().String("provider.api-key", "", "API key for the provider")
 	rootCmd.PersistentFlags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
 	rootCmd.PersistentFlags().String("provider.base-url", "", "Custom API base URL")
+	rootCmd.PersistentFlags().Float64("provider.temperature", 0, "Sampling temperature for the provider (0 = default)")
+	rootCmd.PersistentFlags().String("provider.reasoning-effort", "", "Reasoning effort for the provider (low, medium, high)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
@@ -89,10 +91,12 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	pc := app.ProviderConfig{
-		Kind:    viper.GetString("provider.kind"),
-		APIKey:  apiKey,
-		Model:   viper.GetString("provider.model"),
-		BaseURL: viper.GetString("provider.base-url"),
+		Kind:            viper.GetString("provider.kind"),
+		APIKey:          apiKey,
+		Model:           viper.GetString("provider.model"),
+		BaseURL:         viper.GetString("provider.base-url"),
+		Temperature:     viper.GetFloat64("provider.temperature"),
+		ReasoningEffort: viper.GetString("provider.reasoning-effort"),
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
