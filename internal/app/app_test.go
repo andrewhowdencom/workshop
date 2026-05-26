@@ -340,6 +340,7 @@ func TestRoleToolSchemas(t *testing.T) {
 
 func TestBuildManager_Smoke(t *testing.T) {
 	mgr, err := buildManager(&config{
+		storeDir: t.TempDir(),
 		provider: ProviderConfig{
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
@@ -356,6 +357,7 @@ func TestBuildManager_Smoke(t *testing.T) {
 
 func TestBuildManager_WithWorkingDir(t *testing.T) {
 	mgr, err := buildManager(&config{
+		storeDir:   t.TempDir(),
 		workingDir: "/test/project",
 		provider: ProviderConfig{
 			Kind:   "openai",
