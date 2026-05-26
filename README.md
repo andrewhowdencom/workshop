@@ -122,8 +122,8 @@ provider:
   api-key: sk-...
   model: gpt-4o
   base-url: ""
-  temperature: 0
-  reasoning-effort: ""
+  temperature: 0          # 0 = provider default; range 0–2 for OpenAI
+  reasoning-effort: ""    # "low", "medium", or "high" for o1 models
 store:
   dir: ""
 http:

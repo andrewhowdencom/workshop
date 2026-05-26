@@ -30,6 +30,8 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	setViperValue(t, "provider.api-key", "test-key")
 	setViperValue(t, "provider.model", "gpt-4o")
 	setViperValue(t, "provider.base-url", "http://test")
+	setViperValue(t, "provider.temperature", "0.7")
+	setViperValue(t, "provider.reasoning-effort", "medium")
 	setViperValue(t, "store.dir", "/tmp/store")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
@@ -66,6 +68,12 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	}
 	if got, want := prov["base-url"], "http://test"; got != want {
 		t.Errorf("provider.base-url = %v, want %v", got, want)
+	}
+	if got, want := prov["temperature"], 0.7; got != want {
+		t.Errorf("provider.temperature = %v, want %v", got, want)
+	}
+	if got, want := prov["reasoning-effort"], "medium"; got != want {
+		t.Errorf("provider.reasoning-effort = %v, want %v", got, want)
 	}
 
 	store, ok := settings["store"].(map[string]interface{})
