@@ -84,19 +84,21 @@ func configureLogging(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runRoot(cmd *cobra.Command, args []string) error {
-	apiKey := viper.GetString("provider.api-key")
-	if apiKey == "" {
-		return fmt.Errorf("api key is required; set --provider.api-key or WORKSHOP_PROVIDER_API_KEY environment variable")
-	}
-
-	pc := app.ProviderConfig{
+func makeProviderConfig() app.ProviderConfig {
+	return app.ProviderConfig{
 		Kind:            viper.GetString("provider.kind"),
-		APIKey:          apiKey,
+		APIKey:          viper.GetString("provider.api-key"),
 		Model:           viper.GetString("provider.model"),
 		BaseURL:         viper.GetString("provider.base-url"),
 		Temperature:     viper.GetFloat64("provider.temperature"),
 		ReasoningEffort: viper.GetString("provider.reasoning-effort"),
+	}
+}
+
+func runRoot(cmd *cobra.Command, args []string) error {
+	pc := makeProviderConfig()
+	if pc.APIKey == "" {
+		return fmt.Errorf("api key is required; set --provider.api-key or WORKSHOP_PROVIDER_API_KEY environment variable")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
