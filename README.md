@@ -51,6 +51,10 @@ go run ./cmd/workshop --thread <uuid>
 
 ### Persistent JSON store
 
+Thread history is persisted by default to `$XDG_DATA_HOME/workshop/threads/`
+(fallback: `~/.local/share/workshop/threads/`). To use a custom storage
+location, set `--store.dir` or `WORKSHOP_STORE_DIR`:
+
 ```bash
 WORKSHOP_STORE_DIR=/tmp/ore-store go run ./cmd/workshop
 ```
@@ -125,7 +129,7 @@ provider:
   temperature: 0          # 0 = provider default; range 0–2 for OpenAI
   reasoning-effort: ""    # "low", "medium", or "high" for o1 models
 store:
-  dir: ""
+  dir: ""              # empty = use $XDG_DATA_HOME/workshop/threads
 http:
   addr: ":8080"
 ```
@@ -144,7 +148,7 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 | `--provider.base-url` | `WORKSHOP_PROVIDER_BASE_URL` | — | Custom API base URL |
 | `--provider.temperature` | `WORKSHOP_PROVIDER_TEMPERATURE` | `0` | Sampling temperature (0 = default) |
 | `--provider.reasoning-effort` | `WORKSHOP_PROVIDER_REASONING_EFFORT` | — | Reasoning effort (low, medium, high) |
-| `--store.dir` | `WORKSHOP_STORE_DIR` | — | Directory for persistent JSON thread storage |
+| `--store.dir` | `WORKSHOP_STORE_DIR` | `$XDG_DATA_HOME/workshop/threads` | Directory for persistent JSON thread storage |
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
