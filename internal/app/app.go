@@ -27,6 +27,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 	unsandbox "github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe"
+	"github.com/adrg/xdg"
 )
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
@@ -62,7 +63,7 @@ func WithProvider(p ProviderConfig) Option {
 }
 
 // WithStoreDir sets the directory for persistent JSON thread storage.
-// If empty, an in-memory store is used.
+// If empty, the default XDG data home path is used.
 func WithStoreDir(dir string) Option {
 	return func(c *config) { c.storeDir = dir }
 }
@@ -147,15 +148,13 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 // buildManager creates the shared session manager from configuration.
 func buildManager(cfg *config) (*session.Manager, error) {
 	// Create thread store.
-	var store thread.Store
-	if cfg.storeDir != "" {
-		var err error
-		store, err = thread.NewJSONStore(cfg.storeDir)
-		if err != nil {
-			return nil, fmt.Errorf("create JSON store: %w", err)
-		}
-	} else {
-		store = thread.NewMemoryStore()
+	storeDir := cfg.storeDir
+	if storeDir == "" {
+		storeDir = filepath.Join(xdg.DataHome, "workshop", "threads")
+	}
+	store, err := thread.NewJSONStore(storeDir)
+	if err != nil {
+		return nil, fmt.Errorf("create JSON store: %w", err)
 	}
 
 	// Build provider from generic config.
