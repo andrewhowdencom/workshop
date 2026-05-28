@@ -4,10 +4,10 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.1.2-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/conduit/http v0.2.3-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.1-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.2.2-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore v0.1.3
+	github.com/andrewhowdencom/ore/x/conduit/http v0.2.4
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.1
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.2.3
 	github.com/andrewhowdencom/ore/x/provider/openai v0.2.2-0.20260526095021-7ee934990e62
 	github.com/andrewhowdencom/ore/x/tool v0.2.2-0.20260526095021-7ee934990e62
 	github.com/andrewhowdencom/ore/x/tool/bash v0.2.1-0.20260526095021-7ee934990e62
@@ -24,7 +24,7 @@ require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
 	charm.land/bubbletea/v2 v2.0.6 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
-	github.com/alecthomas/chroma/v2 v2.25.0 // indirect
+	github.com/alecthomas/chroma/v2 v2.26.0 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -35,7 +35,7 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260525135217-abeec2b8bf0b // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260527151214-009e6338d40d // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
