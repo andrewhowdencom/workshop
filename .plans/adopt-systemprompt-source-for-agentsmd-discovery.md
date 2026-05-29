@@ -25,7 +25,7 @@ Both closures are compatible with `systemprompt.WithContentFunc`.
 - `internal/app/app_test.go` — tests for system prompt behavior, buildManager smoke tests
 - `cmd/workshop/root.go` — TUI/stdio entrypoint; calls `os.Getwd()` and passes via `app.WithWorkingDir(cwd)`
 - `cmd/workshop/http.go` — HTTP entrypoint; same `os.Getwd()` pattern
-- `go.mod` — core `ore` dependency at `v0.1.3`; `x/systemprompt/source` is not yet in any released version
+- `go.mod` — core `ore` dependency updated to `v0.2.0` which includes `x/systemprompt/source`
 
 ## Architectural Blueprint
 
@@ -61,10 +61,10 @@ The `cfg.workingDir` field is already populated from `os.Getwd()` in both `cmd/w
 - **Validation**:
   - `go mod download` succeeds.
   - `go build ./...` compiles without errors.
-- **Details**: The `x/systemprompt/source` package is currently only available in branch `226` (commit `2e98869`) of the ore repo and is **not** present in any released version up to `v0.1.4`. The builder must either:
-  (a) update `go.mod` to a pseudo-version referencing that commit, or
-  (b) coordinate with upstream to merge branch `226` and cut a new release first.
-  After updating the core `ore` module, run `go mod tidy` to refresh `go.sum`.
+- **Details**: The `x/systemprompt/source` package is available in `ore` v0.2.0.
+  Update the core `ore` module to `v0.2.0`, then run `go mod tidy` to refresh
+  `go.sum`. Submodules may also need updating if they reference incompatible
+  core versions — use `go get -u ./...` and verify with `go build ./...`.
 
 ### Task 2: Import and Wire source.AgentsMD into System Prompt Transform
 - **Goal**: Add the `source` import and wire `source.AgentsMD(cfg.workingDir)` into the system prompt transform in `buildManager`.
@@ -111,17 +111,16 @@ The `cfg.workingDir` field is already populated from `os.Getwd()` in both `cmd/w
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
-| `x/systemprompt/source` not yet released in `ore` | **High** — blocks all downstream tasks | **High** | Builder must use a pseudo-version (e.g., `go get github.com/andrewhowdencom/ore@2e98869`) or coordinate upstream merge of branch `226` before starting implementation. Documented in Task 1. |
 | Submodule drift from core ore update | **Medium** — other `ore/x/*` submodules may reference an incompatible core version | **Medium** | After updating core `ore`, run `go mod tidy` and `go get -u ./...` to ensure all `ore` submodules resolve consistently. Verify with `go build ./...`. |
 | Tests fail due to unexpected source.AgentsMD content | **Low** — existing tests use direct `systemprompt.New` construction, not `buildManager` | **Low** | `TestSystemPrompt_WithCWD` and `TestSystemPrompt_WithoutCWD` manually construct the transform; they are unaffected by `buildManager` changes. Smoke tests (`TestBuildManager_*`) only verify manager creation, not prompt content. |
 | Working directory is empty (`os.Getwd()` fails) | **Low** — `source.AgentsMD("")` will walk from current directory; `makeWorkingDirContent("")` already handles this by returning empty string | **Low** | `source.AgentsMD` handles empty startDir gracefully (will use `.` effectively). No code change needed. |
 
 ## Validation Criteria
 
-- [ ] `go.mod` references a version of `github.com/andrewhowdencom/ore` that includes `x/systemprompt/source`.
-- [ ] `internal/app/app.go` imports `github.com/andrewhowdencom/ore/x/systemprompt/source`.
-- [ ] `buildManager` passes `source.AgentsMD(cfg.workingDir)` as a `systemprompt.WithContentFunc` alongside existing closures.
-- [ ] `makeCurrentPrompt` and `makeWorkingDirContent` are preserved (not removed).
-- [ ] `go test ./...` passes.
-- [ ] `go vet ./...` is clean.
-- [ ] `go build ./...` succeeds for all commands (`workshop`, `workshop http`).
+- [x] `go.mod` references a version of `github.com/andrewhowdencom/ore` that includes `x/systemprompt/source`.
+- [x] `internal/app/app.go` imports `github.com/andrewhowdencom/ore/x/systemprompt/source`.
+- [x] `buildManager` passes `source.AgentsMD(cfg.workingDir)` as a `systemprompt.WithContentFunc` alongside existing closures.
+- [x] `makeCurrentPrompt` and `makeWorkingDirContent` are preserved (not removed).
+- [x] `go test ./...` passes.
+- [x] `go vet ./...` is clean.
+- [x] `go build ./...` succeeds for all commands (`workshop`, `workshop http`).
