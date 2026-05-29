@@ -25,6 +25,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/guardrails"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
+	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	xtool "github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
@@ -189,6 +190,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			// skills (name + description) on every turn, triggering pattern-
 			// driven activation rather than proactive exploration.
 			systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
+			systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
