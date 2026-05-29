@@ -444,9 +444,14 @@ func TestBuildManager_Smoke(t *testing.T) {
 }
 
 func TestBuildManager_WithWorkingDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("project instructions"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	mgr, err := buildManager(&config{
 		storeDir:   t.TempDir(),
-		workingDir: "/test/project",
+		workingDir: dir,
 		provider: ProviderConfig{
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
@@ -932,6 +937,184 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 	}
 	if childIdx != -1 && parentIdx != -1 && childIdx > parentIdx {
 		t.Errorf("child instructions should appear before parent claude (nearest-first); child at %d, parent at %d", childIdx, parentIdx)
+	}
+}
+
+func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("repo instructions"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config{
+		workingDir: dir,
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test",
+			Model:  "test-model",
+		},
+	}
+
+	sp, err := makeSystemPromptTransform(cfg, thr)
+	if err != nil {
+		t.Fatalf("makeSystemPromptTransform error: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
+	}
+	if turns[0].Role != state.RoleSystem {
+		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
+	}
+	if len(turns[0].Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(turns[0].Artifacts))
+	}
+
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	// Verify all expected fragments are present.
+	if !strings.Contains(text.Content, defaultPrompt) {
+		t.Errorf("prompt does not contain default prompt: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "You are running in:") {
+		t.Errorf("prompt does not contain cwd context: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "repo instructions") {
+		t.Errorf("prompt does not contain AGENTS.md content: %q", text.Content)
+	}
+
+	// Verify ordering: defaultPrompt < cwd context < agents content.
+	defaultIdx := strings.Index(text.Content, defaultPrompt)
+	cwdIdx := strings.Index(text.Content, "You are running in:")
+	agentsIdx := strings.Index(text.Content, "repo instructions")
+	if defaultIdx == -1 || cwdIdx == -1 || agentsIdx == -1 {
+		t.Fatalf("expected all fragments in prompt; default=%d cwd=%d agents=%d", defaultIdx, cwdIdx, agentsIdx)
+	}
+	if !(defaultIdx < cwdIdx && cwdIdx < agentsIdx) {
+		t.Errorf("fragment ordering incorrect; expected default < cwd < agents, got default=%d cwd=%d agents=%d", defaultIdx, cwdIdx, agentsIdx)
+	}
+}
+
+func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.MkdirAll(child, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "AGENTS.md"), []byte("child instructions"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "CLAUDE.md"), []byte("parent claude"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config{
+		workingDir: child,
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test",
+			Model:  "test-model",
+		},
+	}
+
+	sp, err := makeSystemPromptTransform(cfg, thr)
+	if err != nil {
+		t.Fatalf("makeSystemPromptTransform error: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	childIdx := strings.Index(text.Content, "child instructions")
+	parentIdx := strings.Index(text.Content, "parent claude")
+	if childIdx == -1 {
+		t.Errorf("prompt does not contain child AGENTS.md content")
+	}
+	if parentIdx == -1 {
+		t.Errorf("prompt does not contain parent CLAUDE.md content")
+	}
+	if childIdx != -1 && parentIdx != -1 && childIdx > parentIdx {
+		t.Errorf("child instructions should appear before parent claude (nearest-first); child at %d, parent at %d", childIdx, parentIdx)
+	}
+}
+
+func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
+	dir := t.TempDir() // empty directory, no AGENTS.md or CLAUDE.md
+
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config{
+		workingDir: dir,
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test",
+			Model:  "test-model",
+		},
+	}
+
+	sp, err := makeSystemPromptTransform(cfg, thr)
+	if err != nil {
+		t.Fatalf("makeSystemPromptTransform error: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	// Should contain default prompt and cwd context but no agents-derived content.
+	if !strings.Contains(text.Content, defaultPrompt) {
+		t.Errorf("prompt does not contain default prompt: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "You are running in:") {
+		t.Errorf("prompt does not contain cwd context: %q", text.Content)
+	}
+	// Verify the prompt does not end with a stray separator that would indicate
+	// an empty third content source was still concatenated.
+	if strings.HasSuffix(text.Content, "\n\n") {
+		t.Errorf("prompt should not end with blank separator when no agents files exist: %q", text.Content)
 	}
 }
 
