@@ -168,12 +168,21 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// Resolve the roles directory once for this step.
 		rdir := roleDir()
 
+		// Set up progressive skill discovery from repo and home directories.
+		var discoverers []skills.Discoverer
+		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills"))
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			discoverers = append(discoverers, skills.NewFSDiscoverer(filepath.Join(homeDir, ".agents", "skills")))
+		}
+		skillsToolkit := skills.NewToolkit(discoverers...)
+
 		// Build dynamic system prompt that reads from thread metadata.
 		currentPrompt := makeCurrentPrompt(rdir, thr)
 
 		sp, err := systemprompt.New(
 			systemprompt.WithContentFunc(currentPrompt),
 			systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
+			systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
@@ -207,13 +216,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			sbr.SetDefaultSandbox(unsandbox.New("default"))
 		}
 
-		// Set up progressive skill discovery from repo and home directories.
-		var discoverers []skills.Discoverer
-		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills"))
-		if homeDir, err := os.UserHomeDir(); err == nil {
-			discoverers = append(discoverers, skills.NewFSDiscoverer(filepath.Join(homeDir, ".agents", "skills")))
-		}
-		skillsToolkit := skills.NewToolkit(discoverers...)
+		// Register skills toolkit tools into the registry.
 		if err := skillsToolkit.Register(registry); err != nil {
 			return nil, fmt.Errorf("register skills toolkit: %w", err)
 		}
@@ -295,7 +298,7 @@ func mustRegisterRaw(registry tool.Registry, name, description string, schema ma
 const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"You help users write, review, refactor, and debug code across any language or framework. " +
 	"You have access to filesystem tools (read_file, write_file, edit_file, list_directory, search_files) and a bash tool for running shell commands. " +
-	"You also have access to skills tools (list_skills, read_skill, search_skills) that let you discover and load specialized instructions for specific tasks. " +
+	"When your task matches a skill description below, call read_skill to load its detailed instructions before proceeding. " +
 	"Use these tools proactively to explore the codebase, make changes, run tests, and verify your work. " +
 	"Prefer concise explanations and actionable suggestions.\n\n" +
 	"# Engineering Intuition Defaults\n\n" +
