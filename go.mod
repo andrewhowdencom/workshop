@@ -4,16 +4,16 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.1.3
-	github.com/andrewhowdencom/ore/x/conduit/http v0.2.4
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.1
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.2.3
-	github.com/andrewhowdencom/ore/x/provider/openai v0.2.2-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/tool v0.2.2-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/tool/bash v0.2.1-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.2-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.1-0.20260526095021-7ee934990e62
-	github.com/andrewhowdencom/ore/x/tool/skills v0.2.1-0.20260526095021-7ee934990e62
+	github.com/andrewhowdencom/ore v0.2.0
+	github.com/andrewhowdencom/ore/x/conduit/http v0.3.0
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.2
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.3.0
+	github.com/andrewhowdencom/ore/x/provider/openai v0.2.1
+	github.com/andrewhowdencom/ore/x/tool v0.3.0
+	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.1
+	github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.0
+	github.com/andrewhowdencom/ore/x/tool/skills v0.3.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/term v0.43.0
@@ -24,8 +24,8 @@ require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
 	charm.land/bubbletea/v2 v2.0.6 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
-	github.com/alecthomas/chroma/v2 v2.26.0 // indirect
-	github.com/andrewhowdencom/ore/x/conduit v0.1.1 // indirect
+	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
+	github.com/andrewhowdencom/ore/x/conduit v0.1.2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -41,14 +41,14 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/dlclark/regexp2/v2 v2.1.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/mattn/go-runewidth v0.0.23 // indirect
+	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect

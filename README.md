@@ -208,6 +208,35 @@ the AI knows which project directory it is operating in. This helps the
 assistant resolve relative paths correctly and proactively explore the
 codebase.
 
+### Project-level instructions
+
+Workshop automatically discovers `AGENTS.md` and `CLAUDE.md` instruction
+files in the working directory and its ancestors, injecting their contents
+into the system prompt on every turn. Files are discovered nearest-first
+(child directories before parent directories) and concatenated with blank
+lines between them. If no files are found, no extra content is injected.
+
+This lets you commit repository-wide guidance alongside your code. Create
+an `AGENTS.md` or `CLAUDE.md` in your project root:
+
+```markdown
+# Project Conventions
+
+- Use table-driven tests with sub-tests.
+- Prefer `fmt.Errorf("...: %w", err)` for error wrapping.
+- Run `go test -race ./...` before committing.
+```
+
+Or place one in a subdirectory for package-specific rules:
+
+```bash
+# API package conventions
+cat > api/CLAUDE.md << 'EOF'
+- All handlers must implement the HandlerFunc type.
+- Use structured logging via slog.
+EOF
+```
+
 ## Available tools
 
 | Tool | Description |
