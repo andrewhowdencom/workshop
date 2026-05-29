@@ -221,6 +221,9 @@ codebase.
 | `list_roles` | List available role definitions |
 | `get_current_role` | Show the currently active role for this thread |
 | `switch_role` | Switch to a different role by name |
+| `workspace_create` | Create a new git worktree for isolated development |
+| `workspace_destroy` | Remove the git worktree created in this session |
+| `git_commit` | Commit staged changes with automatic co-author attribution |
 
 ## Security notice
 
