@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/thread"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
+	"github.com/andrewhowdencom/ore/x/tool/skills"
 )
 
 func TestNewProvider_MissingAPIKey(t *testing.T) {
@@ -60,6 +62,12 @@ func TestMakeCurrentPrompt_Fallback(t *testing.T) {
 	got := fn()
 	if got != defaultPrompt {
 		t.Errorf("prompt = %q, want defaultPrompt", got)
+	}
+}
+
+func TestDefaultPrompt_ContainsBehavioralDirective(t *testing.T) {
+	if !strings.Contains(defaultPrompt, "When your task matches a skill description below") {
+		t.Error("defaultPrompt missing behavioral directive for skills")
 	}
 }
 
@@ -870,5 +878,253 @@ func TestMakeSwitchRoleHandler_SandboxPropagation(t *testing.T) {
 
 	if !resolveCalled {
 		t.Error("handler did not pass sandbox to loadRole")
+	}
+}
+
+// mockSkillDiscoverer is a test double for skills.Discoverer.
+type mockSkillDiscoverer struct {
+	meta []skills.SkillMeta
+	read map[string]string
+}
+
+func (m *mockSkillDiscoverer) Discover(ctx context.Context) ([]skills.SkillMeta, error) {
+	return m.meta, nil
+}
+
+func (m *mockSkillDiscoverer) Read(ctx context.Context, name string) (string, error) {
+	return m.read[name], nil
+}
+
+func TestSystemPrompt_WithSkillsFragment(t *testing.T) {
+	mock := &mockSkillDiscoverer{
+		meta: []skills.SkillMeta{
+			{Name: "git", Description: "Guidelines for git operations"},
+			{Name: "testing", Description: "Testing best practices"},
+		},
+	}
+
+	tk := skills.NewToolkit(mock)
+	sp, err := systemprompt.New(
+		systemprompt.WithContentFunc(func() string { return "Base prompt." }),
+		systemprompt.WithContextContentFunc(tk.SystemPromptFragment()),
+	)
+	if err != nil {
+		t.Fatalf("create system prompt: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
+	}
+	if turns[0].Role != state.RoleSystem {
+		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
+	}
+	if len(turns[0].Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(turns[0].Artifacts))
+	}
+
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	if !strings.Contains(text.Content, "git") {
+		t.Errorf("prompt does not contain skill 'git': %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "testing") {
+		t.Errorf("prompt does not contain skill 'testing': %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "You have access to the following specialized skills") {
+		t.Errorf("prompt does not contain skills fragment header: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "Use read_skill") {
+		t.Errorf("prompt does not contain read_skill directive: %q", text.Content)
+	}
+}
+
+func TestSystemPrompt_WithoutSkillsFragment(t *testing.T) {
+	mock := &mockSkillDiscoverer{
+		meta: []skills.SkillMeta{},
+	}
+
+	tk := skills.NewToolkit(mock)
+	sp, err := systemprompt.New(
+		systemprompt.WithContentFunc(func() string { return "Base prompt." }),
+		systemprompt.WithContextContentFunc(tk.SystemPromptFragment()),
+	)
+	if err != nil {
+		t.Fatalf("create system prompt: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
+	}
+	if turns[0].Role != state.RoleSystem {
+		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
+	}
+	if len(turns[0].Artifacts) != 1 {
+		t.Fatalf("expected 1 artifact, got %d", len(turns[0].Artifacts))
+	}
+
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	if strings.Contains(text.Content, "You have access to the following specialized skills") {
+		t.Errorf("prompt should not contain skills fragment header when no skills: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "Base prompt.") {
+		t.Errorf("prompt should contain base prompt: %q", text.Content)
+	}
+}
+
+// mockSkillDiscovererError always returns an error from Discover.
+type mockSkillDiscovererError struct{}
+
+func (m *mockSkillDiscovererError) Discover(ctx context.Context) ([]skills.SkillMeta, error) {
+	return nil, fmt.Errorf("simulated discoverer error")
+}
+
+func (m *mockSkillDiscovererError) Read(ctx context.Context, name string) (string, error) {
+	return "", fmt.Errorf("simulated read error")
+}
+
+func TestSystemPrompt_WithSkillsFragmentError(t *testing.T) {
+	mock := &mockSkillDiscovererError{}
+	tk := skills.NewToolkit(mock)
+	sp, err := systemprompt.New(
+		systemprompt.WithContentFunc(func() string { return "Base prompt." }),
+		systemprompt.WithContextContentFunc(tk.SystemPromptFragment()),
+	)
+	if err != nil {
+		t.Fatalf("create system prompt: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
+	}
+
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	// Fragment should be omitted on error; only base prompt remains.
+	if strings.Contains(text.Content, "You have access to the following specialized skills") {
+		t.Errorf("prompt should not contain skills fragment header when discoverer errors: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "Base prompt.") {
+		t.Errorf("prompt should contain base prompt: %q", text.Content)
+	}
+}
+
+func TestSystemPrompt_WithCWDAndSkillsFragment(t *testing.T) {
+	mock := &mockSkillDiscoverer{
+		meta: []skills.SkillMeta{
+			{Name: "git", Description: "Guidelines for git operations"},
+		},
+	}
+
+	tk := skills.NewToolkit(mock)
+	sp, err := systemprompt.New(
+		systemprompt.WithContentFunc(func() string { return "Base prompt." }),
+		systemprompt.WithContentFunc(func() string { return "You are running in: /test/project." }),
+		systemprompt.WithContextContentFunc(tk.SystemPromptFragment()),
+	)
+	if err != nil {
+		t.Fatalf("create system prompt: %v", err)
+	}
+
+	base := &state.Buffer{}
+	result, err := sp.Transform(context.Background(), base)
+	if err != nil {
+		t.Fatalf("transform error: %v", err)
+	}
+
+	turns := result.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
+	}
+
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	if !ok {
+		t.Fatalf("expected artifact.Text, got %T", turns[0].Artifacts[0])
+	}
+
+	// Verify all three fragments are present.
+	content := text.Content
+	if !strings.Contains(content, "Base prompt.") {
+		t.Errorf("prompt does not contain base prompt: %q", content)
+	}
+	if !strings.Contains(content, "You are running in: /test/project.") {
+		t.Errorf("prompt does not contain working dir content: %q", content)
+	}
+	if !strings.Contains(content, "git") {
+		t.Errorf("prompt does not contain skill 'git': %q", content)
+	}
+	if !strings.Contains(content, "You have access to the following specialized skills") {
+		t.Errorf("prompt does not contain skills fragment header: %q", content)
+	}
+
+	// Verify ordering: base prompt < working dir < skills fragment.
+	baseIdx := strings.Index(content, "Base prompt.")
+	cwdIdx := strings.Index(content, "You are running in:")
+	skillsIdx := strings.Index(content, "You have access to the following specialized skills")
+	if baseIdx == -1 || cwdIdx == -1 || skillsIdx == -1 {
+		t.Fatalf("missing expected fragments in prompt")
+	}
+	if !(baseIdx < cwdIdx && cwdIdx < skillsIdx) {
+		t.Errorf("fragment ordering incorrect: base=%d cwd=%d skills=%d", baseIdx, cwdIdx, skillsIdx)
+	}
+}
+
+func TestSkillsFragment_RealFSDiscoverer(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "skills")
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	skillContent := "---\nname: git\ndescription: Guidelines for git operations\n---\n\nGit skill content.\n"
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	discoverer := skills.NewFSDiscoverer(skillDir)
+	tk := skills.NewToolkit(discoverer)
+
+	fragment := tk.SystemPromptFragment()(context.Background())
+	if fragment == "" {
+		t.Fatal("expected non-empty fragment from real FS discoverer")
+	}
+	if !strings.Contains(fragment, "git") {
+		t.Errorf("fragment does not contain skill name 'git': %q", fragment)
+	}
+	if !strings.Contains(fragment, "Guidelines for git operations") {
+		t.Errorf("fragment does not contain skill description: %q", fragment)
+	}
+	if !strings.Contains(fragment, "Use read_skill") {
+		t.Errorf("fragment does not contain read_skill directive: %q", fragment)
 	}
 }
