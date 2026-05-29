@@ -182,6 +182,9 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		sp, err := systemprompt.New(
 			systemprompt.WithContentFunc(currentPrompt),
 			systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
+			// Inject the skills catalog fragment so the LLM sees available
+			// skills (name + description) on every turn, triggering pattern-
+			// driven activation rather than proactive exploration.
 			systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		)
 		if err != nil {
