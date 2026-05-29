@@ -2,6 +2,14 @@
 // assistant. It wires together the ore framework's TUI conduit, HTTP web UI
 // conduit, system prompt transforms, guardrails, and tool registry to create
 // an interactive coding agent.
+//
+// The system prompt is composed dynamically from three sources:
+//
+//  1. The active role definition (or a default prompt if none is set).
+//  2. A contextual sentence describing the current working directory.
+//  3. Repository-level instructions discovered by walking parent directories
+//     from the working directory toward the root, collecting AGENTS.md and
+//     CLAUDE.md files nearest-first.
 package app
 
 import (
@@ -180,18 +188,8 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		}
 		skillsToolkit := skills.NewToolkit(discoverers...)
 
-		// Build dynamic system prompt that reads from thread metadata.
-		currentPrompt := makeCurrentPrompt(rdir, thr)
-
-		sp, err := systemprompt.New(
-			systemprompt.WithContentFunc(currentPrompt),
-			systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
-			// Inject the skills catalog fragment so the LLM sees available
-			// skills (name + description) on every turn, triggering pattern-
-			// driven activation rather than proactive exploration.
-			systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
-			systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
-		)
+		// Build the composable system prompt transform.
+		sp, err := makeSystemPromptTransform(cfg, thr, skillsToolkit)
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -268,6 +266,29 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 	// Create session manager with the ReAct cognitive pattern.
 	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor()), nil
+}
+
+// makeSystemPromptTransform builds the composable system prompt transform for
+// a given configuration and thread. It concatenates four content sources:
+//
+//  1. The active role prompt (or defaultPrompt if no role is set).
+//  2. A contextual sentence describing the current working directory.
+//  3. The skills catalog fragment showing available skills to the LLM.
+//  4. Repository-level instructions discovered by walking parent directories
+//     from cfg.workingDir toward the root, collecting AGENTS.md and
+//     CLAUDE.md files nearest-first.
+//
+// The resulting transform is passed to loop.Step via loop.WithTransforms.
+func makeSystemPromptTransform(cfg *config, thr *thread.Thread, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
+	rdir := roleDir()
+	currentPrompt := makeCurrentPrompt(rdir, thr)
+
+	return systemprompt.New(
+		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
+		systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
+		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
+	)
 }
 
 // newProvider constructs a provider.Provider from generic ProviderConfig.
