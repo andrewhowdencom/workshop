@@ -961,7 +961,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		},
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr)
+	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -999,7 +999,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		t.Errorf("prompt does not contain AGENTS.md content: %q", text.Content)
 	}
 
-	// Verify ordering: defaultPrompt < cwd context < agents content.
+	// Verify ordering: defaultPrompt < cwd context < agents.
 	defaultIdx := strings.Index(text.Content, defaultPrompt)
 	cwdIdx := strings.Index(text.Content, "You are running in:")
 	agentsIdx := strings.Index(text.Content, "repo instructions")
@@ -1039,7 +1039,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		},
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr)
+	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1087,7 +1087,7 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 		},
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr)
+	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1265,10 +1265,10 @@ func TestSystemPrompt_WithSkillsFragment(t *testing.T) {
 	if !strings.Contains(text.Content, "testing") {
 		t.Errorf("prompt does not contain skill 'testing': %q", text.Content)
 	}
-	if !strings.Contains(text.Content, "You have access to the following specialized skills") {
-		t.Errorf("prompt does not contain skills fragment header: %q", text.Content)
+	if !strings.Contains(text.Content, "When your task matches a skill description below") {
+		t.Errorf("prompt does not contain skills fragment directive: %q", text.Content)
 	}
-	if !strings.Contains(text.Content, "Use read_skill") {
+	if !strings.Contains(text.Content, "call read_skill") {
 		t.Errorf("prompt does not contain read_skill directive: %q", text.Content)
 	}
 }
@@ -1408,14 +1408,14 @@ func TestSystemPrompt_WithCWDAndSkillsFragment(t *testing.T) {
 	if !strings.Contains(content, "git") {
 		t.Errorf("prompt does not contain skill 'git': %q", content)
 	}
-	if !strings.Contains(content, "You have access to the following specialized skills") {
-		t.Errorf("prompt does not contain skills fragment header: %q", content)
+	if !strings.Contains(content, "When your task matches a skill description below") {
+		t.Errorf("prompt does not contain skills fragment directive: %q", content)
 	}
 
 	// Verify ordering: base prompt < working dir < skills fragment.
 	baseIdx := strings.Index(content, "Base prompt.")
 	cwdIdx := strings.Index(content, "You are running in:")
-	skillsIdx := strings.Index(content, "You have access to the following specialized skills")
+	skillsIdx := strings.Index(content, "When your task matches a skill description below")
 	if baseIdx == -1 || cwdIdx == -1 || skillsIdx == -1 {
 		t.Fatalf("missing expected fragments in prompt")
 	}
@@ -1449,7 +1449,7 @@ func TestSkillsFragment_RealFSDiscoverer(t *testing.T) {
 	if !strings.Contains(fragment, "Guidelines for git operations") {
 		t.Errorf("fragment does not contain skill description: %q", fragment)
 	}
-	if !strings.Contains(fragment, "Use read_skill") {
+	if !strings.Contains(fragment, "call read_skill") {
 		t.Errorf("fragment does not contain read_skill directive: %q", fragment)
 	}
 }
