@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -321,6 +322,84 @@ func TestRoleToolSchemas(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:   "createWorkspaceSchema",
+			schema: createWorkspaceSchema,
+			checks: func(t *testing.T, schema map[string]any) {
+				if schema["type"] != "object" {
+					t.Errorf("type = %v, want object", schema["type"])
+				}
+				props, ok := schema["properties"].(map[string]any)
+				if !ok {
+					t.Fatal("missing properties")
+				}
+				if _, ok := props["branch"]; !ok {
+					t.Fatal("missing branch property")
+				}
+				if _, ok := props["base_branch"]; !ok {
+					t.Fatal("missing base_branch property")
+				}
+				reqRaw, ok := schema["required"].([]interface{})
+				if !ok {
+					t.Fatalf("required is not an array: %T", schema["required"])
+				}
+				found := false
+				for _, r := range reqRaw {
+					if s, ok := r.(string); ok && s == "branch" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("required does not contain 'branch': %v", reqRaw)
+				}
+			},
+		},
+		{
+			name:   "destroyWorkspaceSchema",
+			schema: destroyWorkspaceSchema,
+			checks: func(t *testing.T, schema map[string]any) {
+				if schema["type"] != "object" {
+					t.Errorf("type = %v, want object", schema["type"])
+				}
+				if _, ok := schema["properties"]; ok {
+					t.Error("destroyWorkspaceSchema should have no properties")
+				}
+			},
+		},
+		{
+			name:   "gitCommitSchema",
+			schema: gitCommitSchema,
+			checks: func(t *testing.T, schema map[string]any) {
+				if schema["type"] != "object" {
+					t.Errorf("type = %v, want object", schema["type"])
+				}
+				props, ok := schema["properties"].(map[string]any)
+				if !ok {
+					t.Fatal("missing properties")
+				}
+				if _, ok := props["title"]; !ok {
+					t.Fatal("missing title property")
+				}
+				if _, ok := props["message"]; !ok {
+					t.Fatal("missing message property")
+				}
+				reqRaw, ok := schema["required"].([]interface{})
+				if !ok {
+					t.Fatalf("required is not an array: %T", schema["required"])
+				}
+				found := false
+				for _, r := range reqRaw {
+					if s, ok := r.(string); ok && s == "title" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("required does not contain 'title': %v", reqRaw)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -370,6 +449,234 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 	}
 	if mgr == nil {
 		t.Fatal("buildManager returned nil manager")
+	}
+}
+
+func TestCoAuthoredByTrailer(t *testing.T) {
+	tests := []struct {
+		name string
+		pc   ProviderConfig
+		want string
+	}{
+		{
+			name: "simple model",
+			pc:   ProviderConfig{Kind: "openai", Model: "gpt-4o"},
+			want: "Co-authored-by: gpt-4o <gpt-4o@workshop.agent>",
+		},
+		{
+			name: "provider prefix stripped",
+			pc:   ProviderConfig{Kind: "fireworks", Model: "fireworks/kimi-k2p6"},
+			want: "Co-authored-by: fireworks/kimi-k2p6 <kimi-k2p6@workshop.agent>",
+		},
+		{
+			name: "claude model",
+			pc:   ProviderConfig{Kind: "anthropic", Model: "claude-3-5-sonnet"},
+			want: "Co-authored-by: claude-3-5-sonnet <claude-3-5-sonnet@workshop.agent>",
+		},
+		{
+			name: "empty model",
+			pc:   ProviderConfig{Kind: "openai", Model: ""},
+			want: "",
+		},
+		{
+			name: "empty kind",
+			pc:   ProviderConfig{Kind: "", Model: "gpt-4o"},
+			want: "",
+		},
+		{
+			name: "multiple slashes",
+			pc:   ProviderConfig{Kind: "custom", Model: "a/b/c/model"},
+			want: "Co-authored-by: a/b/c/model <model@workshop.agent>",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := coAuthoredByTrailer(tt.pc)
+			if got != tt.want {
+				t.Errorf("coAuthoredByTrailer() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := makeWorkspaceCreateHandler(thr)
+	_, err = handler(context.Background(), nil, map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for missing branch")
+	}
+}
+
+func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := makeWorkspaceDestroyHandler(thr)
+	_, err = handler(context.Background(), nil, map[string]any{})
+	if err == nil {
+		t.Fatal("expected error when no worktree was created")
+	}
+	if !strings.Contains(err.Error(), "no worktree") {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestMakeGitCommitHandler_MissingTitle(t *testing.T) {
+	handler := makeGitCommitHandler(ProviderConfig{Kind: "openai", Model: "gpt-4o"})
+	_, err := handler(context.Background(), nil, map[string]any{})
+	if err == nil {
+		t.Fatal("expected error for missing title")
+	}
+	_, err = handler(context.Background(), nil, map[string]any{"title": "   "})
+	if err == nil {
+		t.Fatal("expected error for empty/whitespace title")
+	}
+}
+
+func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available in test environment")
+	}
+
+	dir := t.TempDir()
+	if err := exec.Command("git", "init", dir).Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", dir, "add", ".").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "commit", "-m", "initial").Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	store := thread.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	// Create worktree.
+	createHandler := makeWorkspaceCreateHandler(thr)
+	result, err := createHandler(context.Background(), nil, map[string]any{"branch": "feature"})
+	if err != nil {
+		t.Fatalf("workspace_create failed: %v", err)
+	}
+	path, ok := result.(string)
+	if !ok || path == "" {
+		t.Fatalf("unexpected result type: %T", result)
+	}
+
+	// Verify metadata stored.
+	meta, ok := thr.GetMetadata("workshop.worktree.path")
+	if !ok || meta != path {
+		t.Fatalf("metadata = %q, want %q", meta, path)
+	}
+
+	// Verify worktree directory exists.
+	wtPath := filepath.Join(dir, path)
+	if _, err := os.Stat(wtPath); err != nil {
+		t.Fatalf("worktree directory does not exist: %v", err)
+	}
+
+	// Destroy worktree.
+	destroyHandler := makeWorkspaceDestroyHandler(thr)
+	_, err = destroyHandler(context.Background(), nil, map[string]any{})
+	if err != nil {
+		t.Fatalf("workspace_destroy failed: %v", err)
+	}
+
+	// Verify metadata cleared.
+	meta, ok = thr.GetMetadata("workshop.worktree.path")
+	if ok && meta != "" {
+		t.Fatalf("metadata should be cleared, got %q", meta)
+	}
+
+	// Verify worktree directory removed.
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory should not exist: %v", err)
+	}
+}
+
+func TestMakeGitCommitHandler_Integration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available in test environment")
+	}
+
+	dir := t.TempDir()
+	if err := exec.Command("git", "init", dir).Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.email", "test@example.com").Run(); err != nil {
+		t.Fatalf("git config: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.name", "Test").Run(); err != nil {
+		t.Fatalf("git config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", dir, "add", ".").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "commit", "-m", "initial").Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	// Modify and stage a file.
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("world"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", dir, "add", "file.txt").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+
+	// Run handler in the temp repo.
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWd)
+
+	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
+	handler := makeGitCommitHandler(pc)
+	_, err = handler(context.Background(), nil, map[string]any{"title": "Update greeting", "message": "Changed text"})
+	if err != nil {
+		t.Fatalf("git_commit failed: %v", err)
+	}
+
+	// Verify commit contains trailer.
+	out, err := exec.Command("git", "-C", dir, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	wantTrailer := "Co-authored-by: gpt-4o <gpt-4o@workshop.agent>"
+	if !strings.Contains(string(out), wantTrailer) {
+		t.Errorf("commit message missing trailer:\n%s", string(out))
+	}
+	if !strings.Contains(string(out), "Changed text") {
+		t.Errorf("commit message missing body:\n%s", string(out))
 	}
 }
 

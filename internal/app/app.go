@@ -5,10 +5,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
@@ -230,6 +233,11 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		mustRegisterRaw(registry, "get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, thr))
 		mustRegisterRaw(registry, "switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, thr))
 
+		// Workspace and git tools.
+		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(thr))
+		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this session.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(thr))
+		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(cfg.provider))
+
 		invokeOpts := []provider.InvokeOption{openai.WithTools(registry.Tools())}
 		if cfg.provider.Temperature != 0 {
 			invokeOpts = append(invokeOpts, openai.WithTemperature(cfg.provider.Temperature))
@@ -298,6 +306,8 @@ const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"You also have access to skills tools (list_skills, read_skill, search_skills) that let you discover and load specialized instructions for specific tasks. " +
 	"Use these tools proactively to explore the codebase, make changes, run tests, and verify your work. " +
 	"Prefer concise explanations and actionable suggestions.\n\n" +
+	"You also have access to workspace management tools (`workspace_create`, `workspace_destroy`) for isolated git worktrees, " +
+	"and a `git_commit` tool that automatically appends co-author attribution.\n\n" +
 	"# Engineering Intuition Defaults\n\n" +
 	"When reasoning about code changes, default to these heuristics:\n\n" +
 	"1. Simplicity is the highest good. If two approaches solve the same problem, choose the simpler one. " +
@@ -399,4 +409,108 @@ func makeSwitchRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 		thr.SetMetadata("workshop.role", name)
 		return fmt.Sprintf("Switched to role: %s", name), nil
 	}
+}
+
+// makeWorkspaceCreateHandler returns a tool handler that creates a new git
+// worktree under .worktrees/<branch> and stores its path in thread metadata.
+func makeWorkspaceCreateHandler(thr *thread.Thread) tool.ToolFunc {
+	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
+		branch, ok := args["branch"].(string)
+		if !ok || branch == "" {
+			return nil, fmt.Errorf("missing required argument: branch")
+		}
+
+		// Check if branch already exists.
+		if err := exec.CommandContext(ctx, "git", "rev-parse", "--verify", branch).Run(); err == nil {
+			return nil, fmt.Errorf("branch %q already exists", branch)
+		}
+
+		path := filepath.Join(".worktrees", branch)
+
+		cmdArgs := []string{"worktree", "add", "-b", branch, path}
+		if base, ok := args["base_branch"].(string); ok && base != "" {
+			cmdArgs = append(cmdArgs, base)
+		}
+
+		cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("git worktree add failed: %w\n%s", err, out.String())
+		}
+
+		thr.SetMetadata("workshop.worktree.path", path)
+		return path, nil
+	}
+}
+
+// makeWorkspaceDestroyHandler returns a tool handler that removes the worktree
+// stored in thread metadata and clears the metadata key.
+func makeWorkspaceDestroyHandler(thr *thread.Thread) tool.ToolFunc {
+	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
+		path, ok := thr.GetMetadata("workshop.worktree.path")
+		if !ok || path == "" {
+			return nil, fmt.Errorf("no worktree was created in this session")
+		}
+
+		cmd := exec.CommandContext(ctx, "git", "worktree", "remove", path)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("git worktree remove failed: %w\n%s", err, out.String())
+		}
+
+		thr.SetMetadata("workshop.worktree.path", "")
+		return fmt.Sprintf("Worktree %q removed", path), nil
+	}
+}
+
+// makeGitCommitHandler returns a tool handler that commits staged changes with
+// an automatic Co-Authored-By trailer derived from the provider config.
+func makeGitCommitHandler(pc ProviderConfig) tool.ToolFunc {
+	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
+		title, ok := args["title"].(string)
+		if !ok || strings.TrimSpace(title) == "" {
+			return nil, fmt.Errorf("missing or empty required argument: title")
+		}
+
+		// Verify there are staged changes.
+		if err := exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet").Run(); err == nil {
+			return nil, fmt.Errorf("no staged changes to commit")
+		}
+
+		trailer := coAuthoredByTrailer(pc)
+		msg := title
+		if body, ok := args["message"].(string); ok && strings.TrimSpace(body) != "" {
+			msg += "\n\n" + body
+		}
+		if trailer != "" {
+			msg += "\n\n" + trailer
+		}
+
+		cmd := exec.CommandContext(ctx, "git", "commit", "-m", msg)
+		var out bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("git commit failed: %w\n%s", err, out.String())
+		}
+
+		return out.String(), nil
+	}
+}
+
+// coAuthoredByTrailer builds the Co-authored-by trailer from ProviderConfig.
+// Format: Co-authored-by: <raw model> <stripped-model>@workshop.agent
+func coAuthoredByTrailer(pc ProviderConfig) string {
+	if pc.Model == "" || pc.Kind == "" {
+		return ""
+	}
+	stripped := pc.Model
+	if i := strings.LastIndex(stripped, "/"); i >= 0 {
+		stripped = stripped[i+1:]
+	}
+	return fmt.Sprintf("Co-authored-by: %s <%s@workshop.agent>", pc.Model, stripped)
 }
