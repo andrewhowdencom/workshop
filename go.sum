@@ -14,8 +14,8 @@ github.com/alecthomas/chroma/v2 v2.26.1 h1:2X21EdxGZNv5GF9mG5u+uzc02GCFyGxbcBm3G
 github.com/alecthomas/chroma/v2 v2.26.1/go.mod h1:lxhRRa9H4hPmRLOOdYga4zkQIQjq3dtrrdwQeCfu78Y=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
-github.com/andrewhowdencom/ore v0.2.1 h1:u4uE9mH6YnfagPQu2BbTmd2YGtdaGnBJUFGK+VXA2VI=
-github.com/andrewhowdencom/ore v0.2.1/go.mod h1:Q9646tT7WUc5TGVUcB1vOzTH6y7mdECzEMASVVMBkRc=
+github.com/andrewhowdencom/ore v0.2.2 h1:iTmkQCAeo4uYrLgPhYvBrcJLJK7JdK2heuE22VpUXZg=
+github.com/andrewhowdencom/ore v0.2.2/go.mod h1:Q9646tT7WUc5TGVUcB1vOzTH6y7mdECzEMASVVMBkRc=
 github.com/andrewhowdencom/ore/x/conduit v0.1.2 h1:2PP5y64V1Ffg9ee7c2fI++6jzkDRNiRT+ONcQQ5V+28=
 github.com/andrewhowdencom/ore/x/conduit v0.1.2/go.mod h1:83aDeFABkaP1x98A9jxkqIr3zN4XsiprPnpAxHGpPFw=
 github.com/andrewhowdencom/ore/x/conduit/http v0.3.1 h1:1Ua1Y6xZdi15IPoxZtPbcyAR6LwUJ2DuomLckAz0nGU=
@@ -34,8 +34,8 @@ github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.1 h1:o2tTHsprT5TR8HWzV7J5D
 github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.1/go.mod h1:GgCinCAaoEb4lka/ZT/l00fAqVaV/mG0UjztoDrdqvU=
 github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.0 h1:qWiTZkoma9I60j2IUboB+mLmbdq39ITkgfzJm0O/PEo=
 github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe v0.1.0/go.mod h1:Gh+lKisqMyePhE+yfvyTGrfx1dKz7lWgKn1HyGqkGCU=
-github.com/andrewhowdencom/ore/x/tool/skills v0.3.0 h1:dVmmU+KsJM+UOTNOkX9XCt8443Z1RZyVBUOEvDayg/w=
-github.com/andrewhowdencom/ore/x/tool/skills v0.3.0/go.mod h1:8c7zEajdnouZ4XMhVLLZjgM2z4RecgE3OVBX/5M4znU=
+github.com/andrewhowdencom/ore/x/tool/skills v0.3.1 h1:Q5VTs97TBCL9GQYsmOQNbnAPiywbxBeafpOUJ2H77FE=
+github.com/andrewhowdencom/ore/x/tool/skills v0.3.1/go.mod h1:10fCPpw5IeLEvnvZCJK+3n4zRHxsn+QSIx0P2Uk5jGQ=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
