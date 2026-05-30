@@ -37,7 +37,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
-	unsandbox "github.com/andrewhowdencom/ore/x/tool/sandbox/unsafe"
+
 	"github.com/adrg/xdg"
 )
 
@@ -156,6 +156,33 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 	return stdioConduit.Start(ctx)
 }
 
+// workshopSandbox is a FileSandbox that resolves relative paths against the
+// active git worktree stored in thread metadata. Absolute paths pass through
+// unchanged. It also provides WorkingDirectory for command execution defaults.
+type workshopSandbox struct {
+	name string
+	thr  *session.Thread
+}
+
+func (s *workshopSandbox) Name() string { return s.name }
+
+func (s *workshopSandbox) ResolvePath(path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	if wtPath, ok := s.thr.GetMetadata("workshop.worktree.path"); ok && wtPath != "" {
+		return filepath.Join(wtPath, path), nil
+	}
+	return path, nil
+}
+
+func (s *workshopSandbox) WorkingDirectory() string {
+	if wtPath, ok := s.thr.GetMetadata("workshop.worktree.path"); ok && wtPath != "" {
+		return wtPath
+	}
+	return ""
+}
+
 // buildManager creates the shared session manager from configuration.
 func buildManager(cfg *config) (*session.Manager, error) {
 	// Create thread store.
@@ -207,18 +234,11 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// Create tool registry with filesystem and bash functions.
 		registry := tool.NewRegistry()
 
-		// Set the default sandbox to the unsafe sandbox. This satisfies the
-		// ToolFunc contract so tools fall through to raw OS operations with no
-		// isolation. The unsafe sandbox intentionally implements only
-		// tool.Sandbox (Name), not FileSandbox or ExecSandbox, so path
-		// resolution and command execution remain unconstrained.
-		//
-		// NOTE: This is deliberately insecure – it allows tools to execute raw
-		// OS commands and access any filesystem path. Use ONLY for local
-		// development. Swap for a secure sandbox (e.g., container-based)
-		// before running untrusted code or in production.
+		// Register the workshop sandbox as the default. It resolves relative
+		// paths against the active git worktree and provides the worktree
+		// directory as the default working directory for command execution.
 		if sbr, ok := registry.(tool.SandboxRegistry); ok {
-			sbr.SetDefaultSandbox(unsandbox.New("default"))
+			sbr.SetDefaultSandbox(&workshopSandbox{name: "workshop", thr: thr})
 		}
 
 		// Register skills toolkit tools into the registry.
@@ -241,7 +261,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// Workspace and git tools.
 		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(thr))
 		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this session.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(thr))
-		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(cfg.provider))
+		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(thr, cfg.provider))
 
 		invokeOpts := []provider.InvokeOption{openai.WithTools(registry.Tools())}
 		if cfg.provider.Temperature != 0 {
@@ -287,9 +307,19 @@ func makeSystemPromptTransform(cfg *config, thr *session.Thread, skillsToolkit *
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
-		systemprompt.WithContentFunc(source.Harness("workshop")),
-		systemprompt.WithContentFunc(source.Model(cfg.provider.Model)),
-		systemprompt.WithContentFunc(source.Provider(cfg.provider.Kind)),
+		systemprompt.WithContentFunc(func() string { return "You are the workshop agent." }),
+		systemprompt.WithContentFunc(func() string {
+			if cfg.provider.Model == "" {
+				return ""
+			}
+			return "You are running on model " + cfg.provider.Model + "."
+		}),
+		systemprompt.WithContentFunc(func() string {
+			if cfg.provider.Kind == "" {
+				return ""
+			}
+			return "Provider backend: " + cfg.provider.Kind
+		}),
 	)
 }
 
@@ -446,6 +476,10 @@ func makeSwitchRoleHandler(rdir string, thr *session.Thread) tool.ToolFunc {
 // worktree under .worktrees/<branch> and stores its path in thread metadata.
 func makeWorkspaceCreateHandler(thr *session.Thread) tool.ToolFunc {
 	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
+		if existingPath, ok := thr.GetMetadata("workshop.worktree.path"); ok && existingPath != "" {
+			return nil, fmt.Errorf("already inside worktree %q; nested worktrees are not allowed", existingPath)
+		}
+
 		branch, ok := args["branch"].(string)
 		if !ok || branch == "" {
 			return nil, fmt.Errorf("missing required argument: branch")
@@ -500,15 +534,21 @@ func makeWorkspaceDestroyHandler(thr *session.Thread) tool.ToolFunc {
 
 // makeGitCommitHandler returns a tool handler that commits staged changes with
 // an automatic Co-Authored-By trailer derived from the provider config.
-func makeGitCommitHandler(pc ProviderConfig) tool.ToolFunc {
-	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
+func makeGitCommitHandler(thr *session.Thread, pc ProviderConfig) tool.ToolFunc {
+	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		title, ok := args["title"].(string)
 		if !ok || strings.TrimSpace(title) == "" {
 			return nil, fmt.Errorf("missing or empty required argument: title")
 		}
 
 		// Verify there are staged changes.
-		if err := exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet").Run(); err == nil {
+		diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet")
+		if fsb, ok := sb.(tool.FileSandbox); ok {
+			if dir := fsb.WorkingDirectory(); dir != "" {
+				diffCmd.Dir = dir
+			}
+		}
+		if err := diffCmd.Run(); err == nil {
 			return nil, fmt.Errorf("no staged changes to commit")
 		}
 
@@ -522,6 +562,11 @@ func makeGitCommitHandler(pc ProviderConfig) tool.ToolFunc {
 		}
 
 		cmd := exec.CommandContext(ctx, "git", "commit", "-m", msg)
+		if fsb, ok := sb.(tool.FileSandbox); ok {
+			if dir := fsb.WorkingDirectory(); dir != "" {
+				cmd.Dir = dir
+			}
+		}
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		cmd.Stderr = &out

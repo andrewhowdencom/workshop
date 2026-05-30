@@ -15,6 +15,8 @@ import (
 	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
+	"github.com/andrewhowdencom/ore/x/tool/bash"
+	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 )
 
@@ -543,8 +545,13 @@ func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
 }
 
 func TestMakeGitCommitHandler_MissingTitle(t *testing.T) {
-	handler := makeGitCommitHandler(ProviderConfig{Kind: "openai", Model: "gpt-4o"})
-	_, err := handler(context.Background(), nil, map[string]any{})
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := makeGitCommitHandler(thr, ProviderConfig{Kind: "openai", Model: "gpt-4o"})
+	_, err = handler(context.Background(), nil, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing title")
 	}
@@ -673,8 +680,13 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
-	handler := makeGitCommitHandler(pc)
+	handler := makeGitCommitHandler(thr, pc)
 	_, err = handler(context.Background(), nil, map[string]any{"title": "Update greeting", "message": "Changed text"})
 	if err != nil {
 		t.Fatalf("git_commit failed: %v", err)
@@ -1463,5 +1475,448 @@ func TestSkillsFragment_RealFSDiscoverer(t *testing.T) {
 	}
 	if !strings.Contains(fragment, "call read_skill") {
 		t.Errorf("fragment does not contain read_skill directive: %q", fragment)
+	}
+}
+
+// --- Workshop Sandbox Tests ---
+
+func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
+	worktree := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	got, err := sb.ResolvePath("file.txt")
+	if err != nil {
+		t.Fatalf("ResolvePath error: %v", err)
+	}
+	want := filepath.Join(worktree, "file.txt")
+	if got != want {
+		t.Errorf("ResolvePath = %q, want %q", got, want)
+	}
+}
+
+func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
+	worktree := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	absPath := "/etc/passwd"
+	got, err := sb.ResolvePath(absPath)
+	if err != nil {
+		t.Fatalf("ResolvePath error: %v", err)
+	}
+	if got != absPath {
+		t.Errorf("ResolvePath = %q, want %q (unchanged)", got, absPath)
+	}
+}
+
+func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	relPath := "file.txt"
+	got, err := sb.ResolvePath(relPath)
+	if err != nil {
+		t.Fatalf("ResolvePath error: %v", err)
+	}
+	if got != relPath {
+		t.Errorf("ResolvePath = %q, want %q (unchanged)", got, relPath)
+	}
+}
+
+func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
+	worktree := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	got := sb.WorkingDirectory()
+	if got != worktree {
+		t.Errorf("WorkingDirectory = %q, want %q", got, worktree)
+	}
+}
+
+func TestWorkshopSandbox_WorkingDirectory_WithoutWorktree(t *testing.T) {
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	got := sb.WorkingDirectory()
+	if got != "" {
+		t.Errorf("WorkingDirectory = %q, want empty string", got)
+	}
+}
+
+func TestReadFile_ResolvesRelativePathInWorktree(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktree, "file.txt"), []byte("hello worktree"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	result, err := filesystem.ReadFile(context.Background(), sb, map[string]any{"path": "file.txt"})
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+
+	content, ok := result.(string)
+	if !ok {
+		t.Fatalf("result type = %T, want string", result)
+	}
+	if !strings.Contains(content, "hello worktree") {
+		t.Errorf("content = %q, want 'hello worktree'", content)
+	}
+}
+
+func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "outside.txt"), []byte("outside content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	worktree := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	result, err := filesystem.ReadFile(context.Background(), sb, map[string]any{"path": filepath.Join(outside, "outside.txt")})
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+
+	content, ok := result.(string)
+	if !ok {
+		t.Fatalf("result type = %T, want string", result)
+	}
+	if !strings.Contains(content, "outside content") {
+		t.Errorf("content = %q, want 'outside content'", content)
+	}
+}
+
+func TestWriteFile_ResolvesRelativePathInWorktree(t *testing.T) {
+	worktree := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	_, err = filesystem.WriteFile(context.Background(), sb, map[string]any{
+		"path":    "newfile.txt",
+		"content": "written from worktree",
+	})
+	if err != nil {
+		t.Fatalf("WriteFile error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, "newfile.txt"))
+	if err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+	if string(data) != "written from worktree" {
+		t.Errorf("content = %q, want 'written from worktree'", string(data))
+	}
+}
+
+func TestEditFile_ResolvesRelativePathInWorktree(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktree, "edit.txt"), []byte("old content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	_, err = filesystem.EditFile(context.Background(), sb, map[string]any{
+		"path":       "edit.txt",
+		"old_string": "old",
+		"new_string": "new",
+	})
+	if err != nil {
+		t.Fatalf("EditFile error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(worktree, "edit.txt"))
+	if err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+	if string(data) != "new content\n" {
+		t.Errorf("content = %q, want 'new content\\n'", string(data))
+	}
+}
+
+func TestListDirectory_ResolvesRelativePathInWorktree(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktree, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "b.txt"), []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	result, err := filesystem.ListDirectory(context.Background(), sb, map[string]any{"path": "."})
+	if err != nil {
+		t.Fatalf("ListDirectory error: %v", err)
+	}
+
+	entries, ok := result.([]string)
+	if !ok {
+		t.Fatalf("result type = %T, want []string", result)
+	}
+	if len(entries) != 2 {
+		t.Errorf("len(entries) = %d, want 2", len(entries))
+	}
+}
+
+func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktree, "search.txt"), []byte("match me\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	result, err := filesystem.SearchFiles(context.Background(), sb, map[string]any{
+		"path":  ".",
+		"query": "match",
+	})
+	if err != nil {
+		t.Fatalf("SearchFiles error: %v", err)
+	}
+
+	results, ok := result.([]filesystem.SearchResult)
+	if !ok {
+		t.Fatalf("result type = %T, want []filesystem.SearchResult", result)
+	}
+	if len(results) != 1 {
+		t.Errorf("len(results) = %d, want 1", len(results))
+	}
+}
+
+func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
+	worktree := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	result, err := bash.Bash(context.Background(), sb, map[string]any{"command": "pwd"})
+	if err != nil {
+		t.Fatalf("bash error: %v", err)
+	}
+
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", result)
+	}
+	stdout, ok := m["stdout"].(string)
+	if !ok {
+		t.Fatalf("stdout type = %T, want string", m["stdout"])
+	}
+	if !strings.Contains(stdout, worktree) {
+		t.Errorf("stdout = %q, want to contain %q", stdout, worktree)
+	}
+}
+
+func TestBash_ExplicitWorkingDirectoryRespected(t *testing.T) {
+	worktree := t.TempDir()
+	explicitDir := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	result, err := bash.Bash(context.Background(), sb, map[string]any{
+		"command":             "pwd",
+		"working_directory":   explicitDir,
+	})
+	if err != nil {
+		t.Fatalf("bash error: %v", err)
+	}
+
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("result type = %T, want map[string]any", result)
+	}
+	stdout, ok := m["stdout"].(string)
+	if !ok {
+		t.Fatalf("stdout type = %T, want string", m["stdout"])
+	}
+	if !strings.Contains(stdout, explicitDir) {
+		t.Errorf("stdout = %q, want to contain %q", stdout, explicitDir)
+	}
+}
+
+func TestGitCommitHandler_WorktreeAware(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	if err := exec.Command("git", "init", dir).Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.email", "test@example.com").Run(); err != nil {
+		t.Fatalf("git config: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "config", "user.name", "Test").Run(); err != nil {
+		t.Fatalf("git config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", dir, "add", ".").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := exec.Command("git", "-C", dir, "commit", "-m", "initial").Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	worktreePath := filepath.Join(dir, ".worktrees", "feature")
+	if err := exec.Command("git", "-C", dir, "worktree", "add", "-b", "feature", worktreePath).Run(); err != nil {
+		t.Fatalf("git worktree add: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "feature.txt"), []byte("feature content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "-C", worktreePath, "add", "feature.txt").Run(); err != nil {
+		t.Fatalf("git add in worktree: %v", err)
+	}
+
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktreePath)
+
+	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
+	handler := makeGitCommitHandler(thr, pc)
+
+	sb := &workshopSandbox{name: "test", thr: thr}
+	_, err = handler(context.Background(), sb, map[string]any{"title": "Feature commit"})
+	if err != nil {
+		t.Fatalf("git_commit failed: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", worktreePath, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if !strings.Contains(string(out), "Feature commit") {
+		t.Errorf("commit message missing title:\n%s", string(out))
+	}
+	if !strings.Contains(string(out), "Co-authored-by: gpt-4o <gpt-4o@workshop.agent>") {
+		t.Errorf("commit message missing trailer:\n%s", string(out))
+	}
+}
+
+func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", "/some/worktree/path")
+
+	handler := makeWorkspaceCreateHandler(thr)
+	_, err = handler(context.Background(), nil, map[string]any{"branch": "nested"})
+	if err == nil {
+		t.Fatal("expected error for nested workspace_create")
+	}
+	if !strings.Contains(err.Error(), "already inside worktree") {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
+	worktree := t.TempDir()
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thr.SetMetadata("workshop.worktree.path", worktree)
+
+	// Verify sandbox resolves relative paths to worktree
+	sb := &workshopSandbox{name: "test", thr: thr}
+	got, _ := sb.ResolvePath("file.txt")
+	want := filepath.Join(worktree, "file.txt")
+	if got != want {
+		t.Fatalf("before destroy: ResolvePath = %q, want %q", got, want)
+	}
+
+	// Clear metadata (simulating workspace_destroy)
+	thr.SetMetadata("workshop.worktree.path", "")
+
+	// Verify sandbox now returns relative paths unchanged
+	got, _ = sb.ResolvePath("file.txt")
+	if got != "file.txt" {
+		t.Errorf("after destroy: ResolvePath = %q, want %q", got, "file.txt")
+	}
+
+	// Verify WorkingDirectory is empty
+	if dir := sb.WorkingDirectory(); dir != "" {
+		t.Errorf("after destroy: WorkingDirectory = %q, want empty", dir)
 	}
 }
