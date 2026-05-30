@@ -287,9 +287,19 @@ func makeSystemPromptTransform(cfg *config, thr *session.Thread, skillsToolkit *
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
-		systemprompt.WithContentFunc(source.Harness("workshop")),
-		systemprompt.WithContentFunc(source.Model(cfg.provider.Model)),
-		systemprompt.WithContentFunc(source.Provider(cfg.provider.Kind)),
+		systemprompt.WithContentFunc(func() string { return "You are the workshop agent." }),
+		systemprompt.WithContentFunc(func() string {
+			if cfg.provider.Model == "" {
+				return ""
+			}
+			return "You are running on model " + cfg.provider.Model + "."
+		}),
+		systemprompt.WithContentFunc(func() string {
+			if cfg.provider.Kind == "" {
+				return ""
+			}
+			return "Provider backend: " + cfg.provider.Kind
+		}),
 	)
 }
 
