@@ -543,8 +543,13 @@ func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
 }
 
 func TestMakeGitCommitHandler_MissingTitle(t *testing.T) {
-	handler := makeGitCommitHandler(ProviderConfig{Kind: "openai", Model: "gpt-4o"})
-	_, err := handler(context.Background(), nil, map[string]any{})
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := makeGitCommitHandler(thr, ProviderConfig{Kind: "openai", Model: "gpt-4o"})
+	_, err = handler(context.Background(), nil, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing title")
 	}
@@ -673,8 +678,13 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
+	store := session.NewMemoryStore()
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatal(err)
+	}
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
-	handler := makeGitCommitHandler(pc)
+	handler := makeGitCommitHandler(thr, pc)
 	_, err = handler(context.Background(), nil, map[string]any{"title": "Update greeting", "message": "Changed text"})
 	if err != nil {
 		t.Fatalf("git_commit failed: %v", err)
