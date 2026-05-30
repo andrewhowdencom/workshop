@@ -998,16 +998,28 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 	if !strings.Contains(text.Content, "repo instructions") {
 		t.Errorf("prompt does not contain AGENTS.md content: %q", text.Content)
 	}
+	if !strings.Contains(text.Content, "You are the workshop agent.") {
+		t.Errorf("prompt does not contain harness: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "You are running on model test-model.") {
+		t.Errorf("prompt does not contain model: %q", text.Content)
+	}
+	if !strings.Contains(text.Content, "Provider backend: openai") {
+		t.Errorf("prompt does not contain provider: %q", text.Content)
+	}
 
-	// Verify ordering: defaultPrompt < cwd context < agents.
+	// Verify ordering: defaultPrompt < cwd context < agents < harness < model < provider.
 	defaultIdx := strings.Index(text.Content, defaultPrompt)
 	cwdIdx := strings.Index(text.Content, "You are running in:")
 	agentsIdx := strings.Index(text.Content, "repo instructions")
-	if defaultIdx == -1 || cwdIdx == -1 || agentsIdx == -1 {
-		t.Fatalf("expected all fragments in prompt; default=%d cwd=%d agents=%d", defaultIdx, cwdIdx, agentsIdx)
+	harnessIdx := strings.Index(text.Content, "You are the workshop agent.")
+	modelIdx := strings.Index(text.Content, "You are running on model test-model.")
+	providerIdx := strings.Index(text.Content, "Provider backend: openai")
+	if defaultIdx == -1 || cwdIdx == -1 || agentsIdx == -1 || harnessIdx == -1 || modelIdx == -1 || providerIdx == -1 {
+		t.Fatalf("expected all fragments in prompt; default=%d cwd=%d agents=%d harness=%d model=%d provider=%d", defaultIdx, cwdIdx, agentsIdx, harnessIdx, modelIdx, providerIdx)
 	}
-	if !(defaultIdx < cwdIdx && cwdIdx < agentsIdx) {
-		t.Errorf("fragment ordering incorrect; expected default < cwd < agents, got default=%d cwd=%d agents=%d", defaultIdx, cwdIdx, agentsIdx)
+	if !(defaultIdx < cwdIdx && cwdIdx < agentsIdx && agentsIdx < harnessIdx && harnessIdx < modelIdx && modelIdx < providerIdx) {
+		t.Errorf("fragment ordering incorrect; expected default < cwd < agents < harness < model < provider, got default=%d cwd=%d agents=%d harness=%d model=%d provider=%d", defaultIdx, cwdIdx, agentsIdx, harnessIdx, modelIdx, providerIdx)
 	}
 }
 

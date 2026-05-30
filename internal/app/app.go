@@ -287,6 +287,9 @@ func makeSystemPromptTransform(cfg *config, thr *session.Thread, skillsToolkit *
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
+		systemprompt.WithContentFunc(source.Harness("workshop")),
+		systemprompt.WithContentFunc(source.Model(cfg.provider.Model)),
+		systemprompt.WithContentFunc(source.Provider(cfg.provider.Kind)),
 	)
 }
 
