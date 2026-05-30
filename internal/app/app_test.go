@@ -586,7 +586,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(oldWd)
+	defer func() { _ = os.Chdir(oldWd) }()
 
 	// Create worktree.
 	createHandler := makeWorkspaceCreateHandler(thr)
@@ -671,7 +671,7 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(oldWd)
+	defer func() { _ = os.Chdir(oldWd) }()
 
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
 	handler := makeGitCommitHandler(pc)
