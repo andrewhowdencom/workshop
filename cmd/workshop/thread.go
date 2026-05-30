@@ -8,7 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/andrewhowdencom/ore/thread"
+	"github.com/andrewhowdencom/ore/session"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -41,7 +41,7 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 
 	days := viper.GetInt("days")
 
-	store, err := thread.NewJSONStore(storeDir)
+	store, err := session.NewJSONStore(storeDir)
 	if err != nil {
 		return fmt.Errorf("create JSON store: %w", err)
 	}
@@ -49,7 +49,7 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 	return runThreadListWithStore(days, store, os.Stdout)
 }
 
-func runThreadListWithStore(days int, store thread.Store, w io.Writer) error {
+func runThreadListWithStore(days int, store session.Store, w io.Writer) error {
 	threads, err := store.List()
 	if err != nil {
 		return fmt.Errorf("list threads: %w", err)
@@ -57,7 +57,7 @@ func runThreadListWithStore(days int, store thread.Store, w io.Writer) error {
 
 	cutoff := time.Now().AddDate(0, 0, -days)
 
-	var filtered []*thread.Thread
+	var filtered []*session.Thread
 	for _, thr := range threads {
 		if thr.UpdatedAt.After(cutoff) {
 			filtered = append(filtered, thr)

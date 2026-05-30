@@ -25,7 +25,6 @@ import (
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
-	"github.com/andrewhowdencom/ore/thread"
 	"github.com/andrewhowdencom/ore/tool"
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
 	stdioc "github.com/andrewhowdencom/ore/x/conduit/stdio"
@@ -164,7 +163,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	if storeDir == "" {
 		storeDir = filepath.Join(xdg.DataHome, "workshop", "threads")
 	}
-	store, err := thread.NewJSONStore(storeDir)
+	store, err := session.NewJSONStore(storeDir)
 	if err != nil {
 		return nil, fmt.Errorf("create JSON store: %w", err)
 	}
@@ -176,7 +175,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Step factory: inject system prompt and guardrails as transforms.
-	stepFactory := func(thr *thread.Thread) (*loop.Step, error) {
+	stepFactory := func(thr *session.Thread) (*loop.Step, error) {
 		// Resolve the roles directory once for this step.
 		rdir := roleDir()
 
@@ -279,7 +278,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 //     CLAUDE.md files nearest-first.
 //
 // The resulting transform is passed to loop.Step via loop.WithTransforms.
-func makeSystemPromptTransform(cfg *config, thr *thread.Thread, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
+func makeSystemPromptTransform(cfg *config, thr *session.Thread, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
 	rdir := roleDir()
 	currentPrompt := makeCurrentPrompt(rdir, thr)
 
@@ -352,7 +351,7 @@ const defaultPrompt = "You are a terminal-based coding assistant. " +
 
 // makeCurrentPrompt returns a closure that reads the active role from thread
 // metadata and returns the corresponding prompt, falling back to defaultPrompt.
-func makeCurrentPrompt(rdir string, thr *thread.Thread) func() string {
+func makeCurrentPrompt(rdir string, thr *session.Thread) func() string {
 	return func() string {
 		if roleName, ok := thr.GetMetadata("workshop.role"); ok && roleName != "" {
 			if role, err := loadRole(rdir, roleName, nil); err == nil {
@@ -397,7 +396,7 @@ func makeListRolesHandler(rdir string) tool.ToolFunc {
 // makeGetCurrentRoleHandler returns a tool handler that returns the currently
 // active role for the given thread. The sandbox argument is received from the
 // tool framework and passed through to the role I/O layer.
-func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
+func makeGetCurrentRoleHandler(rdir string, thr *session.Thread) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		roleName := "default"
 		if v, ok := thr.GetMetadata("workshop.role"); ok && v != "" {
@@ -426,7 +425,7 @@ func makeGetCurrentRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 // makeSwitchRoleHandler returns a tool handler that validates and switches
 // the active role for the given thread. The sandbox argument is received
 // from the tool framework and passed through to the role I/O layer.
-func makeSwitchRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
+func makeSwitchRoleHandler(rdir string, thr *session.Thread) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
@@ -442,7 +441,7 @@ func makeSwitchRoleHandler(rdir string, thr *thread.Thread) tool.ToolFunc {
 
 // makeWorkspaceCreateHandler returns a tool handler that creates a new git
 // worktree under .worktrees/<branch> and stores its path in thread metadata.
-func makeWorkspaceCreateHandler(thr *thread.Thread) tool.ToolFunc {
+func makeWorkspaceCreateHandler(thr *session.Thread) tool.ToolFunc {
 	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
 		branch, ok := args["branch"].(string)
 		if !ok || branch == "" {
@@ -476,7 +475,7 @@ func makeWorkspaceCreateHandler(thr *thread.Thread) tool.ToolFunc {
 
 // makeWorkspaceDestroyHandler returns a tool handler that removes the worktree
 // stored in thread metadata and clears the metadata key.
-func makeWorkspaceDestroyHandler(thr *thread.Thread) tool.ToolFunc {
+func makeWorkspaceDestroyHandler(thr *session.Thread) tool.ToolFunc {
 	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
 		path, ok := thr.GetMetadata("workshop.worktree.path")
 		if !ok || path == "" {

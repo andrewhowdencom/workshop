@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/andrewhowdencom/ore/artifact"
+	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
-	"github.com/andrewhowdencom/ore/thread"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
@@ -53,7 +53,7 @@ func TestNewProvider_UnsupportedKind(t *testing.T) {
 }
 
 func TestMakeCurrentPrompt_Fallback(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestMakeCurrentPrompt_WithRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestMakeListRolesHandler(t *testing.T) {
 }
 
 func TestMakeGetCurrentRoleHandler_Default(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestMakeGetCurrentRoleHandler_WithRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestMakeGetCurrentRoleHandler_WithRole(t *testing.T) {
 }
 
 func TestMakeSwitchRoleHandler_MissingName(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestMakeSwitchRoleHandler_MissingName(t *testing.T) {
 }
 
 func TestMakeSwitchRoleHandler_InvalidRole(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestMakeSwitchRoleHandler_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -251,7 +251,7 @@ func TestMakeSwitchRoleHandler_FrontmatterNameMismatch(t *testing.T) {
 	}
 
 	// switch_role should succeed with "planner"
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -514,7 +514,7 @@ func TestCoAuthoredByTrailer(t *testing.T) {
 }
 
 func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -527,7 +527,7 @@ func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
 }
 
 func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -573,7 +573,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -695,7 +695,7 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 }
 
 func TestSystemPrompt_WithCWD(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -752,7 +752,7 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 }
 
 func TestSystemPrompt_WithoutCWD(t *testing.T) {
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -805,7 +805,7 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -878,7 +878,7 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -946,7 +946,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1024,7 +1024,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1072,7 +1072,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 	dir := t.TempDir() // empty directory, no AGENTS.md or CLAUDE.md
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1149,7 +1149,7 @@ func TestMakeGetCurrentRoleHandler_SandboxPropagation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1181,7 +1181,7 @@ func TestMakeSwitchRoleHandler_SandboxPropagation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := thread.NewMemoryStore()
+	store := session.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)

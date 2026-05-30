@@ -4,11 +4,11 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.2.0
-	github.com/andrewhowdencom/ore/x/conduit/http v0.3.0
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.2
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.3.0
-	github.com/andrewhowdencom/ore/x/provider/openai v0.2.1
+	github.com/andrewhowdencom/ore v0.2.1
+	github.com/andrewhowdencom/ore/x/conduit/http v0.3.1
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.3
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.3.1
+	github.com/andrewhowdencom/ore/x/provider/openai v0.3.0
 	github.com/andrewhowdencom/ore/x/tool v0.3.0
 	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.1

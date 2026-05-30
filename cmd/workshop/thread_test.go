@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andrewhowdencom/ore/thread"
+	"github.com/andrewhowdencom/ore/session"
 	"github.com/spf13/viper"
 )
 
@@ -28,7 +28,7 @@ func TestThreadList_EmptyStoreDir(t *testing.T) {
 func TestThreadList_WithStore(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := thread.NewJSONStore(tmpDir)
+	store, err := session.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestThreadList_WithStore(t *testing.T) {
 func TestThreadList_DaysFilter(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := thread.NewJSONStore(tmpDir)
+	store, err := session.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestThreadList_DaysFilter(t *testing.T) {
 	}
 
 	// Reload the store to pick up the manually created old thread.
-	store, err = thread.NewJSONStore(tmpDir)
+	store, err = session.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("reload store: %v", err)
 	}
