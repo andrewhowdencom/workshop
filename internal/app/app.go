@@ -102,7 +102,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	}
 
 	// Create the TUI conduit.
-	tuiConduit, err := tui.New(mgr, tui.WithThreadID(cfg.threadID))
+	tuiConduit, err := tui.New(mgr, tui.WithThreadID(cfg.threadID), tui.WithName("ws"))
 	if err != nil {
 		return fmt.Errorf("create TUI conduit: %w", err)
 	}
