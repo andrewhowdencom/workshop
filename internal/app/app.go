@@ -542,7 +542,13 @@ func makeGitCommitHandler(thr *session.Thread, pc ProviderConfig) tool.ToolFunc 
 		}
 
 		// Verify there are staged changes.
-		if err := exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet").Run(); err == nil {
+		diffCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--quiet")
+		if fsb, ok := sb.(tool.FileSandbox); ok {
+			if dir := fsb.WorkingDirectory(); dir != "" {
+				diffCmd.Dir = dir
+			}
+		}
+		if err := diffCmd.Run(); err == nil {
 			return nil, fmt.Errorf("no staged changes to commit")
 		}
 
