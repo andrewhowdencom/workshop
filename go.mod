@@ -7,7 +7,7 @@ require (
 	github.com/andrewhowdencom/ore v0.3.2
 	github.com/andrewhowdencom/ore/x/conduit/http v0.5.3
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.3
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.4.4
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.4.5
 	github.com/andrewhowdencom/ore/x/provider/openai v0.3.1
 	github.com/andrewhowdencom/ore/x/tool v0.3.2
 	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
@@ -34,7 +34,7 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260527151214-009e6338d40d // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260531005911-0ca8ababeab2 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect

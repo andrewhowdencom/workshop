@@ -24,6 +24,8 @@ github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.3 h1:oH79M/39GzUGdr335lKFVfy
 github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.3/go.mod h1:idCe3Ar6HRGryWxhrO9oMDhyd5uZrj7EkAnXPXQthH4=
 github.com/andrewhowdencom/ore/x/conduit/tui v0.4.4 h1:nNdIjKrEUgT8HCsjdZv7U+K7IcntFB2pUt8NoM+YGGU=
 github.com/andrewhowdencom/ore/x/conduit/tui v0.4.4/go.mod h1:f6I7CiZ0ERRGr8YhGTdQNpV9YXngLQkFnw/b0clAc5c=
+github.com/andrewhowdencom/ore/x/conduit/tui v0.4.5 h1:VnOp6+DrOeo8Myn6h6tB+qQDTcsyfqTFJo/ja3kgnuY=
+github.com/andrewhowdencom/ore/x/conduit/tui v0.4.5/go.mod h1:77b25LsZ3238vCWkkxd/kofQbwM7zTh87mOqGVeUmxQ=
 github.com/andrewhowdencom/ore/x/provider/openai v0.3.1 h1:5/GbLpeVTtVnW0y+fZAQnRaEhyb88QmQZ/YK82IhdcI=
 github.com/andrewhowdencom/ore/x/provider/openai v0.3.1/go.mod h1:75t3kfRMPEUhVvzbswi3pvgvlRy0XjIsKv8SGTj+PnQ=
 github.com/andrewhowdencom/ore/x/tool v0.3.2 h1:jRW+gvZx1NO105CK3ffxDu4haP4c4KtLYDeda4YvBGc=
@@ -58,6 +60,8 @@ github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f h1:pk6g
 github.com/charmbracelet/x/exp/golden v0.0.0-20250806222409-83e3a29d542f/go.mod h1:IfZAMTHB6XkZSeXUqriemErjAWCCzT0LwjKFYCZyw0I=
 github.com/charmbracelet/x/exp/slice v0.0.0-20260527151214-009e6338d40d h1:RxcAR+vJCoD8QqT1cqLtkQKw+1cqvjqnu5IpPqYzPco=
 github.com/charmbracelet/x/exp/slice v0.0.0-20260527151214-009e6338d40d/go.mod h1:vqEfX6xzqW1pKKZUUiFOKg0OQ7bCh54Q2vR/tserrRA=
+github.com/charmbracelet/x/exp/slice v0.0.0-20260531005911-0ca8ababeab2 h1:TK3RS9TupbW39l1sflQdUjCu/7BIBbTAHX7aH+rcj2k=
+github.com/charmbracelet/x/exp/slice v0.0.0-20260531005911-0ca8ababeab2/go.mod h1:vqEfX6xzqW1pKKZUUiFOKg0OQ7bCh54Q2vR/tserrRA=
 github.com/charmbracelet/x/term v0.2.2 h1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=
 github.com/charmbracelet/x/term v0.2.2/go.mod h1:kF8CY5RddLWrsgVwpw4kAa6TESp6EB5y3uxGLeCqzAI=
 github.com/charmbracelet/x/termios v0.1.1 h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=
