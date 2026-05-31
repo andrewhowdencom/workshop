@@ -73,3 +73,11 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
+
+replace github.com/andrewhowdencom/ore => /home/andrewhowdencom/Development/ore/.worktrees/255
+
+replace github.com/andrewhowdencom/ore/x/conduit/tui => /home/andrewhowdencom/Development/ore/.worktrees/255/x/conduit/tui
+
+replace github.com/andrewhowdencom/ore/x/conduit/http => /home/andrewhowdencom/Development/ore/.worktrees/255/x/conduit/http
+
+replace github.com/andrewhowdencom/ore/x/provider/openai => /home/andrewhowdencom/Development/ore/.worktrees/255/x/provider/openai

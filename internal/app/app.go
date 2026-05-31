@@ -283,8 +283,33 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		), nil
 	}
 
+	// Compute static metadata for all streams.
+	cwd, _ := os.Getwd()
+	shortCwd := cwd
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
+		shortCwd = "~" + strings.TrimPrefix(cwd, home)
+	}
+	branchBytes, _ := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branch := strings.TrimSpace(string(branchBytes))
+	if branch == "" {
+		branch = "(not in git repo)"
+	}
+
+	defaultMeta := func(thr *session.Thread) map[string]string {
+		role := ""
+		if r, ok := thr.GetMetadata("workshop.role"); ok {
+			role = r
+		}
+		return map[string]string{
+			"thread_id":  thr.ID,
+			"cwd":        shortCwd,
+			"git_branch": branch,
+			"role":       role,
+		}
+	}
+
 	// Create session manager with the ReAct cognitive pattern.
-	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor()), nil
+	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor(), session.WithDefaultMetadata(defaultMeta)), nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
