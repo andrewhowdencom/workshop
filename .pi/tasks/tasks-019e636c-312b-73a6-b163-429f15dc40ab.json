@@ -1,0 +1,29 @@
+{
+  "nextId": 3,
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Audit all direct dependencies for updates and relevance",
+      "description": "Review every direct dependency in go.mod: check latest available version, understand what changed, assess relevance for the workshop application, and figure out integration approach.",
+      "status": "in_progress",
+      "activeForm": "Auditing direct dependencies for updates",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1779785197806,
+      "updatedAt": 1779785209357
+    },
+    {
+      "id": "2",
+      "subject": "Audit indirect dependencies for critical updates",
+      "description": "Review indirect dependencies for available updates, prioritizing security fixes, breaking changes, or features that affect direct deps.",
+      "status": "pending",
+      "activeForm": "Auditing indirect dependencies",
+      "metadata": {},
+      "blocks": [],
+      "blockedBy": [],
+      "createdAt": 1779785197806,
+      "updatedAt": 1779785197806
+    }
+  ]
+}

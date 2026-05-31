@@ -36,6 +36,7 @@ import (
 	xtool "github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
+	"github.com/andrewhowdencom/ore/x/tool/settitle"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 
 	"github.com/adrg/xdg"
@@ -156,12 +157,23 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 	return stdioConduit.Start(ctx)
 }
 
+// metadataReader is the minimal interface for reading thread metadata.
+type metadataReader interface {
+	GetMetadata(key string) (string, bool)
+}
+
+// metadataStore extends metadataReader with write access.
+type metadataStore interface {
+	metadataReader
+	SetMetadata(key, value string)
+}
+
 // workshopSandbox is a FileSandbox that resolves relative paths against the
-// active git worktree stored in thread metadata. Absolute paths pass through
+// active git worktree stored in stream metadata. Absolute paths pass through
 // unchanged. It also provides WorkingDirectory for command execution defaults.
 type workshopSandbox struct {
 	name string
-	thr  *session.Thread
+	mr   metadataReader
 }
 
 func (s *workshopSandbox) Name() string { return s.name }
@@ -170,14 +182,14 @@ func (s *workshopSandbox) ResolvePath(path string) (string, error) {
 	if filepath.IsAbs(path) {
 		return path, nil
 	}
-	if wtPath, ok := s.thr.GetMetadata("workshop.worktree.path"); ok && wtPath != "" {
+	if wtPath, ok := s.mr.GetMetadata("workshop.worktree.path"); ok && wtPath != "" {
 		return filepath.Join(wtPath, path), nil
 	}
 	return path, nil
 }
 
 func (s *workshopSandbox) WorkingDirectory() string {
-	if wtPath, ok := s.thr.GetMetadata("workshop.worktree.path"); ok && wtPath != "" {
+	if wtPath, ok := s.mr.GetMetadata("workshop.worktree.path"); ok && wtPath != "" {
 		return wtPath
 	}
 	return ""
@@ -202,7 +214,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Step factory: inject system prompt and guardrails as transforms.
-	stepFactory := func(thr *session.Thread) (*loop.Step, error) {
+	stepFactory := func(stream *session.Stream) ([]loop.Option, error) {
 		// Resolve the roles directory once for this step.
 		rdir := roleDir()
 
@@ -215,7 +227,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		skillsToolkit := skills.NewToolkit(discoverers...)
 
 		// Build the composable system prompt transform.
-		sp, err := makeSystemPromptTransform(cfg, thr, skillsToolkit)
+		sp, err := makeSystemPromptTransform(cfg, stream, skillsToolkit)
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -238,7 +250,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// paths against the active git worktree and provides the worktree
 		// directory as the default working directory for command execution.
 		if sbr, ok := registry.(tool.SandboxRegistry); ok {
-			sbr.SetDefaultSandbox(&workshopSandbox{name: "workshop", thr: thr})
+			sbr.SetDefaultSandbox(&workshopSandbox{name: "workshop", mr: stream})
 		}
 
 		// Register skills toolkit tools into the registry.
@@ -255,13 +267,16 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 		// Role management tools.
 		mustRegisterRaw(registry, "list_roles", "List all available role definitions.", listRolesSchema, makeListRolesHandler(rdir))
-		mustRegisterRaw(registry, "get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, thr))
-		mustRegisterRaw(registry, "switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, thr))
+		mustRegisterRaw(registry, "get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, stream))
+		mustRegisterRaw(registry, "switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, stream))
 
 		// Workspace and git tools.
-		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(thr))
-		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this session.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(thr))
-		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(thr, cfg.provider))
+		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(stream))
+		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this session.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(stream))
+		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(stream, cfg.provider))
+
+		// Title management.
+		mustRegisterRaw(registry, "settitle", "Set the conversation title visible to all conduits.", settitleSchema, settitle.Tool())
 
 		invokeOpts := []provider.InvokeOption{openai.WithTools(registry.Tools())}
 		if cfg.provider.Temperature != 0 {
@@ -271,16 +286,11 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			invokeOpts = append(invokeOpts, openai.WithReasoningEffort(cfg.provider.ReasoningEffort))
 		}
 
-		return loop.New(
-			loop.WithOnEmit(func(ctx context.Context, event loop.OutputEvent) {
-				if tc, ok := event.(loop.TurnCompleteEvent); ok {
-					thr.State.Append(tc.Turn.Role, tc.Turn.Artifacts...)
-				}
-			}),
+		return []loop.Option{
 			loop.WithTransforms(sp, gr),
 			loop.WithHandlers(xtool.NewHandler(registry)),
 			loop.WithInvokeOptions(invokeOpts...),
-		), nil
+		}, nil
 	}
 
 	// Compute static metadata for all streams.
@@ -295,13 +305,13 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		branch = "(not in git repo)"
 	}
 
-	defaultMeta := func(thr *session.Thread) map[string]string {
+	defaultMeta := func(stream *session.Stream) map[string]string {
 		role := ""
-		if r, ok := thr.GetMetadata("workshop.role"); ok {
+		if r, ok := stream.GetMetadata("workshop.role"); ok {
 			role = r
 		}
 		return map[string]string{
-			"thread_id":  thr.ID,
+			"thread_id":  stream.ID(),
 			"cwd":        shortCwd,
 			"git_branch": branch,
 			"role":       role,
@@ -313,7 +323,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
-// a given configuration and thread. It concatenates four content sources:
+// a given configuration and metadata reader. It concatenates four content sources:
 //
 //  1. The active role prompt (or defaultPrompt if no role is set).
 //  2. A contextual sentence describing the current working directory.
@@ -323,9 +333,9 @@ func buildManager(cfg *config) (*session.Manager, error) {
 //     CLAUDE.md files nearest-first.
 //
 // The resulting transform is passed to loop.Step via loop.WithTransforms.
-func makeSystemPromptTransform(cfg *config, thr *session.Thread, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
+func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
 	rdir := roleDir()
-	currentPrompt := makeCurrentPrompt(rdir, thr)
+	currentPrompt := makeCurrentPrompt(rdir, mr)
 
 	return systemprompt.New(
 		systemprompt.WithContentFunc(currentPrompt),
@@ -407,11 +417,11 @@ const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"6. Explore proactively. Read full files, search the codebase, and understand context before making changes. Do not wait to be told.\n\n" +
 	"7. Check git history before editing. Use git log and git blame to understand why code exists before changing it."
 
-// makeCurrentPrompt returns a closure that reads the active role from thread
-// metadata and returns the corresponding prompt, falling back to defaultPrompt.
-func makeCurrentPrompt(rdir string, thr *session.Thread) func() string {
+// makeCurrentPrompt returns a closure that reads the active role from metadata
+// and returns the corresponding prompt, falling back to defaultPrompt.
+func makeCurrentPrompt(rdir string, mr metadataReader) func() string {
 	return func() string {
-		if roleName, ok := thr.GetMetadata("workshop.role"); ok && roleName != "" {
+		if roleName, ok := mr.GetMetadata("workshop.role"); ok && roleName != "" {
 			if role, err := loadRole(rdir, roleName, nil); err == nil {
 				return role.Prompt
 			}
@@ -452,12 +462,12 @@ func makeListRolesHandler(rdir string) tool.ToolFunc {
 }
 
 // makeGetCurrentRoleHandler returns a tool handler that returns the currently
-// active role for the given thread. The sandbox argument is received from the
-// tool framework and passed through to the role I/O layer.
-func makeGetCurrentRoleHandler(rdir string, thr *session.Thread) tool.ToolFunc {
+// active role for the given metadata reader. The sandbox argument is received
+// from the tool framework and passed through to the role I/O layer.
+func makeGetCurrentRoleHandler(rdir string, mr metadataReader) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		roleName := "default"
-		if v, ok := thr.GetMetadata("workshop.role"); ok && v != "" {
+		if v, ok := mr.GetMetadata("workshop.role"); ok && v != "" {
 			roleName = v
 		}
 		role, err := loadRole(rdir, roleName, sb)
@@ -481,9 +491,9 @@ func makeGetCurrentRoleHandler(rdir string, thr *session.Thread) tool.ToolFunc {
 }
 
 // makeSwitchRoleHandler returns a tool handler that validates and switches
-// the active role for the given thread. The sandbox argument is received
-// from the tool framework and passed through to the role I/O layer.
-func makeSwitchRoleHandler(rdir string, thr *session.Thread) tool.ToolFunc {
+// the active role for the given metadata store. The sandbox argument is
+// received from the tool framework and passed through to the role I/O layer.
+func makeSwitchRoleHandler(rdir string, ms metadataStore) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		name, ok := args["name"].(string)
 		if !ok || name == "" {
@@ -492,16 +502,16 @@ func makeSwitchRoleHandler(rdir string, thr *session.Thread) tool.ToolFunc {
 		if _, err := loadRole(rdir, name, sb); err != nil {
 			return nil, fmt.Errorf("role %q not found", name)
 		}
-		thr.SetMetadata("workshop.role", name)
+		ms.SetMetadata("workshop.role", name)
 		return fmt.Sprintf("Switched to role: %s", name), nil
 	}
 }
 
 // makeWorkspaceCreateHandler returns a tool handler that creates a new git
-// worktree under .worktrees/<branch> and stores its path in thread metadata.
-func makeWorkspaceCreateHandler(thr *session.Thread) tool.ToolFunc {
+// worktree under .worktrees/<branch> and stores its path in metadata.
+func makeWorkspaceCreateHandler(ms metadataStore) tool.ToolFunc {
 	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
-		if existingPath, ok := thr.GetMetadata("workshop.worktree.path"); ok && existingPath != "" {
+		if existingPath, ok := ms.GetMetadata("workshop.worktree.path"); ok && existingPath != "" {
 			return nil, fmt.Errorf("already inside worktree %q; nested worktrees are not allowed", existingPath)
 		}
 
@@ -530,16 +540,16 @@ func makeWorkspaceCreateHandler(thr *session.Thread) tool.ToolFunc {
 			return nil, fmt.Errorf("git worktree add failed: %w\n%s", err, out.String())
 		}
 
-		thr.SetMetadata("workshop.worktree.path", path)
+		ms.SetMetadata("workshop.worktree.path", path)
 		return path, nil
 	}
 }
 
 // makeWorkspaceDestroyHandler returns a tool handler that removes the worktree
-// stored in thread metadata and clears the metadata key.
-func makeWorkspaceDestroyHandler(thr *session.Thread) tool.ToolFunc {
+// stored in metadata and clears the metadata key.
+func makeWorkspaceDestroyHandler(ms metadataStore) tool.ToolFunc {
 	return func(ctx context.Context, _ tool.Sandbox, args map[string]any) (any, error) {
-		path, ok := thr.GetMetadata("workshop.worktree.path")
+		path, ok := ms.GetMetadata("workshop.worktree.path")
 		if !ok || path == "" {
 			return nil, fmt.Errorf("no worktree was created in this session")
 		}
@@ -552,14 +562,14 @@ func makeWorkspaceDestroyHandler(thr *session.Thread) tool.ToolFunc {
 			return nil, fmt.Errorf("git worktree remove failed: %w\n%s", err, out.String())
 		}
 
-		thr.SetMetadata("workshop.worktree.path", "")
+		ms.SetMetadata("workshop.worktree.path", "")
 		return fmt.Sprintf("Worktree %q removed", path), nil
 	}
 }
 
 // makeGitCommitHandler returns a tool handler that commits staged changes with
 // an automatic Co-Authored-By trailer derived from the provider config.
-func makeGitCommitHandler(thr *session.Thread, pc ProviderConfig) tool.ToolFunc {
+func makeGitCommitHandler(ms metadataStore, pc ProviderConfig) tool.ToolFunc {
 	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
 		title, ok := args["title"].(string)
 		if !ok || strings.TrimSpace(title) == "" {

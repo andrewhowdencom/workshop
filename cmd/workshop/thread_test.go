@@ -37,7 +37,7 @@ func TestThreadList_WithStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create thread 1: %v", err)
 	}
-	thr1.SetMetadata("workshop.role", "developer")
+	thr1.Metadata["workshop.role"] = "developer"
 	if err := store.Save(thr1); err != nil {
 		t.Fatalf("save thread 1: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestThreadList_WithStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create thread 2: %v", err)
 	}
-	thr2.SetMetadata("workshop.role", "reviewer")
+	thr2.Metadata["workshop.role"] = "reviewer"
 	if err := store.Save(thr2); err != nil {
 		t.Fatalf("save thread 2: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestThreadList_DaysFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create recent thread: %v", err)
 	}
-	recent.SetMetadata("workshop.role", "recent")
+	recent.Metadata["workshop.role"] = "recent"
 	if err := store.Save(recent); err != nil {
 		t.Fatalf("save recent thread: %v", err)
 	}

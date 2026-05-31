@@ -52,3 +52,14 @@ var gitCommitSchema = map[string]any{
 	},
 	"required": []string{"title"},
 }
+
+var settitleSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"title": map[string]any{
+			"type":        "string",
+			"description": "New conversation title",
+		},
+	},
+	"required": []string{"title"},
+}

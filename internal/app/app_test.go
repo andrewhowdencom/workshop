@@ -85,7 +85,7 @@ func TestMakeCurrentPrompt_WithRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.role", "reviewer")
+	thr.Metadata["workshop.role"] = "reviewer"
 
 	fn := makeCurrentPrompt(dir, thr)
 	got := fn()
@@ -152,7 +152,7 @@ func TestMakeGetCurrentRoleHandler_WithRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.role", "writer")
+	thr.Metadata["workshop.role"] = "writer"
 
 	handler := makeGetCurrentRoleHandler(dir, thr)
 	result, err := handler(context.Background(), nil, map[string]any{})
@@ -222,7 +222,7 @@ func TestMakeSwitchRoleHandler_Success(t *testing.T) {
 		t.Errorf("result = %q, want %q", result, want)
 	}
 
-	v, ok := thr.GetMetadata("workshop.role")
+	v, ok := thr.Metadata["workshop.role"]
 	if !ok || v != "reviewer" {
 		t.Errorf("metadata = %q, want reviewer", v)
 	}
@@ -269,7 +269,7 @@ func TestMakeSwitchRoleHandler_FrontmatterNameMismatch(t *testing.T) {
 		t.Errorf("switch result = %q, want %q", switchResult, want)
 	}
 
-	v, ok := thr.GetMetadata("workshop.role")
+	v, ok := thr.Metadata["workshop.role"]
 	if !ok || v != "planner" {
 		t.Errorf("metadata = %q, want planner", v)
 	}
@@ -607,7 +607,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 	}
 
 	// Verify metadata stored.
-	meta, ok := thr.GetMetadata("workshop.worktree.path")
+	meta, ok := thr.Metadata["workshop.worktree.path"]
 	if !ok || meta != path {
 		t.Fatalf("metadata = %q, want %q", meta, path)
 	}
@@ -626,7 +626,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 	}
 
 	// Verify metadata cleared.
-	meta, ok = thr.GetMetadata("workshop.worktree.path")
+	meta, ok = thr.Metadata["workshop.worktree.path"]
 	if ok && meta != "" {
 		t.Fatalf("metadata should be cleared, got %q", meta)
 	}
@@ -1178,7 +1178,7 @@ func TestMakeGetCurrentRoleHandler_SandboxPropagation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.role", "writer")
+	thr.Metadata["workshop.role"] = "writer"
 
 	var resolveCalled bool
 	sb := &mockFileSandbox{
@@ -1487,9 +1487,9 @@ func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	got, err := sb.ResolvePath("file.txt")
 	if err != nil {
 		t.Fatalf("ResolvePath error: %v", err)
@@ -1507,9 +1507,9 @@ func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	absPath := "/etc/passwd"
 	got, err := sb.ResolvePath(absPath)
 	if err != nil {
@@ -1527,7 +1527,7 @@ func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	relPath := "file.txt"
 	got, err := sb.ResolvePath(relPath)
 	if err != nil {
@@ -1545,9 +1545,9 @@ func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	got := sb.WorkingDirectory()
 	if got != worktree {
 		t.Errorf("WorkingDirectory = %q, want %q", got, worktree)
@@ -1561,7 +1561,7 @@ func TestWorkshopSandbox_WorkingDirectory_WithoutWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	got := sb.WorkingDirectory()
 	if got != "" {
 		t.Errorf("WorkingDirectory = %q, want empty string", got)
@@ -1579,9 +1579,9 @@ func TestReadFile_ResolvesRelativePathInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.ReadFile(context.Background(), sb, map[string]any{"path": "file.txt"})
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -1608,9 +1608,9 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.ReadFile(context.Background(), sb, map[string]any{"path": filepath.Join(outside, "outside.txt")})
 	if err != nil {
 		t.Fatalf("ReadFile error: %v", err)
@@ -1632,9 +1632,9 @@ func TestWriteFile_ResolvesRelativePathInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	_, err = filesystem.WriteFile(context.Background(), sb, map[string]any{
 		"path":    "newfile.txt",
 		"content": "written from worktree",
@@ -1663,9 +1663,9 @@ func TestEditFile_ResolvesRelativePathInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	_, err = filesystem.EditFile(context.Background(), sb, map[string]any{
 		"path":       "edit.txt",
 		"old_string": "old",
@@ -1698,9 +1698,9 @@ func TestListDirectory_ResolvesRelativePathInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.ListDirectory(context.Background(), sb, map[string]any{"path": "."})
 	if err != nil {
 		t.Fatalf("ListDirectory error: %v", err)
@@ -1726,9 +1726,9 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.SearchFiles(context.Background(), sb, map[string]any{
 		"path":  ".",
 		"query": "match",
@@ -1753,24 +1753,20 @@ func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := bash.Bash(context.Background(), sb, map[string]any{"command": "pwd"})
 	if err != nil {
 		t.Fatalf("bash error: %v", err)
 	}
 
-	m, ok := result.(map[string]any)
+	m, ok := result.(*bash.Result)
 	if !ok {
-		t.Fatalf("result type = %T, want map[string]any", result)
+		t.Fatalf("result type = %T, want *bash.Result", result)
 	}
-	stdout, ok := m["stdout"].(string)
-	if !ok {
-		t.Fatalf("stdout type = %T, want string", m["stdout"])
-	}
-	if !strings.Contains(stdout, worktree) {
-		t.Errorf("stdout = %q, want to contain %q", stdout, worktree)
+	if !strings.Contains(m.Stdout, worktree) {
+		t.Errorf("stdout = %q, want to contain %q", m.Stdout, worktree)
 	}
 }
 
@@ -1782,9 +1778,9 @@ func TestBash_ExplicitWorkingDirectoryRespected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := bash.Bash(context.Background(), sb, map[string]any{
 		"command":             "pwd",
 		"working_directory":   explicitDir,
@@ -1793,16 +1789,12 @@ func TestBash_ExplicitWorkingDirectoryRespected(t *testing.T) {
 		t.Fatalf("bash error: %v", err)
 	}
 
-	m, ok := result.(map[string]any)
+	m, ok := result.(*bash.Result)
 	if !ok {
-		t.Fatalf("result type = %T, want map[string]any", result)
+		t.Fatalf("result type = %T, want *bash.Result", result)
 	}
-	stdout, ok := m["stdout"].(string)
-	if !ok {
-		t.Fatalf("stdout type = %T, want string", m["stdout"])
-	}
-	if !strings.Contains(stdout, explicitDir) {
-		t.Errorf("stdout = %q, want to contain %q", stdout, explicitDir)
+	if !strings.Contains(m.Stdout, explicitDir) {
+		t.Errorf("stdout = %q, want to contain %q", m.Stdout, explicitDir)
 	}
 }
 
@@ -1848,12 +1840,12 @@ func TestGitCommitHandler_WorktreeAware(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktreePath)
+	thr.Metadata["workshop.worktree.path"] = worktreePath
 
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
 	handler := makeGitCommitHandler(thr, pc)
 
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	_, err = handler(context.Background(), sb, map[string]any{"title": "Feature commit"})
 	if err != nil {
 		t.Fatalf("git_commit failed: %v", err)
@@ -1877,7 +1869,7 @@ func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", "/some/worktree/path")
+	thr.Metadata["workshop.worktree.path"] = "/some/worktree/path"
 
 	handler := makeWorkspaceCreateHandler(thr)
 	_, err = handler(context.Background(), nil, map[string]any{"branch": "nested"})
@@ -1896,10 +1888,10 @@ func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thr.SetMetadata("workshop.worktree.path", worktree)
+	thr.Metadata["workshop.worktree.path"] = worktree
 
 	// Verify sandbox resolves relative paths to worktree
-	sb := &workshopSandbox{name: "test", thr: thr}
+	sb := &workshopSandbox{name: "test", mr: thr}
 	got, _ := sb.ResolvePath("file.txt")
 	want := filepath.Join(worktree, "file.txt")
 	if got != want {
@@ -1907,7 +1899,7 @@ func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	}
 
 	// Clear metadata (simulating workspace_destroy)
-	thr.SetMetadata("workshop.worktree.path", "")
+	thr.Metadata["workshop.worktree.path"] = ""
 
 	// Verify sandbox now returns relative paths unchanged
 	got, _ = sb.ResolvePath("file.txt")

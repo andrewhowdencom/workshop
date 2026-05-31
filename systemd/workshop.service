@@ -1,0 +1,12 @@
+[Unit]
+Description=Workshop coding assistant HTTP server
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/go/bin/workshop http --http.addr :8360
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

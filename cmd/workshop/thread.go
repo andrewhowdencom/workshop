@@ -71,10 +71,7 @@ func runThreadListWithStore(days int, store session.Store, w io.Writer) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "ID\tCREATED\tUPDATED\tROLE\n")
 	for _, thr := range filtered {
-		role := ""
-		if r, ok := thr.GetMetadata("workshop.role"); ok {
-			role = r
-		}
+		role := thr.Metadata["workshop.role"]
 		created := thr.CreatedAt.Format("2006-01-02 15:04")
 		updated := thr.UpdatedAt.Format("2006-01-02 15:04")
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", thr.ID, created, updated, role)
