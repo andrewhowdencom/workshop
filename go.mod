@@ -4,12 +4,12 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.3.0
-	github.com/andrewhowdencom/ore/x/conduit/http v0.5.2
+	github.com/andrewhowdencom/ore v0.3.2
+	github.com/andrewhowdencom/ore/x/conduit/http v0.5.3
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.1.3
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.4.3
-	github.com/andrewhowdencom/ore/x/provider/openai v0.3.0
-	github.com/andrewhowdencom/ore/x/tool v0.3.0
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.4.4
+	github.com/andrewhowdencom/ore/x/provider/openai v0.3.1
+	github.com/andrewhowdencom/ore/x/tool v0.3.2
 	github.com/andrewhowdencom/ore/x/tool/bash v0.2.0
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.2.2
 	github.com/andrewhowdencom/ore/x/tool/skills v0.3.1
@@ -73,11 +73,3 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
-
-replace github.com/andrewhowdencom/ore => /home/andrewhowdencom/Development/ore/.worktrees/255
-
-replace github.com/andrewhowdencom/ore/x/conduit/tui => /home/andrewhowdencom/Development/ore/.worktrees/255/x/conduit/tui
-
-replace github.com/andrewhowdencom/ore/x/conduit/http => /home/andrewhowdencom/Development/ore/.worktrees/255/x/conduit/http
-
-replace github.com/andrewhowdencom/ore/x/provider/openai => /home/andrewhowdencom/Development/ore/.worktrees/255/x/provider/openai
