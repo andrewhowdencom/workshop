@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/adrg/xdg"
+	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/workshop/internal/app"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -72,11 +73,19 @@ func loadViperConfigWithPath(v *viper.Viper, configHome string) error {
 	return nil
 }
 
-func configureLogging(cmd *cobra.Command, args []string) error {
+func logLevel() (slog.Level, error) {
 	levelStr := viper.GetString("log-level")
 	var level slog.Level
 	if err := level.UnmarshalText([]byte(levelStr)); err != nil {
-		return fmt.Errorf("invalid log level %q: %w", levelStr, err)
+		return level, fmt.Errorf("invalid log level %q: %w", levelStr, err)
+	}
+	return level, nil
+}
+
+func configureLogging(cmd *cobra.Command, args []string) error {
+	level, err := logLevel()
+	if err != nil {
+		return err
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
@@ -117,7 +126,17 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	if term.IsTerminal(int(os.Stdin.Fd())) {
-		return app.RunTUI(ctx, opts...)
+		// Buffer slog output during the TUI to avoid corrupting the alternate
+		// screen buffer. Flush after the TUI exits.
+		buf := tui.NewLogBuffer()
+		level, err := logLevel()
+		if err != nil {
+			return err
+		}
+		slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: level})))
+		uiErr := app.RunTUI(ctx, opts...)
+		_ = buf.FlushTo(os.Stderr)
+		return uiErr
 	}
 	return app.RunStdio(ctx, opts...)
 }
