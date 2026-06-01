@@ -393,16 +393,16 @@ func newProvider(pc ProviderConfig) (provider.Provider, error) {
 
 // mustRegister panics if tool registration fails. Used for built-in tools
 // whose schemas are baked-in and valid.
-func mustRegister(registry tool.Registry, t provider.Tool, fn tool.ToolFunc) {
-	if err := registry.Register(t.Name, t.Description, t.Schema, fn); err != nil {
+func mustRegister(registry tool.Registry, t tool.Tool, fn tool.ToolFunc) {
+	if err := registry.Register(t, fn); err != nil {
 		panic(fmt.Sprintf("register %s: %v", t.Name, err))
 	}
 }
 
 // mustRegisterRaw is a convenience variant for tools that do not have a
-// provider.Tool struct (e.g., ad-hoc role management tools).
+// tool.Tool struct (e.g., ad-hoc role management tools).
 func mustRegisterRaw(registry tool.Registry, name, description string, schema map[string]any, fn tool.ToolFunc) {
-	if err := registry.Register(name, description, schema, fn); err != nil {
+	if err := registry.Register(tool.Tool{Name: name, Description: description, Schema: schema}, fn); err != nil {
 		panic(fmt.Sprintf("register %s: %v", name, err))
 	}
 }
