@@ -34,6 +34,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	xtool "github.com/andrewhowdencom/ore/x/tool"
+	"github.com/andrewhowdencom/ore/x/usage"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	"github.com/andrewhowdencom/ore/x/tool/settitle"
@@ -300,7 +301,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 		return []loop.Option{
 			loop.WithTransforms(sp, gr),
-			loop.WithHandlers(xtool.NewHandler(registry)),
+			loop.WithHandlers(xtool.NewHandler(registry), usage.New()),
 			loop.WithInvokeOptions(invokeOpts...),
 		}, nil
 	}
