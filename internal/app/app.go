@@ -128,7 +128,7 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 	}
 
 	// Create the HTTP conduit with web UI enabled.
-	httpConduit, err := httpc.New(mgr, httpc.WithUI(), httpc.WithAddr(cfg.httpAddr))
+	httpConduit, err := httpc.New(mgr, httpc.WithUI(), httpc.WithName("workshop"), httpc.WithAddr(cfg.httpAddr))
 	if err != nil {
 		return fmt.Errorf("create HTTP conduit: %w", err)
 	}
