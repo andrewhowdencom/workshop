@@ -108,13 +108,16 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		tui.WithThreadID(cfg.threadID),
 		tui.WithName("ws"),
 		tui.WithStatusZones(map[string]string{
-			"phase":     "lifecycle",
-			"title":     "lifecycle",
-			"thread_id": "context",
-			"cwd":       "context",
-			"git_branch": "context",
-			"role":      "context",
-			"model":     "context",
+			"phase":              "lifecycle",
+			"title":              "lifecycle",
+			"thread_id":          "context",
+			"cwd":                "context",
+			"git_branch":         "context",
+			"role":               "context",
+			"model":              "context",
+			"prompt_tokens":      "lifecycle",
+			"completion_tokens":  "lifecycle",
+			"total_tokens":       "lifecycle",
 		}),
 	)
 	if err != nil {
