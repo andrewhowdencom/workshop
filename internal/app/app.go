@@ -328,16 +328,20 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	defaultMeta := func(stream *session.Stream) map[string]string {
-		role := ""
-		if r, ok := stream.GetMetadata("workshop.role"); ok {
-			role = r
-		}
-		return map[string]string{
+		defaults := map[string]string{
 			"thread_id":  stream.ID(),
 			"cwd":        shortCwd,
 			"git_branch": branch,
-			"role":       role,
 		}
+		role := ""
+		if r, ok := stream.GetMetadata("workshop.role"); ok {
+			role = r
+		} else if cfg.role != "" {
+			role = cfg.role
+			defaults["workshop.role"] = role
+		}
+		defaults["role"] = role
+		return defaults
 	}
 
 	// Create session manager with the ReAct cognitive pattern.
