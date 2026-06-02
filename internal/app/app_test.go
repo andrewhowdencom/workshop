@@ -468,6 +468,96 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 	}
 }
 
+func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
+	mgr, err := buildManager(&config{
+		storeDir: t.TempDir(),
+		role:     "reviewer",
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test-dummy",
+			Model:  "test-model",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildManager error: %v", err)
+	}
+
+	stream, err := mgr.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+
+	role, ok := stream.GetMetadata("workshop.role")
+	if !ok {
+		t.Fatal("workshop.role not seeded for new thread")
+	}
+	if role != "reviewer" {
+		t.Errorf("workshop.role = %q, want reviewer", role)
+	}
+}
+
+func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
+	storeDir := t.TempDir()
+
+	// First session: create with role "reviewer"
+	mgr1, err := buildManager(&config{
+		storeDir: storeDir,
+		role:     "reviewer",
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test-dummy",
+			Model:  "test-model",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildManager error: %v", err)
+	}
+
+	stream1, err := mgr1.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+	threadID := stream1.ID()
+
+	// Verify role was seeded
+	if role, _ := stream1.GetMetadata("workshop.role"); role != "reviewer" {
+		t.Fatalf("initial role = %q, want reviewer", role)
+	}
+
+	// Simulate role change during session (like switch_role tool)
+	stream1.SetMetadata("workshop.role", "writer")
+	if err := stream1.Save(); err != nil {
+		t.Fatalf("save stream: %v", err)
+	}
+	if err := mgr1.Close(threadID); err != nil {
+		t.Fatalf("close stream: %v", err)
+	}
+
+	// Second session: attach with different role "planner"
+	mgr2, err := buildManager(&config{
+		storeDir: storeDir,
+		role:     "planner",
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test-dummy",
+			Model:  "test-model",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildManager error: %v", err)
+	}
+
+	stream2, err := mgr2.Attach(threadID)
+	if err != nil {
+		t.Fatalf("attach stream: %v", err)
+	}
+
+	role, _ := stream2.GetMetadata("workshop.role")
+	if role != "writer" {
+		t.Errorf("workshop.role = %q, want writer (preserved from previous session)", role)
+	}
+}
+
 func TestCoAuthoredByTrailer(t *testing.T) {
 	tests := []struct {
 		name string

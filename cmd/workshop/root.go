@@ -26,6 +26,7 @@ func init() {
 	rootCmd.PersistentFlags().Float64("provider.temperature", 0, "Sampling temperature for the provider (0 = default)")
 	rootCmd.PersistentFlags().String("provider.reasoning-effort", "", "Reasoning effort for the provider (low, medium, high)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
+	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
 
@@ -123,6 +124,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		app.WithProvider(pc),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithWorkingDir(cwd),
+		app.WithRole(viper.GetString("role")),
 	}
 
 	if term.IsTerminal(int(os.Stdin.Fd())) {

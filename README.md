@@ -19,6 +19,9 @@ This project demonstrates how to build a fully fledged agentic application outsi
 | `workshop config init` | Initialize a configuration file from current settings |
 | `workshop version` | Print the build version |
 
+Role files (e.g. `ideation.md`, `build.md`) are loaded from
+`$XDG_DATA_HOME/workshop/roles/` (fallback: `~/.local/share/workshop/roles/`).
+
 ## Usage
 
 ### TUI (default)
@@ -39,6 +42,16 @@ With custom port:
 
 ```bash
 go run ./cmd/workshop http --http.addr :7654
+```
+
+### Start with a role
+
+```bash
+# Via CLI flag
+go run ./cmd/workshop --role ideation
+
+# Via environment variable
+WORKSHOP_ROLE=reviewer go run ./cmd/workshop
 ```
 
 The web chat UI is available at `http://localhost:8080/` (or the configured address).
@@ -113,7 +126,13 @@ Workshop supports an optional YAML configuration file stored in the XDG config d
 | Config file | 3 | `provider.model: gpt-4o` |
 | Default | 4 | Built-in defaults |
 
-For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in the config file, unless `--log-level` is also supplied.
+For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in the config file, unless `--log-level` is also supplied. The same precedence applies to `role`:
+
+| Source | Example |
+|---|---|
+| Flag | `--role=ideation` |
+| Environment | `WORKSHOP_ROLE=reviewer` |
+| Config file | `role: planner` |
 
 > **Security notice:** `config init` writes `provider.api-key` in plaintext. Ensure the generated file is stored securely and never committed to a public repository.
 
