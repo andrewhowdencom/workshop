@@ -121,9 +121,9 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 			"git_branch":         "context",
 			"role":               "context",
 			"model":              "context",
-			"prompt_tokens":      "lifecycle",
-			"completion_tokens":  "lifecycle",
-			"total_tokens":       "lifecycle",
+			"sent":               "lifecycle",
+			"received":           "lifecycle",
+			"total":              "lifecycle",
 		}),
 	)
 	if err != nil {
