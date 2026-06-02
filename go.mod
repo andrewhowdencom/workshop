@@ -4,17 +4,17 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.4.0
+	github.com/andrewhowdencom/ore v0.5.0
 	github.com/andrewhowdencom/ore/x/conduit/http v0.6.0
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.0
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.6.0
-	github.com/andrewhowdencom/ore/x/provider/openai v0.3.3
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.6.1
+	github.com/andrewhowdencom/ore/x/provider/openai v0.4.0
 	github.com/andrewhowdencom/ore/x/tool v0.4.1
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.0
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.3.0
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.4.0
 	github.com/andrewhowdencom/ore/x/tool/settitle v0.1.0
 	github.com/andrewhowdencom/ore/x/tool/skills v0.4.0
-	github.com/andrewhowdencom/ore/x/usage v0.1.0
+	github.com/andrewhowdencom/ore/x/usage v0.1.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	golang.org/x/term v0.43.0
@@ -23,7 +23,7 @@ require (
 
 require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
-	charm.land/bubbletea/v2 v2.0.6 // indirect
+	charm.land/bubbletea/v2 v2.0.7 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
@@ -33,10 +33,10 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260525132238-948f4557a654 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260601155805-6cf7526a1b3f // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260601140041-e36ca9b00c4e // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260602025833-85a30b5e440a // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
