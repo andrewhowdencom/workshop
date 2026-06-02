@@ -60,6 +60,7 @@ type config struct {
 	httpAddr   string
 	provider   ProviderConfig
 	workingDir string
+	role       string
 }
 
 // Option configures the application via functional options.
@@ -89,6 +90,11 @@ func WithHTTPAddr(addr string) Option {
 // WithWorkingDir sets the current working directory to include in the system prompt.
 func WithWorkingDir(dir string) Option {
 	return func(c *config) { c.workingDir = dir }
+}
+
+// WithRole sets the initial role name for new threads.
+func WithRole(name string) Option {
+	return func(c *config) { c.role = name }
 }
 
 // RunTUI initializes and starts the TUI application.
