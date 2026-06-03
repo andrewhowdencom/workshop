@@ -100,12 +100,15 @@ func TestPProf_EmptyAddrFallsBackToDefault(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	maybeStartPProf(ctx, true, "")
+	addr := maybeStartPProf(ctx, true, "")
+	if addr == "" {
+		t.Fatal("maybeStartPProf returned empty address for enabled server")
+	}
 
-	// Give the server time to bind on the default port.
+	// Give the server time to start.
 	time.Sleep(200 * time.Millisecond)
 
-	resp, err := http.Get("http://localhost:8715/debug/pprof/")
+	resp, err := http.Get("http://" + addr + "/debug/pprof/")
 	if err != nil {
 		t.Fatalf("failed to reach fallback pprof server: %v", err)
 	}
