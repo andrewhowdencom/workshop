@@ -96,6 +96,26 @@ func TestPProf_PortInUse(t *testing.T) {
 	conn.Close()
 }
 
+func TestPProf_EmptyAddrFallsBackToDefault(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	maybeStartPProf(ctx, true, "")
+
+	// Give the server time to bind on the default port.
+	time.Sleep(200 * time.Millisecond)
+
+	resp, err := http.Get("http://localhost:8715/debug/pprof/")
+	if err != nil {
+		t.Fatalf("failed to reach fallback pprof server: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status code from fallback: %d", resp.StatusCode)
+	}
+}
+
 func TestPProf_ShutdownOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 

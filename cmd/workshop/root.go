@@ -28,7 +28,7 @@ func init() {
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
 	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
 	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
-	rootCmd.PersistentFlags().String("pprof.addr", "localhost:8715", "TCP address for the pprof server")
+	rootCmd.PersistentFlags().String("pprof.addr", defaultPProfAddr, "TCP address for the pprof server")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
 

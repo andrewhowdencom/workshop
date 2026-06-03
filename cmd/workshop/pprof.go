@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const defaultPProfAddr = "localhost:8715"
+
 // maybeStartPProf starts a background HTTP server with net/http/pprof
 // handlers when enabled. The server listens on the given address and
 // shuts down gracefully when the supplied context is cancelled. If the
@@ -16,6 +18,10 @@ import (
 func maybeStartPProf(ctx context.Context, enabled bool, addr string) {
 	if !enabled {
 		return
+	}
+
+	if addr == "" {
+		addr = defaultPProfAddr
 	}
 
 	srv := &http.Server{

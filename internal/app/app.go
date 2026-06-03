@@ -26,6 +26,9 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/tool"
+
+	"go.opentelemetry.io/otel/trace/noop"
+
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
 	stdioc "github.com/andrewhowdencom/ore/x/conduit/stdio"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
@@ -345,7 +348,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Create session manager with the ReAct cognitive pattern.
-	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor(), session.WithDefaultMetadata(defaultMeta)), nil
+	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor(noop.NewTracerProvider().Tracer("")), session.WithDefaultMetadata(defaultMeta)), nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
