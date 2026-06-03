@@ -6,3 +6,5 @@ log-level: info
 model: accounts/fireworks/models/kimi-k2p6
 store:
     dir: ""
+tracing:
+    endpoint: "http://localhost:4318"  # OTLP/HTTP endpoint; empty = disabled
