@@ -27,6 +27,7 @@ import (
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/tool"
 
+	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
@@ -64,6 +65,7 @@ type config struct {
 	provider   ProviderConfig
 	workingDir string
 	role       string
+	tracer     trace.Tracer
 }
 
 // Option configures the application via functional options.
@@ -98,6 +100,11 @@ func WithWorkingDir(dir string) Option {
 // WithRole sets the initial role name for new threads.
 func WithRole(name string) Option {
 	return func(c *config) { c.role = name }
+}
+
+// WithTracer sets the OpenTelemetry tracer for the application.
+func WithTracer(tracer trace.Tracer) Option {
+	return func(c *config) { c.tracer = tracer }
 }
 
 // RunTUI initializes and starts the TUI application.
@@ -222,6 +229,12 @@ func (s *workshopSandbox) WorkingDirectory() string {
 
 // buildManager creates the shared session manager from configuration.
 func buildManager(cfg *config) (*session.Manager, error) {
+	// Resolve tracer (noop fallback for tests that don't use WithTracer).
+	tracer := cfg.tracer
+	if tracer == nil {
+		tracer = noop.NewTracerProvider().Tracer("")
+	}
+
 	// Create thread store.
 	storeDir := cfg.storeDir
 	if storeDir == "" {
@@ -233,7 +246,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Build provider from generic config.
-	prov, err := newProvider(cfg.provider)
+	prov, err := newProvider(cfg.provider, tracer)
 	if err != nil {
 		return nil, fmt.Errorf("create provider: %w", err)
 	}
@@ -313,8 +326,9 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 		return []loop.Option{
 			loop.WithTransforms(sp, gr),
-			loop.WithHandlers(xtool.NewHandler(registry), usage.New()),
+			loop.WithHandlers(xtool.NewHandler(registry, xtool.WithTracer(tracer)), usage.New()),
 			loop.WithInvokeOptions(invokeOpts...),
+			loop.WithTracer(tracer),
 		}, nil
 	}
 
@@ -348,7 +362,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Create session manager with the ReAct cognitive pattern.
-	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor(noop.NewTracerProvider().Tracer("")), session.WithDefaultMetadata(defaultMeta)), nil
+	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor(tracer), session.WithDefaultMetadata(defaultMeta)), nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
@@ -388,7 +402,7 @@ func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *sk
 }
 
 // newProvider constructs a provider.Provider from generic ProviderConfig.
-func newProvider(pc ProviderConfig) (provider.Provider, error) {
+func newProvider(pc ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
 	switch pc.Kind {
 	case "", "openai":
 		if pc.APIKey == "" {
@@ -401,6 +415,9 @@ func newProvider(pc ProviderConfig) (provider.Provider, error) {
 		opts = append(opts, openai.WithAPIKey(pc.APIKey), openai.WithModel(pc.Model))
 		if pc.BaseURL != "" {
 			opts = append(opts, openai.WithBaseURL(pc.BaseURL))
+		}
+		if tracer != nil {
+			opts = append(opts, openai.WithTracer(tracer))
 		}
 		return openai.New(opts...)
 	default:
