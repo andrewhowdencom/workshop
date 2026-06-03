@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/andrewhowdencom/ore/cognitive"
@@ -132,6 +133,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 			"cwd":                "context",
 			"git_branch":         "context",
 			"role":               "context",
+			"tui.pid":            "context",
 			"model":              "context",
 			"sent":               "lifecycle",
 			"received":           "lifecycle",
@@ -360,6 +362,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			defaults["workshop.role"] = role
 		}
 		defaults["role"] = role
+		defaults["tui.pid"] = strconv.Itoa(os.Getpid())
 		return defaults
 	}
 
