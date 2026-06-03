@@ -391,7 +391,6 @@ func buildManager(cfg *config) (*session.Manager, error) {
 				Provider:      prov,
 				PreserveLastN: cfg.compaction.PreserveLastN,
 			}),
-			compaction.WithStrategy(compaction.KeepLastN{N: cfg.compaction.PreserveLastN}),
 		)
 	}
 
