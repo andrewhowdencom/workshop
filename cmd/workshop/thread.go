@@ -35,8 +35,7 @@ func init() {
 func runThreadList(cmd *cobra.Command, args []string) error {
 	storeDir := viper.GetString("store.dir")
 	if storeDir == "" {
-		fmt.Fprintln(os.Stderr, "warning: store.dir is not set; using in-memory store (no persistent threads to list)")
-		return fmt.Errorf("store.dir must be set for thread list")
+		storeDir = defaultStoreDir()
 	}
 
 	days := viper.GetInt("days")

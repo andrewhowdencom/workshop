@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -168,5 +169,12 @@ func TestRoleFlag_Environment(t *testing.T) {
 	t.Setenv("WORKSHOP_ROLE", "reviewer")
 	if got := v.GetString("role"); got != "reviewer" {
 		t.Errorf("env value: role = %q, want %q", got, "reviewer")
+	}
+}
+
+func TestDefaultStoreDir(t *testing.T) {
+	got := defaultStoreDir()
+	if !strings.Contains(got, filepath.Join("workshop", "threads")) {
+		t.Errorf("defaultStoreDir = %q, want to contain 'workshop/threads'", got)
 	}
 }

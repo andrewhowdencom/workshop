@@ -240,6 +240,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Create thread store.
+	// Keep this fallback in sync with cmd/workshop/defaultStoreDir().
 	storeDir := cfg.storeDir
 	if storeDir == "" {
 		storeDir = filepath.Join(xdg.DataHome, "workshop", "threads")

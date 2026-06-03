@@ -52,6 +52,11 @@ func runConfigInitWithPath(cmd *cobra.Command, args []string, configPath string)
 }
 
 func buildConfigMap() map[string]interface{} {
+	storeDir := viper.GetString("store.dir")
+	if storeDir == "" {
+		storeDir = defaultStoreDir()
+	}
+
 	return map[string]interface{}{
 		"log-level": viper.GetString("log-level"),
 		"provider": map[string]interface{}{
@@ -63,7 +68,7 @@ func buildConfigMap() map[string]interface{} {
 			"reasoning-effort": viper.GetString("provider.reasoning-effort"),
 		},
 		"store": map[string]interface{}{
-			"dir": viper.GetString("store.dir"),
+			"dir": storeDir,
 		},
 		"http": map[string]interface{}{
 			"addr": viper.GetString("http.addr"),

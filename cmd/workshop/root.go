@@ -79,6 +79,11 @@ func loadViperConfigWithPath(v *viper.Viper, configHome string) error {
 	return nil
 }
 
+// defaultStoreDir returns the default path for persistent thread storage.
+func defaultStoreDir() string {
+	return filepath.Join(xdg.DataHome, "workshop", "threads")
+}
+
 func logLevel() (slog.Level, error) {
 	levelStr := viper.GetString("log-level")
 	var level slog.Level

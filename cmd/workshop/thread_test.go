@@ -19,9 +19,10 @@ func TestThreadList_EmptyStoreDir(t *testing.T) {
 	viper.Set("store.dir", "")
 	t.Cleanup(func() { viper.Set("store.dir", oldStoreDir) })
 
-	err := threadListCmd.RunE(threadListCmd, []string{})
-	if err == nil {
-		t.Fatal("expected error for empty store.dir, got nil")
+	// When store.dir is empty, the command should fall back to the default
+	// XDG data directory rather than erroring.
+	if err := threadListCmd.RunE(threadListCmd, []string{}); err != nil {
+		t.Fatalf("expected no error for empty store.dir, got %v", err)
 	}
 }
 

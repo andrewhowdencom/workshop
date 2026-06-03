@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -90,6 +91,41 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	}
 	if got, want := http["addr"], ":8080"; got != want {
 		t.Errorf("http.addr = %v, want %v", got, want)
+	}
+}
+
+func TestRunConfigInitWithPath_UsesDefaultStoreDir(t *testing.T) {
+	setViperValue(t, "provider.model", "gpt-4o")
+	setViperValue(t, "store.dir", "")
+
+	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
+	if err := runConfigInitWithPath(nil, nil, tmpFile); err != nil {
+		t.Fatalf("runConfigInitWithPath: %v", err)
+	}
+
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("read file: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := yaml.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal YAML: %v", err)
+	}
+
+	store, ok := settings["store"].(map[string]interface{})
+	if !ok {
+		t.Fatal("store section missing or not a map")
+	}
+	got, ok := store["dir"].(string)
+	if !ok {
+		t.Fatalf("store.dir is not a string: %T", store["dir"])
+	}
+	if got == "" {
+		t.Errorf("store.dir = empty, want non-empty default")
+	}
+	if !strings.Contains(got, filepath.Join("workshop", "threads")) {
+		t.Errorf("store.dir = %q, want to contain 'workshop/threads'", got)
 	}
 }
 
