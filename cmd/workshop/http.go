@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/andrewhowdencom/workshop/internal/app"
+	"github.com/andrewhowdencom/workshop/internal/telemetry"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -44,6 +46,19 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 
 	maybeStartPProf(ctx, viper.GetBool("pprof"), viper.GetString("pprof.addr"))
 
+	tracer, shutdown, err := telemetry.NewTracer(viper.GetString("tracing.endpoint"))
+	if err != nil {
+		return fmt.Errorf("init telemetry: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdown(shutdownCtx); err != nil {
+			// not using slog here to avoid import cycle / nil logger in short-lived HTTP init
+			fmt.Fprintf(os.Stderr, "tracer shutdown failed: %v\n", err)
+		}
+	}()
+
 	cwd := ""
 	if d, err := os.Getwd(); err == nil {
 		cwd = d
@@ -55,5 +70,6 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		app.WithHTTPAddr(viper.GetString("http.addr")),
 		app.WithWorkingDir(cwd),
 		app.WithRole(viper.GetString("role")),
+		app.WithTracer(tracer),
 	)
 }

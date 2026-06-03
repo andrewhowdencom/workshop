@@ -68,5 +68,8 @@ func buildConfigMap() map[string]interface{} {
 		"http": map[string]interface{}{
 			"addr": viper.GetString("http.addr"),
 		},
+		"tracing": map[string]interface{}{
+			"endpoint": viper.GetString("tracing.endpoint"),
+		},
 	}
 }
