@@ -27,6 +27,8 @@ func init() {
 	rootCmd.PersistentFlags().String("provider.reasoning-effort", "", "Reasoning effort for the provider (low, medium, high)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
 	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
+	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
+	rootCmd.PersistentFlags().String("pprof.addr", "localhost:8715", "TCP address for the pprof server")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
 
@@ -113,6 +115,8 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	maybeStartPProf(ctx, viper.GetBool("pprof"), viper.GetString("pprof.addr"))
 
 	cwd := ""
 	if d, err := os.Getwd(); err == nil {

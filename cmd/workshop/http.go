@@ -42,6 +42,8 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	maybeStartPProf(ctx, viper.GetBool("pprof"), viper.GetString("pprof.addr"))
+
 	cwd := ""
 	if d, err := os.Getwd(); err == nil {
 		cwd = d

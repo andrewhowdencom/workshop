@@ -157,6 +157,32 @@ http:
 
 The previous `ORE_*` and `STORE_DIR` environment variables are no longer supported. Use the `WORKSHOP_` prefix instead.
 
+## Debugging
+
+### pprof
+
+Workshop can expose Go's `net/http/pprof` debug endpoints on a separate
+HTTP listener. Enable it with the `--pprof` flag (or `WORKSHOP_PPROF`
+environment variable):
+
+```bash
+# TUI / stdio mode
+go run ./cmd/workshop --pprof
+
+# HTTP server mode
+go run ./cmd/workshop http --pprof
+```
+
+The default address is `localhost:8715`. Use `--pprof.addr` (or
+`WORKSHOP_PPROF_ADDR`) to change it:
+
+```bash
+go run ./cmd/workshop --pprof --pprof.addr localhost:9999
+```
+
+When enabled, the profile index is available at
+`http://<addr>/debug/pprof/`.
+
 ## Flags
 
 | Flag | Environment Variable | Default | Description |
@@ -171,6 +197,8 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
+| `--pprof` | `WORKSHOP_PPROF` | `false` | Enable the pprof debug server |
+| `--pprof.addr` | `WORKSHOP_PPROF_ADDR` | `localhost:8715` | TCP address for the pprof server |
 
 > **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `provider.api-key`, `log-level`).
 
