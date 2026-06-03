@@ -8,10 +8,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/adrg/xdg"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/workshop/internal/app"
+	"github.com/andrewhowdencom/workshop/internal/telemetry"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"golang.org/x/term"
@@ -29,6 +31,7 @@ func init() {
 	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
 	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
 	rootCmd.PersistentFlags().String("pprof.addr", defaultPProfAddr, "TCP address for the pprof server")
+	rootCmd.PersistentFlags().String("tracing.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL (e.g. http://localhost:4318)")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
 
@@ -118,6 +121,18 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	maybeStartPProf(ctx, viper.GetBool("pprof"), viper.GetString("pprof.addr"))
 
+	tracer, shutdown, err := telemetry.NewTracer(viper.GetString("tracing.endpoint"))
+	if err != nil {
+		return fmt.Errorf("init telemetry: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdown(shutdownCtx); err != nil {
+			slog.Warn("tracer shutdown failed", "error", err)
+		}
+	}()
+
 	cwd := ""
 	if d, err := os.Getwd(); err == nil {
 		cwd = d
@@ -129,6 +144,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithWorkingDir(cwd),
 		app.WithRole(viper.GetString("role")),
+		app.WithTracer(tracer),
 	}
 
 	if term.IsTerminal(int(os.Stdin.Fd())) {

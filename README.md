@@ -151,6 +151,8 @@ store:
   dir: ""              # empty = use $XDG_DATA_HOME/workshop/threads
 http:
   addr: ":8080"
+tracing:
+  endpoint: ""         # OTLP/HTTP collector URL (e.g. http://localhost:4318); empty = disabled
 ```
 
 ### Deprecated variables
@@ -199,6 +201,7 @@ When enabled, the profile index is available at
 | `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
 | `--pprof` | `WORKSHOP_PPROF` | `false` | Enable the pprof debug server |
 | `--pprof.addr` | `WORKSHOP_PPROF_ADDR` | `localhost:8715` | TCP address for the pprof server |
+| `--tracing.endpoint` | `WORKSHOP_TRACING_ENDPOINT` | — | OpenTelemetry OTLP/HTTP endpoint URL (e.g. `http://localhost:4318`); empty = disabled |
 
 > **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `provider.api-key`, `log-level`).
 

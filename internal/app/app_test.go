@@ -22,7 +22,7 @@ import (
 
 func TestNewProvider_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
-	_, err := newProvider(pc)
+	_, err := newProvider(pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -33,7 +33,7 @@ func TestNewProvider_MissingAPIKey(t *testing.T) {
 
 func TestNewProvider_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", APIKey: "sk-test"}
-	_, err := newProvider(pc)
+	_, err := newProvider(pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -44,7 +44,7 @@ func TestNewProvider_MissingModel(t *testing.T) {
 
 func TestNewProvider_UnsupportedKind(t *testing.T) {
 	pc := ProviderConfig{Kind: "unsupported", APIKey: "sk-test", Model: "gpt-4o"}
-	_, err := newProvider(pc)
+	_, err := newProvider(pc, nil)
 	if err == nil {
 		t.Fatal("expected error for unsupported provider kind")
 	}
