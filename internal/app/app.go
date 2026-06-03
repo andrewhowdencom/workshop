@@ -123,6 +123,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	tuiConduit, err := tui.New(mgr,
 		tui.WithThreadID(cfg.threadID),
 		tui.WithName("ws"),
+		tui.WithTracer(cfg.tracer),
 		tui.WithStatusZones(map[string]string{
 			"phase":              "lifecycle",
 			"title":              "lifecycle",
@@ -160,7 +161,7 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 	}
 
 	// Create the HTTP conduit with web UI enabled.
-	httpConduit, err := httpc.New(mgr, httpc.WithUI(), httpc.WithName("workshop"), httpc.WithAddr(cfg.httpAddr))
+	httpConduit, err := httpc.New(mgr, httpc.WithUI(), httpc.WithName("workshop"), httpc.WithAddr(cfg.httpAddr), httpc.WithTracer(cfg.tracer))
 	if err != nil {
 		return fmt.Errorf("create HTTP conduit: %w", err)
 	}
@@ -181,7 +182,7 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 	}
 
 	// Create the stdio conduit.
-	stdioConduit, err := stdioc.New(mgr, stdioc.WithThreadID(cfg.threadID))
+	stdioConduit, err := stdioc.New(mgr, stdioc.WithThreadID(cfg.threadID), stdioc.WithTracer(cfg.tracer))
 	if err != nil {
 		return fmt.Errorf("create stdio conduit: %w", err)
 	}
