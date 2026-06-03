@@ -3,6 +3,7 @@ api:
 base:
     url: "https://api.fireworks.ai/inference/v1"
 log-level: info
+pprof: true
 model: accounts/fireworks/models/kimi-k2p6
 store:
     dir: ""

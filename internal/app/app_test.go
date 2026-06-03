@@ -805,6 +805,7 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 
 	cfg := &config{
 		workingDir: "/test/project",
+		conduit:    "TUI",
 		provider: ProviderConfig{
 			Kind:   "openai",
 			APIKey: "sk-test",
@@ -915,6 +916,7 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 
 	cfg := &config{
 		workingDir: dir,
+		conduit:    "TUI",
 		provider: ProviderConfig{
 			Kind:   "openai",
 			APIKey: "sk-test",
@@ -988,6 +990,7 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 
 	cfg := &config{
 		workingDir: child,
+		conduit:    "TUI",
 		provider: ProviderConfig{
 			Kind:   "openai",
 			APIKey: "sk-test",
@@ -1056,6 +1059,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 
 	cfg := &config{
 		workingDir: dir,
+		conduit:    "TUI",
 		provider: ProviderConfig{
 			Kind:   "openai",
 			APIKey: "sk-test",
@@ -1100,7 +1104,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 	if !strings.Contains(text.Content, "repo instructions") {
 		t.Errorf("prompt does not contain AGENTS.md content: %q", text.Content)
 	}
-	if !strings.Contains(text.Content, "You are the workshop agent.") {
+	if !strings.Contains(text.Content, "You are running the workshop agent") {
 		t.Errorf("prompt does not contain harness: %q", text.Content)
 	}
 	if !strings.Contains(text.Content, "You are running on model test-model.") {
@@ -1114,7 +1118,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 	defaultIdx := strings.Index(text.Content, defaultPrompt)
 	cwdIdx := strings.Index(text.Content, "You are running in:")
 	agentsIdx := strings.Index(text.Content, "repo instructions")
-	harnessIdx := strings.Index(text.Content, "You are the workshop agent.")
+	harnessIdx := strings.Index(text.Content, "You are running the workshop agent")
 	modelIdx := strings.Index(text.Content, "You are running on model test-model.")
 	providerIdx := strings.Index(text.Content, "Provider backend: openai")
 	if defaultIdx == -1 || cwdIdx == -1 || agentsIdx == -1 || harnessIdx == -1 || modelIdx == -1 || providerIdx == -1 {
@@ -1146,6 +1150,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 
 	cfg := &config{
 		workingDir: child,
+		conduit:    "TUI",
 		provider: ProviderConfig{
 			Kind:   "openai",
 			APIKey: "sk-test",

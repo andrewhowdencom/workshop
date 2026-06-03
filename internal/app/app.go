@@ -66,6 +66,7 @@ type config struct {
 	workingDir string
 	role       string
 	tracer     trace.Tracer
+	conduit    string // e.g. "TUI", "HTTP", "stdio"
 }
 
 // Option configures the application via functional options.
@@ -109,7 +110,7 @@ func WithTracer(tracer trace.Tracer) Option {
 
 // RunTUI initializes and starts the TUI application.
 func RunTUI(ctx context.Context, opts ...Option) error {
-	cfg := &config{}
+	cfg := &config{conduit: "TUI"}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -146,7 +147,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 
 // RunHTTP initializes and starts the HTTP web UI application.
 func RunHTTP(ctx context.Context, opts ...Option) error {
-	cfg := &config{}
+	cfg := &config{conduit: "HTTP"}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -171,7 +172,7 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 
 // RunStdio initializes and starts the stdio single-shot application.
 func RunStdio(ctx context.Context, opts ...Option) error {
-	cfg := &config{}
+	cfg := &config{conduit: "stdio"}
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -386,7 +387,12 @@ func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *sk
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
-		systemprompt.WithContentFunc(func() string { return "You are the workshop agent." }),
+		systemprompt.WithContentFunc(func() string {
+			return fmt.Sprintf(
+				"You are running the workshop agent (https://github.com/andrewhowdencom/workshop) on the %s conduit.",
+				cfg.conduit,
+			)
+		}),
 		systemprompt.WithContentFunc(func() string {
 			if cfg.provider.Model == "" {
 				return ""
