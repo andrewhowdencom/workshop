@@ -73,8 +73,12 @@ func buildConfigMap() map[string]interface{} {
 		"http": map[string]interface{}{
 			"addr": viper.GetString("http.addr"),
 		},
-		"pprof":       viper.GetBool("pprof"),
-		"pprof.addr":  viper.GetString("pprof.addr"),
+		"pprof":      viper.GetBool("pprof"),
+		"pprof.addr": viper.GetString("pprof.addr"),
+		"compaction": map[string]interface{}{
+			"max-tokens":      viper.GetInt("compaction.max-tokens"),
+			"preserve-last-n": viper.GetInt("compaction.preserve-last-n"),
+		},
 		"tracing": map[string]interface{}{
 			"endpoint": viper.GetString("tracing.endpoint"),
 		},

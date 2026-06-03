@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.5.1
+	github.com/andrewhowdencom/ore/x/compaction v0.0.0
 	github.com/andrewhowdencom/ore/x/conduit/http v0.6.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.1
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.7.1
@@ -96,5 +97,7 @@ require (
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/andrewhowdencom/ore/x/compaction => ../ore/x/compaction
 
 replace github.com/andrewhowdencom/ore => ../ore

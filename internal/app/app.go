@@ -26,11 +26,13 @@ import (
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/tool"
 
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/andrewhowdencom/ore/x/compaction"
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
 	stdioc "github.com/andrewhowdencom/ore/x/conduit/stdio"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
@@ -39,23 +41,30 @@ import (
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	xtool "github.com/andrewhowdencom/ore/x/tool"
-	"github.com/andrewhowdencom/ore/x/usage"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	"github.com/andrewhowdencom/ore/x/tool/settitle"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
+	"github.com/andrewhowdencom/ore/x/usage"
 
 	"github.com/adrg/xdg"
 )
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
 type ProviderConfig struct {
-	Kind            string  // e.g. "openai"
+	Kind            string // e.g. "openai"
 	APIKey          string
 	Model           string
 	BaseURL         string
 	Temperature     float64
 	ReasoningEffort string
+}
+
+// CompactionConfig holds the configuration for the state compaction
+// framework that reduces conversation history before each inference turn.
+type CompactionConfig struct {
+	MaxTokens     int // 0 = disabled
+	PreserveLastN int // default 10
 }
 
 // config holds the runtime configuration for the application.
@@ -64,6 +73,7 @@ type config struct {
 	storeDir   string
 	httpAddr   string
 	provider   ProviderConfig
+	compaction CompactionConfig
 	workingDir string
 	role       string
 	tracer     trace.Tracer
@@ -104,6 +114,11 @@ func WithRole(name string) Option {
 	return func(c *config) { c.role = name }
 }
 
+// WithCompaction sets the compaction configuration.
+func WithCompaction(c CompactionConfig) Option {
+	return func(cfg *config) { cfg.compaction = c }
+}
+
 // WithTracer sets the OpenTelemetry tracer for the application.
 func WithTracer(tracer trace.Tracer) Option {
 	return func(c *config) { c.tracer = tracer }
@@ -127,17 +142,17 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		tui.WithName("ws"),
 		tui.WithTracer(cfg.tracer),
 		tui.WithStatusZones(map[string]string{
-			"phase":              "lifecycle",
-			"title":              "lifecycle",
-			"thread_id":          "context",
-			"cwd":                "context",
-			"git_branch":         "context",
-			"role":               "context",
-			"tui.pid":            "context",
-			"model":              "context",
-			"sent":               "lifecycle",
-			"received":           "lifecycle",
-			"total":              "lifecycle",
+			"phase":      "lifecycle",
+			"title":      "lifecycle",
+			"thread_id":  "context",
+			"cwd":        "context",
+			"git_branch": "context",
+			"role":       "context",
+			"tui.pid":    "context",
+			"model":      "context",
+			"sent":       "lifecycle",
+			"received":   "lifecycle",
+			"total":      "lifecycle",
 		}),
 	)
 	if err != nil {
@@ -367,8 +382,37 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		return defaults
 	}
 
-	// Create session manager with the ReAct cognitive pattern.
-	return session.NewManager(store, prov, stepFactory, cognitive.NewTurnProcessor(tracer), session.WithDefaultMetadata(defaultMeta)), nil
+	// Build compactor if compaction is enabled.
+	var compactor *compaction.Compactor
+	if cfg.compaction.MaxTokens > 0 {
+		compactor = compaction.New(
+			compaction.WithTrigger(compaction.TokenUsageTrigger{MaxTokens: cfg.compaction.MaxTokens}),
+			compaction.WithStrategy(compaction.SummarizeStrategy{
+				Provider:      prov,
+				PreserveLastN: cfg.compaction.PreserveLastN,
+			}),
+			compaction.WithStrategy(compaction.KeepLastN{N: cfg.compaction.PreserveLastN}),
+		)
+	}
+
+	// Wrap the ReAct processor with optional compaction.
+	processor := func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+		if compactor != nil {
+			if buf, ok := st.(*state.Buffer); ok {
+				compacted, didCompact, err := compactor.MaybeCompact(ctx, buf.Turns())
+				if err != nil {
+					return nil, fmt.Errorf("compaction failed: %w", err)
+				}
+				if didCompact {
+					buf.LoadTurns(compacted)
+				}
+			}
+		}
+		return cognitive.NewTurnProcessor(tracer)(ctx, step, st, prov)
+	}
+
+	// Create session manager.
+	return session.NewManager(store, prov, stepFactory, processor, session.WithDefaultMetadata(defaultMeta)), nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for

@@ -71,5 +71,9 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		app.WithWorkingDir(cwd),
 		app.WithRole(viper.GetString("role")),
 		app.WithTracer(tracer),
+		app.WithCompaction(app.CompactionConfig{
+			MaxTokens:     viper.GetInt("compaction.max-tokens"),
+			PreserveLastN: viper.GetInt("compaction.preserve-last-n"),
+		}),
 	)
 }

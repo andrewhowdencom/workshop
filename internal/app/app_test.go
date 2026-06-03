@@ -445,6 +445,27 @@ func TestBuildManager_Smoke(t *testing.T) {
 	}
 }
 
+func TestBuildManager_WithCompaction(t *testing.T) {
+	mgr, err := buildManager(&config{
+		storeDir: t.TempDir(),
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test-dummy",
+			Model:  "test-model",
+		},
+		compaction: CompactionConfig{
+			MaxTokens:     50000,
+			PreserveLastN: 5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildManager error: %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildManager returned nil manager")
+	}
+}
+
 func TestBuildManager_WithWorkingDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), []byte("project instructions"), 0644); err != nil {
@@ -1877,8 +1898,8 @@ func TestBash_ExplicitWorkingDirectoryRespected(t *testing.T) {
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := bash.Bash(context.Background(), sb, map[string]any{
-		"command":             "pwd",
-		"working_directory":   explicitDir,
+		"command":           "pwd",
+		"working_directory": explicitDir,
 	})
 	if err != nil {
 		t.Fatalf("bash error: %v", err)
