@@ -175,6 +175,8 @@ are summarized via the same LLM provider, and the result is injected as a
 synthetic system turn. The most recent `--compaction.preserve-last-n` turns are
 kept verbatim. Set `--compaction.max-tokens 0` to disable.
 
+Only `SummarizeStrategy` is active; it internally handles preserving the last N turns, so no separate truncation strategy is needed.
+
 ## Debugging
 
 ### pprof
