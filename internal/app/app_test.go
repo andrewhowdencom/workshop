@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/andrewhowdencom/ore/artifact"
+	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
@@ -2026,5 +2027,55 @@ func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	// Verify WorkingDirectory is empty
 	if dir := sb.WorkingDirectory(); dir != "" {
 		t.Errorf("after destroy: WorkingDirectory = %q, want empty", dir)
+	}
+}
+
+// invokedRecorder is a test double that records whether Invoke was called.
+type invokedRecorder struct {
+	invoked bool
+}
+
+func (m *invokedRecorder) Invoke(ctx context.Context, s state.State, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+	m.invoked = true
+	return nil
+}
+
+func TestNewCompactor_Disabled(t *testing.T) {
+	compactor := newCompactor(CompactionConfig{MaxTokens: 0}, nil)
+	if compactor != nil {
+		t.Fatal("expected nil compactor when disabled")
+	}
+}
+
+func TestNewCompactor_UsesSummarizeStrategy(t *testing.T) {
+	mock := &invokedRecorder{}
+	compactor := newCompactor(CompactionConfig{
+		MaxTokens:     100,
+		PreserveLastN: 1,
+	}, mock)
+
+	if compactor == nil {
+		t.Fatal("expected non-nil compactor")
+	}
+
+	// Trigger compaction: last turn has Usage exceeding MaxTokens,
+	// and total turns > PreserveLastN so SummarizeStrategy invokes provider.
+	turns := []state.Turn{
+		{Role: state.RoleUser, Artifacts: []artifact.Artifact{artifact.Text{Content: "hello"}}},
+		{Role: state.RoleAssistant, Artifacts: []artifact.Artifact{
+			artifact.Text{Content: "hi"},
+			artifact.Usage{TotalTokens: 101},
+		}},
+	}
+
+	_, didCompact, err := compactor.MaybeCompact(context.Background(), turns)
+	if err != nil {
+		t.Fatalf("MaybeCompact error: %v", err)
+	}
+	if !didCompact {
+		t.Fatal("expected compaction to fire")
+	}
+	if !mock.invoked {
+		t.Fatal("expected provider to be invoked (SummarizeStrategy calls provider; KeepLastN does not)")
 	}
 }

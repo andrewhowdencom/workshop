@@ -383,16 +383,10 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Build compactor if compaction is enabled.
-	var compactor *compaction.Compactor
-	if cfg.compaction.MaxTokens > 0 {
-		compactor = compaction.New(
-			compaction.WithTrigger(compaction.TokenUsageTrigger{MaxTokens: cfg.compaction.MaxTokens}),
-			compaction.WithStrategy(compaction.SummarizeStrategy{
-				Provider:      prov,
-				PreserveLastN: cfg.compaction.PreserveLastN,
-			}),
-		)
-	}
+	// Note: ore/x/compaction.Compactor supports only a single strategy.
+	// SummarizeStrategy already preserves the last N turns internally,
+	// so KeepLastN is unnecessary and would silently overwrite.
+	compactor := newCompactor(cfg.compaction, prov)
 
 	// Wrap the ReAct processor with optional compaction.
 	processor := func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
@@ -477,6 +471,21 @@ func newProvider(pc ProviderConfig, tracer trace.Tracer) (provider.Provider, err
 	default:
 		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
 	}
+}
+
+// newCompactor builds a compactor from configuration. Returns nil if
+// compaction is disabled (MaxTokens <= 0).
+func newCompactor(cfg CompactionConfig, prov provider.Provider) *compaction.Compactor {
+	if cfg.MaxTokens <= 0 {
+		return nil
+	}
+	return compaction.New(
+		compaction.WithTrigger(compaction.TokenUsageTrigger{MaxTokens: cfg.MaxTokens}),
+		compaction.WithStrategy(compaction.SummarizeStrategy{
+			Provider:      prov,
+			PreserveLastN: cfg.PreserveLastN,
+		}),
+	)
 }
 
 // mustRegister panics if tool registration fails. Used for built-in tools
