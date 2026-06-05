@@ -18,6 +18,7 @@ This project demonstrates how to build a fully fledged agentic application outsi
 | `workshop http` | Run the web UI HTTP server |
 | `workshop config init` | Initialize a configuration file from current settings |
 | `workshop version` | Print the build version |
+| `workshop thread export <id>` | Export a thread to stdout or a file (--format text/json/html, --output file) |
 
 Role files (e.g. `ideation.md`, `build.md`) are loaded from
 `$XDG_DATA_HOME/workshop/roles/` (fallback: `~/.local/share/workshop/roles/`).
@@ -61,6 +62,20 @@ The web chat UI is available at `http://localhost:8080/` (or the configured addr
 ```bash
 go run ./cmd/workshop --thread <uuid>
 ```
+
+### Export a thread
+
+```bash
+go run ./cmd/workshop thread export <uuid> --format html
+```
+
+With output to a file:
+
+```bash
+go run ./cmd/workshop thread export <uuid> --format json --output thread.json
+```
+
+Supported formats are `text` (default), `json`, and `html`.
 
 ### Persistent JSON store
 
