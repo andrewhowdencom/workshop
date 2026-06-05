@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/ore/x/export"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -24,11 +25,23 @@ var threadListCmd = &cobra.Command{
 	RunE:  runThreadList,
 }
 
+var threadExportCmd = &cobra.Command{
+	Use:   "export <id>",
+	Short: "Export a single thread",
+	Args:  cobra.ExactArgs(1),
+	RunE:  runThreadExport,
+}
+
 func init() {
 	threadListCmd.Flags().Int("days", 30, "Lookback period in days")
 	cobra.CheckErr(viper.BindPFlags(threadListCmd.Flags()))
 
+	threadExportCmd.Flags().String("format", "text", "Export format (text, json, html)")
+	threadExportCmd.Flags().String("output", "", "Output file path (default: stdout)")
+	cobra.CheckErr(viper.BindPFlags(threadExportCmd.Flags()))
+
 	threadCmd.AddCommand(threadListCmd)
+	threadCmd.AddCommand(threadExportCmd)
 	rootCmd.AddCommand(threadCmd)
 }
 
@@ -77,4 +90,49 @@ func runThreadListWithStore(days int, store session.Store, w io.Writer) error {
 	}
 
 	return tw.Flush()
+}
+
+func runThreadExport(cmd *cobra.Command, args []string) error {
+	storeDir := viper.GetString("store.dir")
+	if storeDir == "" {
+		storeDir = defaultStoreDir()
+	}
+
+	store, err := session.NewJSONStore(storeDir)
+	if err != nil {
+		return fmt.Errorf("create JSON store: %w", err)
+	}
+
+	format := viper.GetString("format")
+	output := viper.GetString("output")
+
+	var w io.Writer = os.Stdout
+	if output != "" {
+		f, err := os.Create(output)
+		if err != nil {
+			return fmt.Errorf("create output file: %w", err)
+		}
+		defer f.Close()
+		w = f
+	}
+
+	return runThreadExportWithStore(store, args[0], format, w)
+}
+
+func runThreadExportWithStore(store session.Store, id, format string, w io.Writer) error {
+	thread, ok := store.Get(id)
+	if !ok {
+		return fmt.Errorf("thread not found: %s", id)
+	}
+
+	switch format {
+	case "text":
+		return export.Text(w, thread)
+	case "json":
+		return export.JSON(w, thread)
+	case "html":
+		return export.HTML(w, thread)
+	default:
+		return fmt.Errorf("unsupported format: %s", format)
+	}
 }
