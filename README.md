@@ -18,6 +18,7 @@ This project demonstrates how to build a fully fledged agentic application outsi
 | `workshop http` | Run the web UI HTTP server |
 | `workshop config init` | Initialize a configuration file from current settings |
 | `workshop version` | Print the build version |
+| `workshop thread export <id>` | Export a thread to stdout or a file (--format text, json, html; --output file) |
 
 Role files (e.g. `ideation.md`, `build.md`) are loaded from
 `$XDG_DATA_HOME/workshop/roles/` (fallback: `~/.local/share/workshop/roles/`).
@@ -61,6 +62,31 @@ The web chat UI is available at `http://localhost:8080/` (or the configured addr
 ```bash
 go run ./cmd/workshop --thread <uuid>
 ```
+
+### `workshop thread export`
+
+```bash
+go run ./cmd/workshop thread export <uuid>
+```
+
+Print plain text to stdout (default):
+
+```bash
+go run ./cmd/workshop thread export <uuid> --format html
+```
+
+With output to a file:
+
+```bash
+go run ./cmd/workshop thread export <uuid> --format json --output thread.json
+```
+
+Supported formats are `text` (default), `json`, and `html`.
+
+> **Note:** Exporting very large threads may generate substantial output.
+> The HTML format includes minimal styling; you may wish to redirect it to a file and open it in a browser.
+
+See also: [Persistent JSON store](#persistent-json-store) for the default storage location of thread data.
 
 ### Persistent JSON store
 
@@ -214,6 +240,8 @@ When enabled, the profile index is available at
 | `--provider.temperature` | `WORKSHOP_PROVIDER_TEMPERATURE` | `0` | Sampling temperature (0 = default) |
 | `--provider.reasoning-effort` | `WORKSHOP_PROVIDER_REASONING_EFFORT` | — | Reasoning effort (low, medium, high) |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | `$XDG_DATA_HOME/workshop/threads` | Directory for persistent JSON thread storage |
+| `--format` | — | `text` | Export format (text, json, html) (thread export command only) |
+| `--output` | — | — | Output file path (default: stdout) (thread export command only) |
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
