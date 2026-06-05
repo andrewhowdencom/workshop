@@ -168,3 +168,109 @@ func TestThreadList_DaysFilter(t *testing.T) {
 		t.Errorf("output missing old thread with days=90: %s", output)
 	}
 }
+
+func TestThreadExport_Success(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store, err := session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	if err := store.Save(thr); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	formats := []string{"text", "json", "html"}
+	for _, format := range formats {
+		t.Run(format, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := runThreadExportWithStore(store, thr.ID, format, &buf); err != nil {
+				t.Fatalf("runThreadExportWithStore(%s): %v", format, err)
+			}
+
+			output := buf.String()
+			if output == "" {
+				t.Errorf("expected non-empty output for format %s", format)
+			}
+
+			switch format {
+			case "text":
+				if !strings.Contains(output, thr.ID) {
+					t.Errorf("text output missing thread ID: %s", output)
+				}
+			case "json":
+				if !strings.Contains(output, `"id"`) {
+					t.Errorf("json output missing id field: %s", output)
+				}
+			case "html":
+				if !strings.Contains(output, "<!DOCTYPE html>") {
+					t.Errorf("html output missing DOCTYPE: %s", output)
+				}
+			}
+		})
+	}
+}
+
+func TestThreadExport_NotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store, err := session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var buf bytes.Buffer
+	err = runThreadExportWithStore(store, "nonexistent-id", "text", &buf)
+	if err == nil {
+		t.Fatal("expected error for nonexistent thread")
+	}
+	if !strings.Contains(err.Error(), "thread not found") {
+		t.Errorf("error message missing 'thread not found': %v", err)
+	}
+}
+
+func TestThreadExport_FileOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store, err := session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	if err := store.Save(thr); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	outputFile := filepath.Join(tmpDir, "output.txt")
+
+	oldStoreDir := viper.GetString("store.dir")
+	oldOutput := viper.GetString("output")
+	viper.Set("store.dir", tmpDir)
+	viper.Set("output", outputFile)
+	t.Cleanup(func() {
+		viper.Set("store.dir", oldStoreDir)
+		viper.Set("output", oldOutput)
+	})
+
+	if err := threadExportCmd.RunE(threadExportCmd, []string{thr.ID}); err != nil {
+		t.Fatalf("threadExportCmd.RunE: %v", err)
+	}
+
+	content, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("read output file: %v", err)
+	}
+
+	if !strings.Contains(string(content), thr.ID) {
+		t.Errorf("file output missing thread ID: %s", string(content))
+	}
+}
