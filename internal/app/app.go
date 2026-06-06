@@ -437,7 +437,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 				}
 			}
 		}
-		return cognitive.NewTurnProcessor(tracer)(ctx, step, st, prov)
+		return cognitive.NewTurnProcessor(cognitive.ReActFactory, tracer)(ctx, step, st, prov)
 	}
 
 	// Create session manager.
