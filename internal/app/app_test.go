@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/andrewhowdencom/ore/artifact"
+	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
@@ -96,185 +97,58 @@ func TestMakeCurrentPrompt_WithRole(t *testing.T) {
 	}
 }
 
-func TestMakeListRolesHandler(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("Prompt A.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "b.md"), []byte("Prompt B.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	handler := makeListRolesHandler(dir)
-	result, err := handler(context.Background(), nil, map[string]any{})
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	roles, ok := result.([]map[string]any)
-	if !ok {
-		t.Fatalf("result type = %T, want []map[string]any", result)
-	}
-	if len(roles) != 2 {
-		t.Fatalf("len(roles) = %d, want 2", len(roles))
-	}
-}
-
-func TestMakeGetCurrentRoleHandler_Default(t *testing.T) {
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	handler := makeGetCurrentRoleHandler(t.TempDir(), thr)
-	result, err := handler(context.Background(), nil, map[string]any{})
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	m, ok := result.(map[string]any)
-	if !ok {
-		t.Fatalf("result type = %T, want map[string]any", result)
-	}
-	if m["role"] != "default" {
-		t.Errorf("role = %q, want default", m["role"])
-	}
-}
-
-func TestMakeGetCurrentRoleHandler_WithRole(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "writer.md"), []byte("---\nname: writer\ndescription: W\n---\nYou write.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.role"] = "writer"
-
-	handler := makeGetCurrentRoleHandler(dir, thr)
-	result, err := handler(context.Background(), nil, map[string]any{})
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	m, ok := result.(map[string]any)
-	if !ok {
-		t.Fatalf("result type = %T, want map[string]any", result)
-	}
-	if m["role"] != "writer" {
-		t.Errorf("role = %q, want writer", m["role"])
-	}
-	if m["description"] != "W" {
-		t.Errorf("description = %q, want W", m["description"])
-	}
-}
-
-func TestMakeSwitchRoleHandler_MissingName(t *testing.T) {
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	handler := makeSwitchRoleHandler(t.TempDir(), thr)
-	_, err = handler(context.Background(), nil, map[string]any{})
-	if err == nil {
-		t.Fatal("expected error for missing name argument")
-	}
-}
-
-func TestMakeSwitchRoleHandler_InvalidRole(t *testing.T) {
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	handler := makeSwitchRoleHandler(t.TempDir(), thr)
-	_, err = handler(context.Background(), nil, map[string]any{"name": "nonexistent"})
-	if err == nil {
-		t.Fatal("expected error for nonexistent role")
-	}
-}
-
-func TestMakeSwitchRoleHandler_Success(t *testing.T) {
+func TestRoleSlashHandler(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	store := session.NewMemoryStore()
-	thr, err := store.Create()
+	prov := &testSlashProvider{}
+	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+		return nil, nil
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+		return st, nil
+	})
+
+	stream, err := mgr.Create()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("create stream: %v", err)
 	}
 
-	handler := makeSwitchRoleHandler(dir, thr)
-	result, err := handler(context.Background(), nil, map[string]any{"name": "reviewer"})
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	// Valid role
+	_, err = rc.Handler(context.Background(), []string{"reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	want := "Switched to role: reviewer"
-	if result != want {
-		t.Errorf("result = %q, want %q", result, want)
-	}
 
-	v, ok := thr.Metadata["workshop.role"]
+	v, ok := stream.GetMetadata("workshop.role")
 	if !ok || v != "reviewer" {
 		t.Errorf("metadata = %q, want reviewer", v)
 	}
+
+	// Invalid role
+	_, err = rc.Handler(context.Background(), []string{"nonexistent"})
+	if err == nil {
+		t.Fatal("expected error for nonexistent role")
+	}
+
+	// Missing name
+	_, err = rc.Handler(context.Background(), []string{})
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
 }
 
-func TestMakeSwitchRoleHandler_FrontmatterNameMismatch(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "planner.md"), []byte("---\nname: strategist\ndescription: Strategic planning role\n---\nYou are a strategic planner.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
+type testSlashProvider struct{}
 
-	// list_roles should return the filename "planner", not the frontmatter "strategist"
-	listHandler := makeListRolesHandler(dir)
-	result, err := listHandler(context.Background(), nil, map[string]any{})
-	if err != nil {
-		t.Fatalf("list handler error: %v", err)
-	}
-
-	roles, ok := result.([]map[string]any)
-	if !ok {
-		t.Fatalf("result type = %T, want []map[string]any", result)
-	}
-	if len(roles) != 1 {
-		t.Fatalf("len(roles) = %d, want 1", len(roles))
-	}
-	if roles[0]["name"] != "planner" {
-		t.Errorf("role name = %q, want planner", roles[0]["name"])
-	}
-
-	// switch_role should succeed with "planner"
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	switchHandler := makeSwitchRoleHandler(dir, thr)
-	switchResult, err := switchHandler(context.Background(), nil, map[string]any{"name": "planner"})
-	if err != nil {
-		t.Fatalf("switch handler error: %v", err)
-	}
-	want := "Switched to role: planner"
-	if switchResult != want {
-		t.Errorf("switch result = %q, want %q", switchResult, want)
-	}
-
-	v, ok := thr.Metadata["workshop.role"]
-	if !ok || v != "planner" {
-		t.Errorf("metadata = %q, want planner", v)
-	}
+func (p *testSlashProvider) Invoke(ctx context.Context, s state.State, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+	return nil
 }
+
 
 func TestRoleToolSchemas(t *testing.T) {
 	tests := []struct {
@@ -282,58 +156,6 @@ func TestRoleToolSchemas(t *testing.T) {
 		schema map[string]any
 		checks func(t *testing.T, schema map[string]any)
 	}{
-		{
-			name:   "listRolesSchema",
-			schema: listRolesSchema,
-			checks: func(t *testing.T, schema map[string]any) {
-				if schema["type"] != "object" {
-					t.Errorf("listRolesSchema.type = %v, want object", schema["type"])
-				}
-			},
-		},
-		{
-			name:   "getCurrentRoleSchema",
-			schema: getCurrentRoleSchema,
-			checks: func(t *testing.T, schema map[string]any) {
-				if schema["type"] != "object" {
-					t.Errorf("getCurrentRoleSchema.type = %v, want object", schema["type"])
-				}
-			},
-		},
-		{
-			name:   "switchRoleSchema",
-			schema: switchRoleSchema,
-			checks: func(t *testing.T, schema map[string]any) {
-				if schema["type"] != "object" {
-					t.Errorf("switchRoleSchema.type = %v, want object", schema["type"])
-				}
-				props, ok := schema["properties"].(map[string]any)
-				if !ok {
-					t.Fatal("switchRoleSchema missing properties")
-				}
-				nameProp, ok := props["name"].(map[string]any)
-				if !ok {
-					t.Fatal("switchRoleSchema.properties missing name")
-				}
-				if nameProp["type"] != "string" {
-					t.Errorf("properties.name.type = %v, want string", nameProp["type"])
-				}
-				reqRaw, ok := schema["required"].([]interface{})
-				if !ok {
-					t.Fatalf("switchRoleSchema.required is not an array: %T", schema["required"])
-				}
-				found := false
-				for _, r := range reqRaw {
-					if s, ok := r.(string); ok && s == "name" {
-						found = true
-						break
-					}
-				}
-				if !found {
-					t.Errorf("required does not contain 'name': %v", reqRaw)
-				}
-			},
-		},
 		{
 			name:   "createWorkspaceSchema",
 			schema: createWorkspaceSchema,
@@ -1259,93 +1081,6 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 	}
 }
 
-func TestMakeListRolesHandler_SandboxPropagation(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte("Prompt A.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	var resolveCalled bool
-	sb := &mockFileSandbox{
-		resolveFunc: func(path string) (string, error) {
-			resolveCalled = true
-			return path, nil
-		},
-	}
-
-	handler := makeListRolesHandler(dir)
-	_, err := handler(context.Background(), sb, map[string]any{})
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	if !resolveCalled {
-		t.Error("handler did not pass sandbox to listRoleDefinitions")
-	}
-}
-
-func TestMakeGetCurrentRoleHandler_SandboxPropagation(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "writer.md"), []byte("---\nname: writer\ndescription: W\n---\nYou write.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.role"] = "writer"
-
-	var resolveCalled bool
-	sb := &mockFileSandbox{
-		resolveFunc: func(path string) (string, error) {
-			resolveCalled = true
-			return path, nil
-		},
-	}
-
-	handler := makeGetCurrentRoleHandler(dir, thr)
-	_, err = handler(context.Background(), sb, map[string]any{})
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	if !resolveCalled {
-		t.Error("handler did not pass sandbox to loadRole")
-	}
-}
-
-func TestMakeSwitchRoleHandler_SandboxPropagation(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var resolveCalled bool
-	sb := &mockFileSandbox{
-		resolveFunc: func(path string) (string, error) {
-			resolveCalled = true
-			return path, nil
-		},
-	}
-
-	handler := makeSwitchRoleHandler(dir, thr)
-	_, err = handler(context.Background(), sb, map[string]any{"name": "reviewer"})
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-
-	if !resolveCalled {
-		t.Error("handler did not pass sandbox to loadRole")
-	}
-}
 
 // mockSkillDiscoverer is a test double for skills.Discoverer.
 type mockSkillDiscoverer struct {

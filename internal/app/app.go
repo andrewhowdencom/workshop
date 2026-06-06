@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
@@ -38,6 +39,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/ore/x/guardrails"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
+	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	xtool "github.com/andrewhowdencom/ore/x/tool"
@@ -219,6 +221,39 @@ type metadataStore interface {
 	SetMetadata(key, value string)
 }
 
+// roleCommand handles the /role slash command for switching roles
+// without triggering an LLM turn.
+type roleCommand struct {
+	mu     sync.Mutex
+	stream *session.Stream
+	rdir   string
+}
+
+// Handler validates the role name and updates the stream metadata.
+func (c *roleCommand) Handler(ctx context.Context, args []string) (session.Event, error) {
+	if len(args) == 0 {
+		return nil, fmt.Errorf("missing role name")
+	}
+	name := args[0]
+	if _, err := loadRole(c.rdir, name, nil); err != nil {
+		return nil, fmt.Errorf("role %q not found: %w", name, err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stream == nil {
+		return nil, fmt.Errorf("no active stream")
+	}
+	c.stream.SetMetadata("workshop.role", name)
+	return nil, nil
+}
+
+// SetStream updates the shared stream reference.
+func (c *roleCommand) SetStream(s *session.Stream) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stream = s
+}
+
 // workshopSandbox is a FileSandbox that resolves relative paths against the
 // active git worktree stored in stream metadata. Absolute paths pass through
 // unchanged. It also provides WorkingDirectory for command execution defaults.
@@ -271,10 +306,16 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		return nil, fmt.Errorf("create provider: %w", err)
 	}
 
+	// Create role command handler.
+	rc := &roleCommand{rdir: roleDir()}
+
+	// Create slash command registry.
+	slashReg := slash.NewRegistry()
+	slashReg.Bind("role", rc.Handler)
+
 	// Step factory: inject system prompt and guardrails as transforms.
 	stepFactory := func(stream *session.Stream) ([]loop.Option, error) {
-		// Resolve the roles directory once for this step.
-		rdir := roleDir()
+		rc.SetStream(stream)
 
 		// Set up progressive skill discovery from repo and home directories.
 		var discoverers []skills.Discoverer
@@ -322,11 +363,6 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		mustRegister(registry, filesystem.ListDirectoryTool, filesystem.ListDirectory)
 		mustRegister(registry, filesystem.SearchFilesTool, filesystem.SearchFiles)
 		mustRegister(registry, bash.BashTool, bash.Bash)
-
-		// Role management tools.
-		mustRegisterRaw(registry, "list_roles", "List all available role definitions.", listRolesSchema, makeListRolesHandler(rdir))
-		mustRegisterRaw(registry, "get_current_role", "Get the currently active role for this thread.", getCurrentRoleSchema, makeGetCurrentRoleHandler(rdir, stream))
-		mustRegisterRaw(registry, "switch_role", "Switch to a different role for this thread.", switchRoleSchema, makeSwitchRoleHandler(rdir, stream))
 
 		// Workspace and git tools.
 		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(stream))
@@ -405,7 +441,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Create session manager.
-	return session.NewManager(store, prov, stepFactory, processor, session.WithDefaultMetadata(defaultMeta)), nil
+	return session.NewManager(store, prov, stepFactory, processor, session.WithDefaultMetadata(defaultMeta), session.WithInterceptor(slashReg)), nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
@@ -547,72 +583,6 @@ func makeWorkingDirContent(dir string) func() string {
 			return ""
 		}
 		return fmt.Sprintf("You are running in: %s. This is the user's active project directory; explore it proactively.", dir)
-	}
-}
-
-// makeListRolesHandler returns a tool handler that lists available role
-// definitions from the given directory. The sandbox argument is received
-// from the tool framework and passed through to the role I/O layer.
-func makeListRolesHandler(rdir string) tool.ToolFunc {
-	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
-		roles, err := listRoleDefinitions(rdir, sb)
-		if err != nil {
-			return nil, err
-		}
-		result := make([]map[string]any, 0, len(roles))
-		for _, r := range roles {
-			result = append(result, map[string]any{
-				"name":        r.Name,
-				"description": r.Description,
-			})
-		}
-		return result, nil
-	}
-}
-
-// makeGetCurrentRoleHandler returns a tool handler that returns the currently
-// active role for the given metadata reader. The sandbox argument is received
-// from the tool framework and passed through to the role I/O layer.
-func makeGetCurrentRoleHandler(rdir string, mr metadataReader) tool.ToolFunc {
-	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
-		roleName := "default"
-		if v, ok := mr.GetMetadata("workshop.role"); ok && v != "" {
-			roleName = v
-		}
-		role, err := loadRole(rdir, roleName, sb)
-		if err != nil {
-			return map[string]any{
-				"role":           roleName,
-				"description":    "",
-				"prompt_preview": "",
-			}, nil
-		}
-		preview := role.Prompt
-		if len(preview) > 200 {
-			preview = preview[:200] + "..."
-		}
-		return map[string]any{
-			"role":           role.Name,
-			"description":    role.Description,
-			"prompt_preview": preview,
-		}, nil
-	}
-}
-
-// makeSwitchRoleHandler returns a tool handler that validates and switches
-// the active role for the given metadata store. The sandbox argument is
-// received from the tool framework and passed through to the role I/O layer.
-func makeSwitchRoleHandler(rdir string, ms metadataStore) tool.ToolFunc {
-	return func(ctx context.Context, sb tool.Sandbox, args map[string]any) (any, error) {
-		name, ok := args["name"].(string)
-		if !ok || name == "" {
-			return nil, fmt.Errorf("missing required argument: name")
-		}
-		if _, err := loadRole(rdir, name, sb); err != nil {
-			return nil, fmt.Errorf("role %q not found", name)
-		}
-		ms.SetMetadata("workshop.role", name)
-		return fmt.Sprintf("Switched to role: %s", name), nil
 	}
 }
 
