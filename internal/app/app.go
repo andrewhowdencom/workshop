@@ -466,7 +466,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Wrap the ReAct processor with optional compaction.
-	processor := func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+	processor := func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
 		if compactor != nil {
 			if buf, ok := st.(*state.Buffer); ok {
 				compacted, didCompact, err := compactor.MaybeCompact(ctx, buf.Turns())
@@ -478,7 +478,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 				}
 			}
 		}
-		return cognitive.NewTurnProcessor(cognitive.ReActFactory, tracer)(ctx, step, st, prov)
+		return cognitive.NewTurnProcessor(cognitive.ReActFactory, tracer)(ctx, executor, st, prov)
 	}
 
 	// Create session manager.

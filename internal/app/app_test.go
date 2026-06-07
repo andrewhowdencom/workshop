@@ -108,7 +108,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
 		return st, nil
 	})
 
@@ -149,7 +149,7 @@ func TestCompactSlashHandler_Disabled(t *testing.T) {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
 		return st, nil
 	})
 
@@ -175,7 +175,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
 		return st, nil
 	})
 
