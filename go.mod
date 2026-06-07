@@ -5,17 +5,17 @@ go 1.26.2
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.6.1
-	github.com/andrewhowdencom/ore/x/compaction v0.0.0
-	github.com/andrewhowdencom/ore/x/conduit/http v0.6.1
+	github.com/andrewhowdencom/ore/x/compaction v0.3.0
+	github.com/andrewhowdencom/ore/x/conduit/http v0.6.3
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.1
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.7.1
-	github.com/andrewhowdencom/ore/x/provider/openai v0.4.1
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.7.4
+	github.com/andrewhowdencom/ore/x/provider/openai v0.4.2
 	github.com/andrewhowdencom/ore/x/tool v0.4.2
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.1
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.4.1
 	github.com/andrewhowdencom/ore/x/tool/settitle v0.1.0
 	github.com/andrewhowdencom/ore/x/tool/skills v0.4.0
-	github.com/andrewhowdencom/ore/x/usage v0.1.1
+	github.com/andrewhowdencom/ore/x/usage v0.1.2
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -45,14 +45,14 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260601155805-6cf7526a1b3f // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260602025833-85a30b5e440a // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260607010151-cd19a2bba55f // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dlclark/regexp2/v2 v2.1.1 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -85,6 +85,7 @@ require (
 	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/yuin/goldmark-emoji v1.0.6 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace v0.69.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
