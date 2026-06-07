@@ -179,7 +179,6 @@ http:
   addr: ":8080"
 compaction:
   max-tokens: 100000    # 0 = disabled; trigger compaction when tokens exceed this
-  preserve-last-n: 10   # keep this many most recent turns during compaction
 tracing:
   endpoint: ""         # OTLP/HTTP collector URL (e.g. http://localhost:4318); empty = disabled
 ```
@@ -196,10 +195,10 @@ inference. This keeps recent context intact while retaining key facts from
 earlier in the conversation.
 
 Compaction is triggered by token usage reported by the provider
-(`--compaction.max-tokens`). When triggered, the oldest (non-preserved) turns
+(`--compaction.max-tokens`). When triggered, turns that exceed the token budget
 are summarized via the same LLM provider, and the result is injected as a
-synthetic system turn. The most recent `--compaction.preserve-last-n` turns are
-kept verbatim. Set `--compaction.max-tokens 0` to disable.
+synthetic system turn. The newest turns that fit within the budget are kept
+verbatim. Set `--compaction.max-tokens 0` to disable.
 
 You can also force compaction at any time by typing `/compact` in the TUI or
 stdio interface. This immediately compacts the conversation history regardless
@@ -253,7 +252,6 @@ When enabled, the profile index is available at
 | `--pprof` | `WORKSHOP_PPROF` | `false` | Enable the pprof debug server |
 | `--pprof.addr` | `WORKSHOP_PPROF_ADDR` | `localhost:0` | TCP address for the pprof server |
 | `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Trigger compaction when total tokens exceed this threshold (0 = disabled) |
-| `--compaction.preserve-last-n` | `WORKSHOP_COMPACTION_PRESERVE_LAST_N` | `10` | Number of most recent turns to preserve during compaction |
 | `--tracing.endpoint` | `WORKSHOP_TRACING_ENDPOINT` | — | OpenTelemetry OTLP/HTTP endpoint URL (e.g. `http://localhost:4318`); empty = disabled |
 
 > **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `provider.api-key`, `log-level`).

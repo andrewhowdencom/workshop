@@ -84,9 +84,6 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	if got, want := compaction["max-tokens"], 100000; got != want {
 		t.Errorf("compaction.max-tokens = %v, want %v", got, want)
 	}
-	if got, want := compaction["preserve-last-n"], 10; got != want {
-		t.Errorf("compaction.preserve-last-n = %v, want %v", got, want)
-	}
 
 	store, ok := settings["store"].(map[string]interface{})
 	if !ok {
