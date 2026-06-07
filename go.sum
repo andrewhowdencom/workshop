@@ -36,6 +36,8 @@ github.com/andrewhowdencom/ore/x/tool/skills v0.4.0 h1:E4GE2X12EtCYeSejTc2rvsKOM
 github.com/andrewhowdencom/ore/x/tool/skills v0.4.0/go.mod h1:WOoxsj6CFHKIEM04kp9car0y1SRTQlCQkhY5sed6F2o=
 github.com/andrewhowdencom/ore/x/usage v0.1.1 h1:3puYyRU501pg3FDsE7ObCKxOWEhr8ax0QKE+FnP0yGQ=
 github.com/andrewhowdencom/ore/x/usage v0.1.1/go.mod h1:hBFM7D8rmbwQXR3tlO/29SX/niuZ1NKujWap75ssceE=
+github.com/andrewhowdencom/ore/x/verifier v0.1.0 h1:xJfas8uz8DJBNPPvquXBu7K7cPkUhDFWlNe5/YKrdQw=
+github.com/andrewhowdencom/ore/x/verifier v0.1.0/go.mod h1:8U3wTptkVIwaso+pKxc7C0AH4TLi73rD2u+KwkDOYfw=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=
 github.com/atotto/clipboard v0.1.4/go.mod h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=

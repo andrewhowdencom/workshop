@@ -201,6 +201,11 @@ are summarized via the same LLM provider, and the result is injected as a
 synthetic system turn. The most recent `--compaction.preserve-last-n` turns are
 kept verbatim. Set `--compaction.max-tokens 0` to disable.
 
+You can also force compaction at any time by typing `/compact` in the TUI or
+stdio interface. This immediately compacts the conversation history regardless
+of the current token count. If compaction is disabled (`--compaction.max-tokens 0`),
+the command will return an error.
+
 Only `SummarizeStrategy` is active; it internally handles preserving the last N turns, so no separate truncation strategy is needed.
 
 ## Debugging
