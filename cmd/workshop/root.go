@@ -33,7 +33,6 @@ func init() {
 	rootCmd.PersistentFlags().String("pprof.addr", defaultPProfAddr, "TCP address for the pprof server")
 	rootCmd.PersistentFlags().String("tracing.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL (e.g. http://localhost:4318)")
 	rootCmd.PersistentFlags().Int("compaction.max-tokens", 100000, "Trigger compaction when total tokens exceed this threshold (0 = disabled)")
-	rootCmd.PersistentFlags().Int("compaction.preserve-last-n", 10, "Number of most recent turns to preserve during compaction")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
 
@@ -153,8 +152,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		app.WithRole(viper.GetString("role")),
 		app.WithTracer(tracer),
 		app.WithCompaction(app.CompactionConfig{
-			MaxTokens:     viper.GetInt("compaction.max-tokens"),
-			PreserveLastN: viper.GetInt("compaction.preserve-last-n"),
+			MaxTokens: viper.GetInt("compaction.max-tokens"),
 		}),
 	}
 

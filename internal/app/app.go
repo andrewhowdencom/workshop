@@ -65,8 +65,7 @@ type ProviderConfig struct {
 // CompactionConfig holds the configuration for the state compaction
 // framework that reduces conversation history before each inference turn.
 type CompactionConfig struct {
-	MaxTokens     int // 0 = disabled
-	PreserveLastN int // default 10
+	MaxTokens int // 0 = disabled
 }
 
 // config holds the runtime configuration for the application.

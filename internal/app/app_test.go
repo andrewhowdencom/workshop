@@ -173,7 +173,7 @@ func TestCompactSlashHandler_Disabled(t *testing.T) {
 
 func TestCompactSlashHandler_Enabled(t *testing.T) {
 	store := session.NewMemoryStore()
-	prov := &testSlashProvider{}
+	prov := &testSummarizeProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
@@ -185,9 +185,10 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 		t.Fatalf("create stream: %v", err)
 	}
 
-	// Pre-populate the stream with 5 user turns.
+	// Pre-populate the stream with 5 user turns containing long text so
+	// the heuristic token estimate exceeds MaxTokens=1.
 	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
+		err = stream.Process(context.Background(), session.UserMessageEvent{Content: strings.Repeat("a", 100)})
 		if err != nil {
 			t.Fatalf("process event %d: %v", i, err)
 		}
@@ -199,7 +200,10 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	}
 
 	compactor := compaction.New(
-		compaction.WithStrategy(compaction.KeepLastN{N: 2}),
+		compaction.WithStrategy(compaction.SummarizeStrategy{
+			Provider:  &testSummarizeProvider{},
+			MaxTokens: 1,
+		}),
 	)
 	cc := &compactCommand{compactor: compactor}
 	cc.SetStream(stream)
@@ -213,17 +217,27 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 turns after compaction, got %d", len(got))
 	}
-	if got[0].Artifacts[0].(artifact.Text).Content != "message 3" {
-		t.Errorf("first turn = %q, want message 3", got[0].Artifacts[0].(artifact.Text).Content)
+	if got[0].Role != state.RoleSystem {
+		t.Errorf("first turn role = %v, want RoleSystem", got[0].Role)
 	}
-	if got[1].Artifacts[0].(artifact.Text).Content != "message 4" {
-		t.Errorf("second turn = %q, want message 4", got[1].Artifacts[0].(artifact.Text).Content)
+	if got[0].Artifacts[0].(artifact.Text).Content != "summary" {
+		t.Errorf("summary turn = %q, want summary", got[0].Artifacts[0].(artifact.Text).Content)
+	}
+	if got[1].Artifacts[0].(artifact.Text).Content != strings.Repeat("a", 100) {
+		t.Errorf("last turn = %q, want 100 'a's", got[1].Artifacts[0].(artifact.Text).Content)
 	}
 }
 
 type testSlashProvider struct{}
 
 func (p *testSlashProvider) Invoke(ctx context.Context, s state.State, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+	return nil
+}
+
+type testSummarizeProvider struct{}
+
+func (p *testSummarizeProvider) Invoke(ctx context.Context, s state.State, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+	ch <- artifact.Text{Content: "summary"}
 	return nil
 }
 
@@ -355,8 +369,7 @@ func TestBuildManager_WithCompaction(t *testing.T) {
 			Model:  "test-model",
 		},
 		compaction: CompactionConfig{
-			MaxTokens:     50000,
-			PreserveLastN: 5,
+			MaxTokens: 50000,
 		},
 	})
 	if err != nil {
@@ -1863,8 +1876,7 @@ func TestNewCompactor_Disabled(t *testing.T) {
 func TestNewCompactor_UsesSummarizeStrategy(t *testing.T) {
 	mock := &invokedRecorder{}
 	compactor := newCompactor(CompactionConfig{
-		MaxTokens:     100,
-		PreserveLastN: 1,
+		MaxTokens: 100,
 	}, mock)
 
 	if compactor == nil {
