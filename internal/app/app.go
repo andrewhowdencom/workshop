@@ -230,21 +230,22 @@ type roleCommand struct {
 }
 
 // Handler validates the role name and updates the stream metadata.
-func (c *roleCommand) Handler(ctx context.Context, args []string) (session.Event, error) {
+func (c *roleCommand) Handler(ctx context.Context, cmd slash.Command) (slash.Result, error) {
+	args := slash.Fields(cmd.Input)
 	if len(args) == 0 {
-		return nil, fmt.Errorf("missing role name")
+		return slash.Result{}, fmt.Errorf("missing role name")
 	}
 	name := args[0]
 	if _, err := loadRole(c.rdir, name, nil); err != nil {
-		return nil, fmt.Errorf("role %q not found: %w", name, err)
+		return slash.Result{}, fmt.Errorf("role %q not found: %w", name, err)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stream == nil {
-		return nil, fmt.Errorf("no active stream")
+		return slash.Result{}, fmt.Errorf("no active stream")
 	}
 	c.stream.SetMetadata("workshop.role", name)
-	return nil, nil
+	return slash.Result{}, nil
 }
 
 // SetStream updates the shared stream reference.
@@ -265,25 +266,25 @@ type compactCommand struct {
 // Handler forces an immediate compaction of the active thread's state.
 // If compaction is disabled, it returns an error. The event is consumed
 // (nil, nil) so no LLM inference is triggered.
-func (c *compactCommand) Handler(ctx context.Context, args []string) (session.Event, error) {
+func (c *compactCommand) Handler(ctx context.Context, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.compactor == nil {
-		return nil, fmt.Errorf("compaction is not enabled")
+		return slash.Result{}, fmt.Errorf("compaction is not enabled")
 	}
 	if c.stream == nil {
-		return nil, fmt.Errorf("no active stream")
+		return slash.Result{}, fmt.Errorf("no active stream")
 	}
 	turns := c.stream.Turns()
 	compacted, _, err := c.compactor.ForceCompact(ctx, turns)
 	if err != nil {
-		return nil, err
+		return slash.Result{}, err
 	}
 	c.stream.LoadTurns(compacted)
 	if err := c.stream.Save(); err != nil {
-		return nil, fmt.Errorf("save thread: %w", err)
+		return slash.Result{}, fmt.Errorf("save thread: %w", err)
 	}
-	return nil, nil
+	return slash.Result{}, nil
 }
 
 // SetStream updates the shared stream reference.
@@ -356,8 +357,8 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 	// Create slash command registry.
 	slashReg := slash.NewRegistry()
-	slashReg.Bind("role", rc.Handler)
-	slashReg.Bind("compact", cc.Handler)
+	slashReg.Bind("role", "Switch to a different role", rc.Handler)
+	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
 
 	// Step factory: inject system prompt and guardrails as transforms.
 	stepFactory := func(stream *session.Stream) ([]loop.Option, error) {
@@ -559,8 +560,8 @@ func newCompactor(cfg CompactionConfig, prov provider.Provider) *compaction.Comp
 	return compaction.New(
 		compaction.WithTrigger(compaction.TokenUsageTrigger{MaxTokens: cfg.MaxTokens}),
 		compaction.WithStrategy(compaction.SummarizeStrategy{
-			Provider:      prov,
-			PreserveLastN: cfg.PreserveLastN,
+			Provider:  prov,
+			MaxTokens: cfg.MaxTokens,
 		}),
 	)
 }

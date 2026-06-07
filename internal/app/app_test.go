@@ -15,6 +15,7 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
+	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/compaction"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
@@ -121,7 +122,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	rc.SetStream(stream)
 
 	// Valid role
-	_, err = rc.Handler(context.Background(), []string{"reviewer"})
+	_, err = rc.Handler(context.Background(), slash.Command{Name: "role", Input: "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -132,13 +133,13 @@ func TestRoleSlashHandler(t *testing.T) {
 	}
 
 	// Invalid role
-	_, err = rc.Handler(context.Background(), []string{"nonexistent"})
+	_, err = rc.Handler(context.Background(), slash.Command{Name: "role", Input: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent role")
 	}
 
 	// Missing name
-	_, err = rc.Handler(context.Background(), []string{})
+	_, err = rc.Handler(context.Background(), slash.Command{Name: "role", Input: ""})
 	if err == nil {
 		t.Fatal("expected error for missing name")
 	}
@@ -161,7 +162,7 @@ func TestCompactSlashHandler_Disabled(t *testing.T) {
 	cc := &compactCommand{compactor: nil}
 	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), []string{})
+	_, err = cc.Handler(context.Background(), slash.Command{Name: "compact", Input: ""})
 	if err == nil {
 		t.Fatal("expected error when compaction is disabled")
 	}
@@ -203,7 +204,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	cc := &compactCommand{compactor: compactor}
 	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), []string{})
+	_, err = cc.Handler(context.Background(), slash.Command{Name: "compact", Input: ""})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -1871,9 +1872,9 @@ func TestNewCompactor_UsesSummarizeStrategy(t *testing.T) {
 	}
 
 	// Trigger compaction: last turn has Usage exceeding MaxTokens,
-	// and total turns > PreserveLastN so SummarizeStrategy invokes provider.
+	// and the heuristic token estimate exceeds MaxTokens so SummarizeStrategy invokes provider.
 	turns := []state.Turn{
-		{Role: state.RoleUser, Artifacts: []artifact.Artifact{artifact.Text{Content: "hello"}}},
+		{Role: state.RoleUser, Artifacts: []artifact.Artifact{artifact.Text{Content: strings.Repeat("a", 500)}}},
 		{Role: state.RoleAssistant, Artifacts: []artifact.Artifact{
 			artifact.Text{Content: "hi"},
 			artifact.Usage{TotalTokens: 101},
