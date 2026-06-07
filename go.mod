@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.5.2
+	github.com/andrewhowdencom/ore v0.6.1
 	github.com/andrewhowdencom/ore/x/compaction v0.0.0
 	github.com/andrewhowdencom/ore/x/conduit/http v0.6.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.1
@@ -33,6 +33,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
+	github.com/andrewhowdencom/ore/x/verifier v0.1.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect

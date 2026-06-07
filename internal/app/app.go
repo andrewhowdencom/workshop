@@ -254,6 +254,45 @@ func (c *roleCommand) SetStream(s *session.Stream) {
 	c.stream = s
 }
 
+// compactCommand handles the /compact slash command for forcing conversation
+// compaction without triggering an LLM turn.
+type compactCommand struct {
+	mu        sync.Mutex
+	stream    *session.Stream
+	compactor *compaction.Compactor
+}
+
+// Handler forces an immediate compaction of the active thread's state.
+// If compaction is disabled, it returns an error. The event is consumed
+// (nil, nil) so no LLM inference is triggered.
+func (c *compactCommand) Handler(ctx context.Context, args []string) (session.Event, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.compactor == nil {
+		return nil, fmt.Errorf("compaction is not enabled")
+	}
+	if c.stream == nil {
+		return nil, fmt.Errorf("no active stream")
+	}
+	turns := c.stream.Turns()
+	compacted, _, err := c.compactor.ForceCompact(ctx, turns)
+	if err != nil {
+		return nil, err
+	}
+	c.stream.LoadTurns(compacted)
+	if err := c.stream.Save(); err != nil {
+		return nil, fmt.Errorf("save thread: %w", err)
+	}
+	return nil, nil
+}
+
+// SetStream updates the shared stream reference.
+func (c *compactCommand) SetStream(s *session.Stream) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stream = s
+}
+
 // workshopSandbox is a FileSandbox that resolves relative paths against the
 // active git worktree stored in stream metadata. Absolute paths pass through
 // unchanged. It also provides WorkingDirectory for command execution defaults.
@@ -306,16 +345,24 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		return nil, fmt.Errorf("create provider: %w", err)
 	}
 
+	// Build compactor if compaction is enabled.
+	compactor := newCompactor(cfg.compaction, prov)
+
 	// Create role command handler.
 	rc := &roleCommand{rdir: roleDir()}
+
+	// Create compact command handler.
+	cc := &compactCommand{compactor: compactor}
 
 	// Create slash command registry.
 	slashReg := slash.NewRegistry()
 	slashReg.Bind("role", rc.Handler)
+	slashReg.Bind("compact", cc.Handler)
 
 	// Step factory: inject system prompt and guardrails as transforms.
 	stepFactory := func(stream *session.Stream) ([]loop.Option, error) {
 		rc.SetStream(stream)
+		cc.SetStream(stream)
 
 		// Set up progressive skill discovery from repo and home directories.
 		var discoverers []skills.Discoverer
@@ -417,12 +464,6 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		defaults["tui.pid"] = strconv.Itoa(os.Getpid())
 		return defaults
 	}
-
-	// Build compactor if compaction is enabled.
-	// Note: ore/x/compaction.Compactor supports only a single strategy.
-	// SummarizeStrategy already preserves the last N turns internally,
-	// so KeepLastN is unnecessary and would silently overwrite.
-	compactor := newCompactor(cfg.compaction, prov)
 
 	// Wrap the ReAct processor with optional compaction.
 	processor := func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
