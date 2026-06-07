@@ -15,6 +15,7 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
+	"github.com/andrewhowdencom/ore/x/compaction"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
@@ -140,6 +141,82 @@ func TestRoleSlashHandler(t *testing.T) {
 	_, err = rc.Handler(context.Background(), []string{})
 	if err == nil {
 		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestCompactSlashHandler_Disabled(t *testing.T) {
+	store := session.NewMemoryStore()
+	prov := &testSlashProvider{}
+	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+		return nil, nil
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+		return st, nil
+	})
+
+	stream, err := mgr.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+
+	cc := &compactCommand{compactor: nil}
+	cc.SetStream(stream)
+
+	_, err = cc.Handler(context.Background(), []string{})
+	if err == nil {
+		t.Fatal("expected error when compaction is disabled")
+	}
+	if !strings.Contains(err.Error(), "compaction is not enabled") {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestCompactSlashHandler_Enabled(t *testing.T) {
+	store := session.NewMemoryStore()
+	prov := &testSlashProvider{}
+	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+		return nil, nil
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider) (state.State, error) {
+		return st, nil
+	})
+
+	stream, err := mgr.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+
+	// Pre-populate the stream with 5 user turns.
+	for i := 0; i < 5; i++ {
+		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
+		if err != nil {
+			t.Fatalf("process event %d: %v", i, err)
+		}
+	}
+
+	turns := stream.Turns()
+	if len(turns) != 5 {
+		t.Fatalf("expected 5 turns, got %d", len(turns))
+	}
+
+	compactor := compaction.New(
+		compaction.WithStrategy(compaction.KeepLastN{N: 2}),
+	)
+	cc := &compactCommand{compactor: compactor}
+	cc.SetStream(stream)
+
+	_, err = cc.Handler(context.Background(), []string{})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	got := stream.Turns()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 turns after compaction, got %d", len(got))
+	}
+	if got[0].Artifacts[0].(artifact.Text).Content != "message 3" {
+		t.Errorf("first turn = %q, want message 3", got[0].Artifacts[0].(artifact.Text).Content)
+	}
+	if got[1].Artifacts[0].(artifact.Text).Content != "message 4" {
+		t.Errorf("second turn = %q, want message 4", got[1].Artifacts[0].(artifact.Text).Content)
 	}
 }
 
