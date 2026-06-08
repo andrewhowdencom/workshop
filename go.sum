@@ -20,8 +20,6 @@ github.com/andrewhowdencom/ore/x/conduit/http v0.6.3 h1:kYiFwQvh2LjnKPjbZjHuB+QX
 github.com/andrewhowdencom/ore/x/conduit/http v0.6.3/go.mod h1:3j+VV65qJEeNYQ+6ghn7mv+JSGH5EwUe295Skk07BdY=
 github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.1 h1:I9DuMF4phCG9KGcv8XK2ysrS+InjbTlOlT/uAKwiXys=
 github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.1/go.mod h1:W9bRdlJa2jizU7qP9Wee8dS/TigPtFjA/DrkeW5jri8=
-github.com/andrewhowdencom/ore/x/conduit/tui v0.7.4 h1:Z/FXfq6u9tHRPpS+u9/KVrYQRIdLxaldTHnevuidP5I=
-github.com/andrewhowdencom/ore/x/conduit/tui v0.7.4/go.mod h1:sw3ysZ76QbSVCsMExTpm7Xbw24KyVD022lC5TGkUIyQ=
 github.com/andrewhowdencom/ore/x/provider/openai v0.4.2 h1:kRKKh4JCtOTbILB7JaJvx/SjLOR7tnPn5xusorUHIC0=
 github.com/andrewhowdencom/ore/x/provider/openai v0.4.2/go.mod h1:T9+ibJmw5JFshqIW7G6w+nVirpfzUuUqKR0OSLEr/fI=
 github.com/andrewhowdencom/ore/x/tool v0.4.2 h1:R45ZKT/QGglyid8hjv3OaDICyGzTvgVv3vsY5Sl2hMw=

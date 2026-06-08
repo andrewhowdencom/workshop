@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/andrewhowdencom/ore/artifact"
@@ -1902,5 +1904,177 @@ func TestNewCompactor_UsesSummarizeStrategy(t *testing.T) {
 	}
 	if !mock.invoked {
 		t.Fatal("expected provider to be invoked (SummarizeStrategy calls provider; KeepLastN does not)")
+	}
+}
+
+func TestCompactionNotifier(t *testing.T) {
+	t.Run("NotifyWithoutReloader", func(t *testing.T) {
+		n := &compactionNotifier{}
+		n.Notify([]state.Turn{}) // should not panic
+	})
+
+	t.Run("NotifyWithReloader", func(t *testing.T) {
+		n := &compactionNotifier{}
+		var got []state.Turn
+		n.SetReloader(func(turns []state.Turn) {
+			got = turns
+		})
+		want := []state.Turn{{Role: state.RoleUser}}
+		n.Notify(want)
+		if len(got) != 1 || got[0].Role != state.RoleUser {
+			t.Errorf("got %v, want %v", got, want)
+		}
+	})
+
+	t.Run("SetReloaderOverwrites", func(t *testing.T) {
+		n := &compactionNotifier{}
+		var firstCalled, secondCalled bool
+		n.SetReloader(func(turns []state.Turn) {
+			firstCalled = true
+		})
+		n.SetReloader(func(turns []state.Turn) {
+			secondCalled = true
+		})
+		n.Notify(nil)
+		if firstCalled {
+			t.Error("first reloader was called, expected overwrite")
+		}
+		if !secondCalled {
+			t.Error("second reloader was not called")
+		}
+	})
+
+	t.Run("NotifyNilTurns", func(t *testing.T) {
+		n := &compactionNotifier{}
+		var got []state.Turn
+		n.SetReloader(func(turns []state.Turn) {
+			got = turns
+		})
+		n.Notify(nil)
+		if got != nil {
+			t.Errorf("got %v, want nil", got)
+		}
+	})
+
+	t.Run("ThreadSafety", func(t *testing.T) {
+		n := &compactionNotifier{}
+		var count int64
+		n.SetReloader(func(turns []state.Turn) {
+			atomic.AddInt64(&count, 1)
+		})
+
+		var wg sync.WaitGroup
+		for i := 0; i < 100; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				n.Notify([]state.Turn{})
+			}()
+		}
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				n.SetReloader(func(turns []state.Turn) {
+					atomic.AddInt64(&count, 1)
+				})
+			}(i)
+		}
+		wg.Wait()
+
+		if count == 0 {
+			t.Error("reloader was never called")
+		}
+	})
+}
+
+func TestCompactSlashHandler_Notifies(t *testing.T) {
+	store := session.NewMemoryStore()
+	prov := &testSlashProvider{}
+	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+		return nil, nil
+	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+		return st, nil
+	})
+
+	stream, err := mgr.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+
+	// Pre-populate the stream with 5 user turns.
+	for i := 0; i < 5; i++ {
+		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
+		if err != nil {
+			t.Fatalf("process event %d: %v", i, err)
+		}
+	}
+
+	turns := stream.Turns()
+	if len(turns) != 5 {
+		t.Fatalf("expected 5 turns, got %d", len(turns))
+	}
+
+	compactor := compaction.New(
+		compaction.WithStrategy(compaction.KeepLastN{N: 2}),
+	)
+
+	var notified []state.Turn
+	notifier := &compactionNotifier{}
+	notifier.SetReloader(func(turns []state.Turn) {
+		notified = turns
+	})
+
+	cc := &compactCommand{compactor: compactor, notifier: notifier}
+	cc.SetStream(stream)
+
+	_, err = cc.Handler(context.Background(), slash.Command{Name: "compact", Input: ""})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if len(notified) != 2 {
+		t.Fatalf("expected notifier to receive 2 turns, got %d", len(notified))
+	}
+	if notified[0].Artifacts[0].(artifact.Text).Content != "message 3" {
+		t.Errorf("first turn = %q, want message 3", notified[0].Artifacts[0].(artifact.Text).Content)
+	}
+	if notified[1].Artifacts[0].(artifact.Text).Content != "message 4" {
+		t.Errorf("second turn = %q, want message 4", notified[1].Artifacts[0].(artifact.Text).Content)
+	}
+}
+
+func TestBuildManager_CompactionNotifier(t *testing.T) {
+	var notified []state.Turn
+	notifier := &compactionNotifier{}
+	notifier.SetReloader(func(turns []state.Turn) {
+		notified = turns
+	})
+
+	mgr, err := buildManager(&config{
+		storeDir: t.TempDir(),
+		provider: ProviderConfig{
+			Kind:   "openai",
+			APIKey: "sk-test-dummy",
+			Model:  "test-model",
+		},
+		compaction: CompactionConfig{
+			MaxTokens:     50000,
+			PreserveLastN: 5,
+		},
+		compactionNotifier: notifier,
+	})
+	if err != nil {
+		t.Fatalf("buildManager error: %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildManager returned nil manager")
+	}
+
+	// Verify that the notifier is still functional after buildManager.
+	testTurns := []state.Turn{{Role: state.RoleUser}}
+	notifier.Notify(testTurns)
+	if len(notified) != 1 || notified[0].Role != state.RoleUser {
+		t.Errorf("notifier did not receive test turns: got %v", notified)
 	}
 }
