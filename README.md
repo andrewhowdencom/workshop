@@ -205,6 +205,9 @@ stdio interface. This immediately compacts the conversation history regardless
 of the current token count. If compaction is disabled (`--compaction.max-tokens 0`),
 the command will return an error.
 
+When running in TUI mode, the conversation history is automatically reloaded
+after compaction so the display reflects the newly compacted state.
+
 Only `SummarizeStrategy` is active; it internally handles preserving the last N turns, so no separate truncation strategy is needed.
 
 ## Debugging
