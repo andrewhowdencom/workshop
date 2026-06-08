@@ -46,16 +46,28 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 
 	maybeStartPProf(ctx, viper.GetBool("pprof"), viper.GetString("pprof.addr"))
 
-	tracer, shutdown, err := telemetry.NewTracer(viper.GetString("tracing.endpoint"))
+	tracer, tracerShutdown, err := telemetry.NewTracer(viper.GetString("tracing.endpoint"))
 	if err != nil {
 		return fmt.Errorf("init telemetry: %w", err)
 	}
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := shutdown(shutdownCtx); err != nil {
+		if err := tracerShutdown(shutdownCtx); err != nil {
 			// not using slog here to avoid import cycle / nil logger in short-lived HTTP init
 			fmt.Fprintf(os.Stderr, "tracer shutdown failed: %v\n", err)
+		}
+	}()
+
+	meter, meterShutdown, err := telemetry.NewMeter(viper.GetString("tracing.endpoint"))
+	if err != nil {
+		return fmt.Errorf("init metrics: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := meterShutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "meter shutdown failed: %v\n", err)
 		}
 	}()
 
@@ -71,6 +83,7 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		app.WithWorkingDir(cwd),
 		app.WithRole(viper.GetString("role")),
 		app.WithTracer(tracer),
+		app.WithMeter(meter),
 		app.WithCompaction(app.CompactionConfig{
 			MaxTokens:     viper.GetInt("compaction.max-tokens"),
 			PreserveLastN: viper.GetInt("compaction.preserve-last-n"),
