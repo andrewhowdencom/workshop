@@ -433,12 +433,16 @@ func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
 		t.Fatalf("create stream: %v", err)
 	}
 
-	role, ok := stream.GetMetadata("workshop.role")
+	role, ok := stream.GetMetadata("role")
 	if !ok {
-		t.Fatal("workshop.role not seeded for new thread")
+		t.Fatal("role not seeded for new thread")
 	}
 	if role != "reviewer" {
-		t.Errorf("workshop.role = %q, want reviewer", role)
+		t.Errorf("role = %q, want reviewer", role)
+	}
+	// workshop.role should not be set for new threads; only explicit /role changes set it
+	if _, ok := stream.GetMetadata("workshop.role"); ok {
+		t.Error("workshop.role should not be seeded for new threads")
 	}
 }
 
@@ -465,12 +469,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	}
 	threadID := stream1.ID()
 
-	// Verify role was seeded
-	if role, _ := stream1.GetMetadata("workshop.role"); role != "reviewer" {
-		t.Fatalf("initial role = %q, want reviewer", role)
-	}
-
-	// Simulate role change during session (like switch_role tool)
+	// Simulate role change during session (like /role command)
 	stream1.SetMetadata("workshop.role", "writer")
 	if err := stream1.Save(); err != nil {
 		t.Fatalf("save stream: %v", err)
@@ -501,6 +500,10 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	role, _ := stream2.GetMetadata("workshop.role")
 	if role != "writer" {
 		t.Errorf("workshop.role = %q, want writer (preserved from previous session)", role)
+	}
+	// The display role should reflect the persisted workshop.role, not the new cfg.role
+	if displayRole, _ := stream2.GetMetadata("role"); displayRole != "writer" {
+		t.Errorf("role = %q, want writer (from persisted workshop.role)", displayRole)
 	}
 }
 
