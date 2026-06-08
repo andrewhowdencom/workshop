@@ -165,6 +165,10 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		opt(cfg)
 	}
 
+	// Create a compaction notifier to forward compacted turns to the TUI.
+	notifier := &compactionNotifier{}
+	cfg.compactionNotifier = notifier
+
 	mgr, err := buildManager(cfg)
 	if err != nil {
 		return err
@@ -191,6 +195,15 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	)
 	if err != nil {
 		return fmt.Errorf("create TUI conduit: %w", err)
+	}
+
+	// Wire the notifier to reload the TUI history when compaction occurs.
+	if tuiImpl, ok := tuiConduit.(*tui.TUI); ok {
+		notifier.SetReloader(func(turns []state.Turn) {
+			if err := tuiImpl.ReloadHistory(turns); err != nil {
+				// Best-effort: ignore reload errors to avoid disrupting compaction.
+			}
+		})
 	}
 
 	return tuiConduit.Start(ctx)

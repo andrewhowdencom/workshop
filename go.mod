@@ -107,4 +107,6 @@ replace github.com/andrewhowdencom/ore/x/compaction => ../ore/x/compaction
 
 replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
 
+replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
+
 replace github.com/andrewhowdencom/ore => ../ore
