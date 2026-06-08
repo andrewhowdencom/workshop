@@ -4,19 +4,19 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.7.0
-	github.com/andrewhowdencom/ore/x/compaction v0.3.1
-	github.com/andrewhowdencom/ore/x/conduit/http v0.6.3
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.1
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.7.4
-	github.com/andrewhowdencom/ore/x/provider/openai v0.4.2
-	github.com/andrewhowdencom/ore/x/telemetry v0.0.0-00010101000000-000000000000
-	github.com/andrewhowdencom/ore/x/tool v0.4.2
-	github.com/andrewhowdencom/ore/x/tool/bash v0.3.1
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.4.1
-	github.com/andrewhowdencom/ore/x/tool/settitle v0.1.0
-	github.com/andrewhowdencom/ore/x/tool/skills v0.4.0
-	github.com/andrewhowdencom/ore/x/usage v0.1.2
+	github.com/andrewhowdencom/ore v0.7.1
+	github.com/andrewhowdencom/ore/x/compaction v0.4.0
+	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.2
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.8.1
+	github.com/andrewhowdencom/ore/x/provider/openai v0.4.4
+	github.com/andrewhowdencom/ore/x/telemetry v0.1.0
+	github.com/andrewhowdencom/ore/x/tool v0.4.4
+	github.com/andrewhowdencom/ore/x/tool/bash v0.3.3
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.4.3
+	github.com/andrewhowdencom/ore/x/tool/settitle v0.1.1
+	github.com/andrewhowdencom/ore/x/tool/skills v0.4.2
+	github.com/andrewhowdencom/ore/x/usage v0.1.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -27,7 +27,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
-	golang.org/x/term v0.43.0
+	golang.org/x/term v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -37,7 +37,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
-	github.com/andrewhowdencom/ore/x/verifier v0.1.0 // indirect
+	github.com/andrewhowdencom/ore/x/verifier v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
@@ -46,10 +46,10 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260601155805-6cf7526a1b3f // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260608091853-35bcb7319efa // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260607010151-cd19a2bba55f // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260608090822-c3ad58c6c9e5 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
@@ -94,9 +94,9 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.81.1 // indirect

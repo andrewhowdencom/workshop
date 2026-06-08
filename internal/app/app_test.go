@@ -26,6 +26,18 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 )
 
+// keepLastN is a test-only compaction strategy that retains only the last N turns.
+type keepLastN struct {
+	N int
+}
+
+func (k keepLastN) Compact(ctx context.Context, turns []state.Turn) ([]state.Turn, error) {
+	if len(turns) <= k.N {
+		return turns, nil
+	}
+	return turns[len(turns)-k.N:], nil
+}
+
 func TestNewProvider_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
 	_, err := newProvider(pc, nil)
@@ -202,9 +214,9 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	}
 
 	compactor := compaction.New(
+		compaction.WithTrigger(compaction.TurnCountTrigger{N: 1}),
 		compaction.WithStrategy(compaction.SummarizeStrategy{
-			Provider:  &testSummarizeProvider{},
-			MaxTokens: 1,
+			Provider: &testSummarizeProvider{},
 		}),
 	)
 	cc := &compactCommand{compactor: compactor}
@@ -216,17 +228,14 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	}
 
 	got := stream.Turns()
-	if len(got) != 2 {
-		t.Fatalf("expected 2 turns after compaction, got %d", len(got))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 turn after compaction, got %d", len(got))
 	}
 	if got[0].Role != state.RoleSystem {
 		t.Errorf("first turn role = %v, want RoleSystem", got[0].Role)
 	}
 	if got[0].Artifacts[0].(artifact.Text).Content != "summary" {
 		t.Errorf("summary turn = %q, want summary", got[0].Artifacts[0].(artifact.Text).Content)
-	}
-	if got[1].Artifacts[0].(artifact.Text).Content != strings.Repeat("a", 100) {
-		t.Errorf("last turn = %q, want 100 'a's", got[1].Artifacts[0].(artifact.Text).Content)
 	}
 }
 
@@ -2016,7 +2025,7 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	}
 
 	compactor := compaction.New(
-		compaction.WithStrategy(compaction.KeepLastN{N: 2}),
+		compaction.WithStrategy(keepLastN{N: 2}),
 	)
 
 	var notified []state.Turn
@@ -2059,8 +2068,7 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 			Model:  "test-model",
 		},
 		compaction: CompactionConfig{
-			MaxTokens:     50000,
-			PreserveLastN: 5,
+			MaxTokens: 50000,
 		},
 		compactionNotifier: notifier,
 	})

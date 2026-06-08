@@ -200,9 +200,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	// Wire the notifier to reload the TUI history when compaction occurs.
 	if tuiImpl, ok := tuiConduit.(*tui.TUI); ok {
 		notifier.SetReloader(func(turns []state.Turn) {
-			if err := tuiImpl.ReloadHistory(turns); err != nil {
-				// Best-effort: ignore reload errors to avoid disrupting compaction.
-			}
+			_ = tuiImpl.ReloadHistory(turns) // Best-effort: ignore reload errors to avoid disrupting compaction.
 		})
 	}
 
@@ -615,8 +613,7 @@ func newCompactor(cfg CompactionConfig, prov provider.Provider) *compaction.Comp
 	return compaction.New(
 		compaction.WithTrigger(compaction.TokenUsageTrigger{MaxTokens: cfg.MaxTokens}),
 		compaction.WithStrategy(compaction.SummarizeStrategy{
-			Provider:  prov,
-			MaxTokens: cfg.MaxTokens,
+			Provider: prov,
 		}),
 	)
 }
