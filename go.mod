@@ -10,6 +10,7 @@ require (
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.1
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.7.4
 	github.com/andrewhowdencom/ore/x/provider/openai v0.4.2
+	github.com/andrewhowdencom/ore/x/telemetry v0.0.0-00010101000000-000000000000
 	github.com/andrewhowdencom/ore/x/tool v0.4.2
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.1
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.4.1

@@ -30,6 +30,7 @@ import (
 	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/tool"
 
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
@@ -42,6 +43,7 @@ import (
 	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
+	"github.com/andrewhowdencom/ore/x/telemetry"
 	xtool "github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
@@ -79,6 +81,7 @@ type config struct {
 	workingDir string
 	role       string
 	tracer     trace.Tracer
+	meter      metric.Meter
 	conduit    string // e.g. "TUI", "HTTP", "stdio"
 }
 
@@ -124,6 +127,11 @@ func WithCompaction(c CompactionConfig) Option {
 // WithTracer sets the OpenTelemetry tracer for the application.
 func WithTracer(tracer trace.Tracer) Option {
 	return func(c *config) { c.tracer = tracer }
+}
+
+// WithMeter sets the OpenTelemetry meter for the application.
+func WithMeter(meter metric.Meter) Option {
+	return func(c *config) { c.meter = meter }
 }
 
 // RunTUI initializes and starts the TUI application.
@@ -428,11 +436,14 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			invokeOpts = append(invokeOpts, openai.WithReasoningEffort(cfg.provider.ReasoningEffort))
 		}
 
+		tel := telemetry.New(cfg.meter)
+
 		return []loop.Option{
 			loop.WithTransforms(sp, gr),
 			loop.WithHandlers(xtool.NewHandler(registry, xtool.WithTracer(tracer)), usage.New()),
 			loop.WithInvokeOptions(invokeOpts...),
 			loop.WithTracer(tracer),
+			loop.WithOnEmit(tel.OnEmit()),
 		}, nil
 	}
 
