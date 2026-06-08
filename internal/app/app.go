@@ -70,6 +70,29 @@ type CompactionConfig struct {
 	MaxTokens int // 0 = disabled
 }
 
+// compactionNotifier is a thread-safe callback bridge that forwards compacted
+// turns to a registered reloader (e.g. the TUI conduit's ReloadHistory).
+type compactionNotifier struct {
+	mu       sync.Mutex
+	reloader func(turns []state.Turn)
+}
+
+// SetReloader registers the callback that receives compacted turns.
+func (n *compactionNotifier) SetReloader(fn func(turns []state.Turn)) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.reloader = fn
+}
+
+// Notify forwards the compacted turns to the registered reloader if any.
+func (n *compactionNotifier) Notify(turns []state.Turn) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.reloader != nil {
+		n.reloader(turns)
+	}
+}
+
 // config holds the runtime configuration for the application.
 type config struct {
 	threadID   string
@@ -82,6 +105,8 @@ type config struct {
 	tracer     trace.Tracer
 	meter      metric.Meter
 	conduit    string // e.g. "TUI", "HTTP", "stdio"
+
+	compactionNotifier *compactionNotifier
 }
 
 // Option configures the application via functional options.
@@ -268,6 +293,7 @@ type compactCommand struct {
 	mu        sync.Mutex
 	stream    *session.Stream
 	compactor *compaction.Compactor
+	notifier  *compactionNotifier
 }
 
 // Handler forces an immediate compaction of the active thread's state.
@@ -288,6 +314,9 @@ func (c *compactCommand) Handler(ctx context.Context, cmd slash.Command) (slash.
 		return slash.Result{}, err
 	}
 	c.stream.LoadTurns(compacted)
+	if c.notifier != nil {
+		c.notifier.Notify(compacted)
+	}
 	if err := c.stream.Save(); err != nil {
 		return slash.Result{}, fmt.Errorf("save thread: %w", err)
 	}
@@ -360,7 +389,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	rc := &roleCommand{rdir: roleDir()}
 
 	// Create compact command handler.
-	cc := &compactCommand{compactor: compactor}
+	cc := &compactCommand{compactor: compactor, notifier: cfg.compactionNotifier}
 
 	// Create slash command registry.
 	slashReg := slash.NewRegistry()
@@ -486,6 +515,9 @@ func buildManager(cfg *config) (*session.Manager, error) {
 				}
 				if didCompact {
 					buf.LoadTurns(compacted)
+					if cfg.compactionNotifier != nil {
+						cfg.compactionNotifier.Notify(compacted)
+					}
 				}
 			}
 		}
