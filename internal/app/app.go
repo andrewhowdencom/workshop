@@ -509,7 +509,6 @@ func buildManager(cfg *config) (*session.Manager, error) {
 			role = r
 		} else if cfg.role != "" {
 			role = cfg.role
-			defaults["workshop.role"] = role
 		}
 		defaults["role"] = role
 		defaults["tui.pid"] = strconv.Itoa(os.Getpid())
