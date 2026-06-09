@@ -47,7 +47,7 @@ import (
 	xtool "github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
-	"github.com/andrewhowdencom/ore/x/tool/settitle"
+	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 	"github.com/andrewhowdencom/ore/x/usage"
 
@@ -465,7 +465,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(stream, cfg.provider))
 
 		// Title management.
-		mustRegisterRaw(registry, "settitle", "Set the conversation title visible to all conduits.", settitleSchema, settitle.Tool())
+		mustRegisterRaw(registry, "set_title", "Set the conversation title visible to all conduits.", setTitleSchema, settitle.Tool())
 
 		invokeOpts := []provider.InvokeOption{openai.WithTools(registry.Tools())}
 		if cfg.provider.Temperature != 0 {

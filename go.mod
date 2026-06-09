@@ -4,17 +4,17 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.7.1
-	github.com/andrewhowdencom/ore/x/compaction v0.4.0
+	github.com/andrewhowdencom/ore v0.7.2
+	github.com/andrewhowdencom/ore/x/compaction v0.4.1
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.2
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.8.1
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.8.2
 	github.com/andrewhowdencom/ore/x/provider/openai v0.4.4
-	github.com/andrewhowdencom/ore/x/telemetry v0.1.0
+	github.com/andrewhowdencom/ore/x/telemetry v0.1.1
 	github.com/andrewhowdencom/ore/x/tool v0.4.4
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.3
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.4.3
-	github.com/andrewhowdencom/ore/x/tool/settitle v0.1.1
+	github.com/andrewhowdencom/ore/x/tool/set_title v0.1.1
 	github.com/andrewhowdencom/ore/x/tool/skills v0.4.2
 	github.com/andrewhowdencom/ore/x/usage v0.1.3
 	github.com/spf13/cobra v1.10.2
@@ -97,13 +97,15 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260608224507-4308a22a1bab // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260608224507-4308a22a1bab // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
 replace github.com/andrewhowdencom/ore/x/compaction => ../ore/x/compaction
+
+replace github.com/andrewhowdencom/ore/x/tool/set_title => ../ore/x/tool/set_title
 
 replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
 
