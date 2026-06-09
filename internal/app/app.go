@@ -185,7 +185,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 			"thread_id":  "context",
 			"cwd":        "context",
 			"git_branch": "context",
-			"role":       "context",
+			"workshop.role": "context",
 			"tui.pid":    "context",
 			"model":      "context",
 			"sent":       "lifecycle",
@@ -510,7 +510,9 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		} else if cfg.role != "" {
 			role = cfg.role
 		}
-		defaults["role"] = role
+		if role != "" {
+			defaults["workshop.role"] = role
+		}
 		defaults["tui.pid"] = strconv.Itoa(os.Getpid())
 		return defaults
 	}
