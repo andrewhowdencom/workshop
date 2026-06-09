@@ -31,7 +31,8 @@ func init() {
 	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
 	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
 	rootCmd.PersistentFlags().String("pprof.addr", defaultPProfAddr, "TCP address for the pprof server")
-	rootCmd.PersistentFlags().String("tracing.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL (e.g. http://localhost:4318)")
+	rootCmd.PersistentFlags().String("telemetry.traces.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL for traces (e.g. http://localhost:4318); empty = disabled")
+	rootCmd.PersistentFlags().String("telemetry.metrics.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL for metrics (e.g. http://localhost:4318); empty = disabled")
 	rootCmd.PersistentFlags().Int("compaction.max-tokens", 100000, "Trigger compaction when total tokens exceed this threshold (0 = disabled)")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
@@ -127,7 +128,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	maybeStartPProf(ctx, viper.GetBool("pprof"), viper.GetString("pprof.addr"))
 
-	tracer, tracerShutdown, err := telemetry.NewTracer(viper.GetString("tracing.endpoint"))
+	tracer, tracerShutdown, err := telemetry.NewTracer(viper.GetString("telemetry.traces.endpoint"))
 	if err != nil {
 		return fmt.Errorf("init telemetry: %w", err)
 	}
@@ -139,7 +140,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	meter, meterShutdown, err := telemetry.NewMeter(viper.GetString("tracing.endpoint"))
+	meter, meterShutdown, err := telemetry.NewMeter(viper.GetString("telemetry.metrics.endpoint"))
 	if err != nil {
 		return fmt.Errorf("init metrics: %w", err)
 	}

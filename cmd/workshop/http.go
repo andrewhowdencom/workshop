@@ -46,7 +46,7 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 
 	maybeStartPProf(ctx, viper.GetBool("pprof"), viper.GetString("pprof.addr"))
 
-	tracer, tracerShutdown, err := telemetry.NewTracer(viper.GetString("tracing.endpoint"))
+	tracer, tracerShutdown, err := telemetry.NewTracer(viper.GetString("telemetry.traces.endpoint"))
 	if err != nil {
 		return fmt.Errorf("init telemetry: %w", err)
 	}
@@ -59,7 +59,7 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	meter, meterShutdown, err := telemetry.NewMeter(viper.GetString("tracing.endpoint"))
+	meter, meterShutdown, err := telemetry.NewMeter(viper.GetString("telemetry.metrics.endpoint"))
 	if err != nil {
 		return fmt.Errorf("init metrics: %w", err)
 	}

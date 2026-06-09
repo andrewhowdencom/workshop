@@ -78,8 +78,13 @@ func buildConfigMap() map[string]interface{} {
 		"compaction": map[string]interface{}{
 			"max-tokens": viper.GetInt("compaction.max-tokens"),
 		},
-		"tracing": map[string]interface{}{
-			"endpoint": viper.GetString("tracing.endpoint"),
+		"telemetry": map[string]interface{}{
+			"traces": map[string]interface{}{
+				"endpoint": viper.GetString("telemetry.traces.endpoint"),
+			},
+			"metrics": map[string]interface{}{
+				"endpoint": viper.GetString("telemetry.metrics.endpoint"),
+			},
 		},
 	}
 }
