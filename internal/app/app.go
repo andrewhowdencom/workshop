@@ -192,6 +192,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 			"received":   "lifecycle",
 			"total":      "lifecycle",
 		}),
+		tui.WithStatusLabels(map[string]string{"workshop.role": "role"}),
 	)
 	if err != nil {
 		return fmt.Errorf("create TUI conduit: %w", err)
