@@ -185,13 +185,14 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 			"thread_id":  "context",
 			"cwd":        "context",
 			"git_branch": "context",
-			"role":       "context",
+			"workshop.role": "context",
 			"tui.pid":    "context",
 			"model":      "context",
 			"sent":       "lifecycle",
 			"received":   "lifecycle",
 			"total":      "lifecycle",
 		}),
+		tui.WithStatusLabels(map[string]string{"workshop.role": "role"}),
 	)
 	if err != nil {
 		return fmt.Errorf("create TUI conduit: %w", err)
@@ -510,7 +511,9 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		} else if cfg.role != "" {
 			role = cfg.role
 		}
-		defaults["role"] = role
+		if role != "" {
+			defaults["workshop.role"] = role
+		}
 		defaults["tui.pid"] = strconv.Itoa(os.Getpid())
 		return defaults
 	}
