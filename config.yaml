@@ -1,6 +1,6 @@
 provider:
     kind: openai
-    api-key: "fw_BpELqGSP6euW8LCsGrNide"
+    api-key: ""
     base-url: "https://api.fireworks.ai/inference/v1"
     model: accounts/fireworks/models/kimi-k2p6
     temperature: 0
