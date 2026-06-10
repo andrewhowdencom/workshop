@@ -274,7 +274,7 @@ type roleCommand struct {
 }
 
 // Handler validates the role name and updates the stream metadata.
-func (c *roleCommand) Handler(ctx context.Context, cmd slash.Command) (slash.Result, error) {
+func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	args := slash.Fields(cmd.Input)
 	if len(args) == 0 {
 		return slash.Result{}, fmt.Errorf("missing role name")
@@ -311,7 +311,7 @@ type compactCommand struct {
 // Handler forces an immediate compaction of the active thread's state.
 // If compaction is disabled, it returns an error. The event is consumed
 // (nil, nil) so no LLM inference is triggered.
-func (c *compactCommand) Handler(ctx context.Context, cmd slash.Command) (slash.Result, error) {
+func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.compactor == nil {

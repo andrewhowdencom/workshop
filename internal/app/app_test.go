@@ -136,7 +136,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	rc.SetStream(stream)
 
 	// Valid role
-	_, err = rc.Handler(context.Background(), slash.Command{Name: "role", Input: "reviewer"})
+	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -147,13 +147,13 @@ func TestRoleSlashHandler(t *testing.T) {
 	}
 
 	// Invalid role
-	_, err = rc.Handler(context.Background(), slash.Command{Name: "role", Input: "nonexistent"})
+	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent role")
 	}
 
 	// Missing name
-	_, err = rc.Handler(context.Background(), slash.Command{Name: "role", Input: ""})
+	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	if err == nil {
 		t.Fatal("expected error for missing name")
 	}
@@ -176,7 +176,7 @@ func TestCompactSlashHandler_Disabled(t *testing.T) {
 	cc := &compactCommand{compactor: nil}
 	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), slash.Command{Name: "compact", Input: ""})
+	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err == nil {
 		t.Fatal("expected error when compaction is disabled")
 	}
@@ -222,7 +222,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	cc := &compactCommand{compactor: compactor}
 	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), slash.Command{Name: "compact", Input: ""})
+	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -2040,7 +2040,7 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	cc := &compactCommand{compactor: compactor, notifier: notifier}
 	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), slash.Command{Name: "compact", Input: ""})
+	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
