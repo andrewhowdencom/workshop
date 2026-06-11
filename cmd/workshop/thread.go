@@ -33,6 +33,13 @@ var threadExportCmd = &cobra.Command{
 	RunE:  runThreadExport,
 }
 
+var threadAnalyticsCmd = &cobra.Command{
+	Use:   "analytics [<id>]",
+	Short: "Print per-artifact-kind statistics for a thread or the whole store",
+	Args:  cobra.MaximumNArgs(1),
+	RunE:  runThreadAnalytics,
+}
+
 func init() {
 	threadListCmd.Flags().Int("days", 30, "Lookback period in days")
 	cobra.CheckErr(viper.BindPFlags(threadListCmd.Flags()))
@@ -41,8 +48,12 @@ func init() {
 	threadExportCmd.Flags().String("output", "", "Output file path (default: stdout)")
 	cobra.CheckErr(viper.BindPFlags(threadExportCmd.Flags()))
 
+	threadAnalyticsCmd.Flags().Int("days", 30, "Lookback period in days for the store-wide form")
+	cobra.CheckErr(viper.BindPFlags(threadAnalyticsCmd.Flags()))
+
 	threadCmd.AddCommand(threadListCmd)
 	threadCmd.AddCommand(threadExportCmd)
+	threadCmd.AddCommand(threadAnalyticsCmd)
 	rootCmd.AddCommand(threadCmd)
 }
 
@@ -138,6 +149,25 @@ func runThreadExportWithStore(store session.Store, id, format string, w io.Write
 	}
 }
 
+func runThreadAnalytics(cmd *cobra.Command, args []string) error {
+	storeDir := viper.GetString("store.dir")
+	if storeDir == "" {
+		storeDir = defaultStoreDir()
+	}
+
+	store, err := session.NewJSONStore(storeDir)
+	if err != nil {
+		return fmt.Errorf("create JSON store: %w", err)
+	}
+
+	id := ""
+	if len(args) == 1 {
+		id = args[0]
+	}
+
+	return runThreadAnalyticsWithStore(viper.GetInt("days"), id, store, os.Stdout)
+}
+
 // runThreadAnalyticsWithStore aggregates per-artifact-kind statistics
 // from the given store and writes a tabwriter table to w.
 //
@@ -157,7 +187,7 @@ func runThreadAnalyticsWithStore(days int, id string, store session.Store, w io.
 		stats = analytics.AnalyzeThread(thread)
 	} else {
 		cutoff := time.Now().AddDate(0, 0, -days)
-		filtered := &storeFilter{inner: store, cutoff: cutoff}
+		filtered := &storeFilter{Store: store, cutoff: cutoff}
 
 		var err error
 		stats, err = analytics.AnalyzeStore(filtered)
