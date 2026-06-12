@@ -9,7 +9,7 @@ require (
 	github.com/andrewhowdencom/ore/x/compaction v0.4.2
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.2
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.9.0
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.10.0
 	github.com/andrewhowdencom/ore/x/provider/openai v0.5.0
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.2
 	github.com/andrewhowdencom/ore/x/tool v0.5.0
