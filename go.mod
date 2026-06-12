@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.7.3
+	github.com/andrewhowdencom/ore/x/analytics v0.0.0-00010101000000-000000000000
 	github.com/andrewhowdencom/ore/x/compaction v0.4.2
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.2
@@ -37,6 +38,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
+	github.com/andrewhowdencom/ore/x/llmbytes v0.0.0 // indirect
 	github.com/andrewhowdencom/ore/x/verifier v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -112,3 +114,7 @@ replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
 replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
 
 replace github.com/andrewhowdencom/ore => ../ore
+
+replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
+
+replace github.com/andrewhowdencom/ore/x/llmbytes => ../ore/x/llmbytes

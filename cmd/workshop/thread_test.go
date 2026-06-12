@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/ore/state"
 	"github.com/spf13/viper"
 )
 
@@ -473,5 +475,202 @@ func TestThreadExport_FileOutput_Formats(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestThreadAnalytics_StoreWide(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store, err := session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	// Thread 1: a single text turn.
+	thr1, err := store.Create()
+	if err != nil {
+		t.Fatalf("create thread 1: %v", err)
+	}
+	thr1.State.Append(state.RoleUser, artifact.Text{Content: "hi"})
+	if err := store.Save(thr1); err != nil {
+		t.Fatalf("save thread 1: %v", err)
+	}
+
+	// Thread 2: a reasoning turn plus a tool call turn.
+	thr2, err := store.Create()
+	if err != nil {
+		t.Fatalf("create thread 2: %v", err)
+	}
+	thr2.State.Append(state.RoleAssistant, artifact.Reasoning{Content: "think"})
+	thr2.State.Append(state.RoleAssistant, artifact.ToolCall{
+		ID:        "call-1",
+		Name:      "bash",
+		Arguments: `{"cmd":"ls"}`,
+	})
+	if err := store.Save(thr2); err != nil {
+		t.Fatalf("save thread 2: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runThreadAnalyticsWithStore(30, "", store, &buf); err != nil {
+		t.Fatalf("runThreadAnalyticsWithStore: %v", err)
+	}
+
+	output := buf.String()
+
+	// Header columns.
+	for _, col := range []string{"KIND", "COUNT", "BYTES"} {
+		if !strings.Contains(output, col) {
+			t.Errorf("output missing header column %q: %s", col, output)
+		}
+	}
+
+	// Each present kind must appear at least once.
+	for _, kind := range []string{"text", "reasoning", "tool_call"} {
+		if !strings.Contains(output, kind) {
+			t.Errorf("output missing kind %q: %s", kind, output)
+		}
+	}
+
+	// Thread 1: one text artifact, content "hi" -> 2 bytes.
+	// Thread 2: one reasoning artifact, content "think" -> 5 bytes.
+	// The tool_call LLMString for `{"cmd":"ls"}` is 12 bytes.
+	// Assert those specific counts appear in the tabwriter output.
+	for _, expect := range []string{"2", "5", "12"} {
+		if !strings.Contains(output, expect) {
+			t.Errorf("output missing expected byte count %q: %s", expect, output)
+		}
+	}
+}
+
+func TestThreadAnalytics_DaysFilter(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store, err := session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	// Recent thread with a text artifact.
+	recent, err := store.Create()
+	if err != nil {
+		t.Fatalf("create recent thread: %v", err)
+	}
+	recent.State.Append(state.RoleUser, artifact.Text{Content: "fresh"})
+	if err := store.Save(recent); err != nil {
+		t.Fatalf("save recent thread: %v", err)
+	}
+
+	// Old thread written as raw JSON with a 60-day-old timestamp.
+	// The format must match the on-disk envelope shape produced by
+	// session/serialize.go (a {kind, data} wrapper around the artifact
+	// body); otherwise session.JSONStore silently skips the file.
+	oldID := "00000000000000000000000000000001"
+	oldTime := time.Now().AddDate(0, 0, -60).Format(time.RFC3339)
+	oldJSON := fmt.Sprintf(
+		`{"id":"%s","created_at":"%s","updated_at":"%s","turns":[{"role":"user","artifacts":[{"kind":"text","data":{"kind":"text","content":"stale"}}],"timestamp":"%s"}]}`,
+		oldID, oldTime, oldTime, oldTime,
+	)
+	oldPath := filepath.Join(tmpDir, oldID+".json")
+	if err := os.WriteFile(oldPath, []byte(oldJSON), 0o644); err != nil {
+		t.Fatalf("write old thread file: %v", err)
+	}
+
+	// Reload the store so it picks up the manually written file.
+	store, err = session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("reload store: %v", err)
+	}
+
+	// With days=30, only the recent thread contributes.
+	var buf bytes.Buffer
+	if err := runThreadAnalyticsWithStore(30, "", store, &buf); err != nil {
+		t.Fatalf("runThreadAnalyticsWithStore(30): %v", err)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "text") {
+		t.Errorf("days=30 output missing text kind: %s", output)
+	}
+	if !strings.Contains(output, "5") {
+		t.Errorf("days=30 output missing recent thread's byte count: %s", output)
+	}
+
+	// With days=90, both threads contribute, and the text row should
+	// aggregate both contents (5 + 5 = 10 bytes, count 2).
+	buf.Reset()
+	if err := runThreadAnalyticsWithStore(90, "", store, &buf); err != nil {
+		t.Fatalf("runThreadAnalyticsWithStore(90): %v", err)
+	}
+
+	output = buf.String()
+	if !strings.Contains(output, "10") {
+		t.Errorf("days=90 output should aggregate both threads' bytes: %s", output)
+	}
+}
+
+func TestThreadAnalytics_ThreadID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store, err := session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	thr, err := store.Create()
+	if err != nil {
+		t.Fatalf("create thread: %v", err)
+	}
+	thr.State.Append(state.RoleUser, artifact.Text{Content: "one"})
+	thr.State.Append(state.RoleUser, artifact.Text{Content: "two"})
+	thr.State.Append(state.RoleAssistant, artifact.ToolCall{
+		ID:        "call-1",
+		Name:      "bash",
+		Arguments: `{"cmd":"ls"}`,
+	})
+	if err := store.Save(thr); err != nil {
+		t.Fatalf("save thread: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err := runThreadAnalyticsWithStore(30, thr.ID, store, &buf); err != nil {
+		t.Fatalf("runThreadAnalyticsWithStore: %v", err)
+	}
+
+	output := buf.String()
+
+	// Both kinds must appear.
+	if !strings.Contains(output, "text") {
+		t.Errorf("output missing text kind: %s", output)
+	}
+	if !strings.Contains(output, "tool_call") {
+		t.Errorf("output missing tool_call kind: %s", output)
+	}
+
+	// Two text artifacts of length 3 each -> 6 bytes.
+	if !strings.Contains(output, "6") {
+		t.Errorf("output missing expected text bytes (6): %s", output)
+	}
+	// The tool_call LLMString for `{"cmd":"ls"}` is 12 bytes.
+	if !strings.Contains(output, "12") {
+		t.Errorf("output missing expected tool_call bytes (12): %s", output)
+	}
+}
+
+func TestThreadAnalytics_ThreadNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	store, err := session.NewJSONStore(tmpDir)
+	if err != nil {
+		t.Fatalf("create store: %v", err)
+	}
+
+	var buf bytes.Buffer
+	err = runThreadAnalyticsWithStore(30, "nonexistent-id", store, &buf)
+	if err == nil {
+		t.Fatal("expected error for nonexistent thread")
+	}
+	if !strings.Contains(err.Error(), "thread not found") {
+		t.Errorf("error message missing 'thread not found': %v", err)
 	}
 }
