@@ -38,6 +38,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
+	github.com/andrewhowdencom/ore/x/llmbytes v0.0.0 // indirect
 	github.com/andrewhowdencom/ore/x/verifier v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -115,3 +116,5 @@ replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
 replace github.com/andrewhowdencom/ore => ../ore
 
 replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
+
+replace github.com/andrewhowdencom/ore/x/llmbytes => ../ore/x/llmbytes
