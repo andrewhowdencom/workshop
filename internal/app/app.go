@@ -407,6 +407,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	slashReg := slash.NewRegistry()
 	slashReg.Bind("role", "Switch to a different role", rc.Handler)
 	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
+	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
 
 	// Step factory: inject system prompt and guardrails as transforms.
 	stepFactory := func(stream *session.Stream) ([]loop.Option, error) {
