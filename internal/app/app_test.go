@@ -23,6 +23,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
+	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 )
 
@@ -236,6 +237,98 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	}
 	if got[0].Artifacts[0].(artifact.Text).Content != "summary" {
 		t.Errorf("summary turn = %q, want summary", got[0].Artifacts[0].(artifact.Text).Content)
+	}
+}
+
+// testEmitter records events emitted through the loop.Emitter interface so
+// tests can assert what the slash handler sent to the session stream.
+type testEmitter struct {
+	mu     sync.Mutex
+	events []loop.OutputEvent
+}
+
+func (e *testEmitter) Emit(ctx context.Context, ev loop.OutputEvent) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.events = append(e.events, ev)
+}
+
+func TestNameSlashHandler_ValidInput_EmitsPropertiesEvent(t *testing.T) {
+	emitter := &testEmitter{}
+	handler := settitle.Slash()
+
+	result, err := handler(context.Background(), emitter, slash.Command{Name: "name", Input: "Fix login bug"})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if result.Feedback.Content != "" {
+		t.Errorf("Feedback = %q, want empty on valid input", result.Feedback.Content)
+	}
+	if result.Replace != nil {
+		t.Errorf("Replace = %v, want nil on valid input", result.Replace)
+	}
+
+	if len(emitter.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(emitter.events))
+	}
+	pe, ok := emitter.events[0].(loop.PropertiesEvent)
+	if !ok {
+		t.Fatalf("expected loop.PropertiesEvent, got %T", emitter.events[0])
+	}
+	if got, want := pe.Properties["title"], "Fix login bug"; got != want {
+		t.Errorf("Properties[title] = %q, want %q", got, want)
+	}
+}
+
+func TestNameSlashHandler_EmptyInput_ReturnsFeedback(t *testing.T) {
+	emitter := &testEmitter{}
+	handler := settitle.Slash()
+
+	result, err := handler(context.Background(), emitter, slash.Command{Name: "name", Input: ""})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if result.Feedback.Content != "Usage: /name <text>" {
+		t.Errorf("Feedback = %q, want %q", result.Feedback.Content, "Usage: /name <text>")
+	}
+	if result.Replace != nil {
+		t.Errorf("Replace = %v, want nil on empty input", result.Replace)
+	}
+	if len(emitter.events) != 0 {
+		t.Errorf("expected no events on empty input, got %d", len(emitter.events))
+	}
+}
+
+func TestNameSlashHandler_WhitespaceInput_ReturnsFeedback(t *testing.T) {
+	emitter := &testEmitter{}
+	handler := settitle.Slash()
+
+	result, err := handler(context.Background(), emitter, slash.Command{Name: "name", Input: "   \t  "})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if result.Feedback.Content != "Usage: /name <text>" {
+		t.Errorf("Feedback = %q, want %q", result.Feedback.Content, "Usage: /name <text>")
+	}
+	if len(emitter.events) != 0 {
+		t.Errorf("expected no events on whitespace input, got %d", len(emitter.events))
+	}
+}
+
+func TestNameSlashHandler_TrimsInput(t *testing.T) {
+	emitter := &testEmitter{}
+	handler := settitle.Slash()
+
+	_, err := handler(context.Background(), emitter, slash.Command{Name: "name", Input: "  spaced  "})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if len(emitter.events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(emitter.events))
+	}
+	pe := emitter.events[0].(loop.PropertiesEvent)
+	if got, want := pe.Properties["title"], "spaced"; got != want {
+		t.Errorf("Properties[title] = %q, want %q", got, want)
 	}
 }
 
