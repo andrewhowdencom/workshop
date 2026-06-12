@@ -519,7 +519,7 @@ func TestThreadAnalytics_StoreWide(t *testing.T) {
 	output := buf.String()
 
 	// Header columns.
-	for _, col := range []string{"KIND", "COUNT", "BYTES"} {
+	for _, col := range []string{"KIND", "SOURCE", "COUNT", "BYTES"} {
 		if !strings.Contains(output, col) {
 			t.Errorf("output missing header column %q: %s", col, output)
 		}
@@ -530,6 +530,13 @@ func TestThreadAnalytics_StoreWide(t *testing.T) {
 		if !strings.Contains(output, kind) {
 			t.Errorf("output missing kind %q: %s", kind, output)
 		}
+	}
+
+	// The lone tool_call was named "bash"; its Source column must
+	// reflect that, so the user can attribute context cost to the
+	// specific tool rather than just the kind.
+	if !strings.Contains(output, "bash") {
+		t.Errorf("output missing tool source %q for tool_call: %s", "bash", output)
 	}
 
 	// Thread 1: one text artifact, content "hi" -> 2 bytes.
@@ -639,12 +646,28 @@ func TestThreadAnalytics_ThreadID(t *testing.T) {
 
 	output := buf.String()
 
+	// Header columns (the Source column is asserted explicitly because
+	// it is the new behavior under test — it must be present in the
+	// output rather than silently dropped).
+	for _, col := range []string{"KIND", "SOURCE", "COUNT", "BYTES"} {
+		if !strings.Contains(output, col) {
+			t.Errorf("output missing header column %q: %s", col, output)
+		}
+	}
+
 	// Both kinds must appear.
 	if !strings.Contains(output, "text") {
 		t.Errorf("output missing text kind: %s", output)
 	}
 	if !strings.Contains(output, "tool_call") {
 		t.Errorf("output missing tool_call kind: %s", output)
+	}
+
+	// The tool_call was named "bash"; its Source column must
+	// reflect that, so the user can attribute context cost to the
+	// specific tool rather than just the kind.
+	if !strings.Contains(output, "bash") {
+		t.Errorf("output missing tool source %q for tool_call: %s", "bash", output)
 	}
 
 	// Two text artifacts of length 3 each -> 6 bytes.

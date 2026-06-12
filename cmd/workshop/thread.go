@@ -168,8 +168,13 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 	return runThreadAnalyticsWithStore(viper.GetInt("days"), id, store, os.Stdout)
 }
 
-// runThreadAnalyticsWithStore aggregates per-artifact-kind statistics
-// from the given store and writes a tabwriter table to w.
+// runThreadAnalyticsWithStore aggregates per-(kind, source)
+// statistics from the given store and writes a tabwriter table to w.
+//
+// The output table has four columns: KIND, SOURCE, COUNT, BYTES.
+// SOURCE is the originating tool name for tool_call and tool_result
+// artifacts, and is empty for all other artifact kinds. This lets
+// callers attribute context cost to specific tools, not just kinds.
 //
 // If id is non-empty, only that thread is aggregated. If id is empty,
 // threads older than `days` are excluded first (matched on UpdatedAt),
@@ -178,7 +183,7 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 // This function is read-only by construction: it never calls store.Save
 // or store.Create, and only reads from the store via List / Get.
 func runThreadAnalyticsWithStore(days int, id string, store session.Store, w io.Writer) error {
-	var stats []analytics.KindStats
+	var stats []analytics.Stats
 	if id != "" {
 		thread, ok := store.Get(id)
 		if !ok {
@@ -197,9 +202,9 @@ func runThreadAnalyticsWithStore(days int, id string, store session.Store, w io.
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "KIND\tCOUNT\tBYTES\n")
+	fmt.Fprintf(tw, "KIND\tSOURCE\tCOUNT\tBYTES\n")
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%d\t%d\n", s.Kind, s.Count, s.Bytes)
+		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\n", s.Kind, s.Source, s.Count, s.Bytes)
 	}
 
 	if err := tw.Flush(); err != nil {
