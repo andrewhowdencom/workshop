@@ -5,13 +5,13 @@ go 1.26.2
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.7.4
-	github.com/andrewhowdencom/ore/x/analytics v0.0.0-00010101000000-000000000000
+	github.com/andrewhowdencom/ore/x/analytics v0.1.1
 	github.com/andrewhowdencom/ore/x/compaction v0.4.2
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.2
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.8.3
-	github.com/andrewhowdencom/ore/x/provider/openai v0.4.4
-	github.com/andrewhowdencom/ore/x/telemetry v0.1.1
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.8.5
+	github.com/andrewhowdencom/ore/x/provider/openai v0.4.5
+	github.com/andrewhowdencom/ore/x/telemetry v0.1.2
 	github.com/andrewhowdencom/ore/x/tool v0.4.5
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.4
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.4.4
@@ -35,7 +35,7 @@ require (
 require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
 	charm.land/bubbletea/v2 v2.0.7 // indirect
-	charm.land/lipgloss/v2 v2.0.3 // indirect
+	charm.land/lipgloss/v2 v2.0.4 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
 	github.com/andrewhowdencom/ore/x/llmbytes v0.1.0 // indirect
@@ -95,12 +95,12 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260608224507-4308a22a1bab // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260608224507-4308a22a1bab // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260610212136-7ab31c22f7ad // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
