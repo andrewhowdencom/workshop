@@ -179,8 +179,11 @@ http:
   addr: ":8080"
 compaction:
   max-tokens: 100000    # 0 = disabled; trigger compaction when tokens exceed this
-tracing:
-  endpoint: ""         # OTLP/HTTP collector URL (e.g. http://localhost:4318); empty = disabled
+telemetry:
+  traces:
+    endpoint: ""         # OTLP/HTTP collector URL for traces (e.g. http://localhost:4318); empty = disabled
+  metrics:
+    endpoint: ""         # OTLP/HTTP collector URL for metrics (e.g. http://localhost:4318); empty = disabled
 ```
 
 ### Deprecated variables
@@ -255,7 +258,8 @@ When enabled, the profile index is available at
 | `--pprof` | `WORKSHOP_PPROF` | `false` | Enable the pprof debug server |
 | `--pprof.addr` | `WORKSHOP_PPROF_ADDR` | `localhost:0` | TCP address for the pprof server |
 | `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Trigger compaction when total tokens exceed this threshold (0 = disabled) |
-| `--tracing.endpoint` | `WORKSHOP_TRACING_ENDPOINT` | — | OpenTelemetry OTLP/HTTP endpoint URL (e.g. `http://localhost:4318`); empty = disabled |
+| `--telemetry.traces.endpoint` | `WORKSHOP_TELEMETRY_TRACES_ENDPOINT` | — | OpenTelemetry OTLP/HTTP endpoint URL for traces (e.g. `http://localhost:4318`); empty = disabled |
+| `--telemetry.metrics.endpoint` | `WORKSHOP_TELEMETRY_METRICS_ENDPOINT` | — | OpenTelemetry OTLP/HTTP endpoint URL for metrics (e.g. `http://localhost:4318`); empty = disabled |
 
 > **Note:** Environment variables use the `WORKSHOP_` prefix. Configuration file keys mirror the flag names (e.g., `provider.api-key`, `log-level`).
 

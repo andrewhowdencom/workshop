@@ -1,11 +1,15 @@
-api:
-    key: "fw_BpELqGSP6euW8LCsGrNide"
-base:
-    url: "https://api.fireworks.ai/inference/v1"
+provider:
+    kind: openai
+    api-key: ""
+    base-url: "https://api.fireworks.ai/inference/v1"
+    model: accounts/fireworks/models/kimi-k2p6
+    temperature: 0
 log-level: info
 pprof: true
-model: accounts/fireworks/models/kimi-k2p6
 store:
     dir: ""
-tracing:
-    endpoint: "http://localhost:4318"  # OTLP/HTTP endpoint; empty = disabled
+telemetry:
+    traces:
+        endpoint: "http://localhost:4318"  # OTLP/HTTP endpoint; empty = disabled
+    metrics:
+        endpoint: "http://localhost:4318"  # OTLP/HTTP endpoint; empty = disabled
