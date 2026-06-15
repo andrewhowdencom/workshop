@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,6 +40,7 @@ import (
 	stdioc "github.com/andrewhowdencom/ore/x/conduit/stdio"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/ore/x/guardrails"
+	"github.com/andrewhowdencom/ore/x/provider/anthropic"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
 	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
@@ -62,6 +64,18 @@ type ProviderConfig struct {
 	BaseURL         string
 	Temperature     float64
 	ReasoningEffort string
+	// MaxTokens is the hard cap on output tokens per request. Required by the
+	// Anthropic provider (set to 0 to apply the workshop default of 32000);
+	// accepted but optional for OpenAI-compatible providers.
+	//
+	// Note: distinct from CompactionConfig.MaxTokens, which is a token budget
+	// for the conversation-history compactor (not a per-request output cap).
+	MaxTokens int64
+	// ThinkingBudget is the soft cap on extended-thinking tokens for the
+	// Anthropic provider. 0 disables extended thinking. When non-zero, it
+	// counts against MaxTokens; MaxTokens must therefore exceed
+	// ThinkingBudget by enough to leave room for the visible response.
+	ThinkingBudget int64
 }
 
 // CompactionConfig holds the configuration for the state compaction
@@ -583,6 +597,13 @@ func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *sk
 	)
 }
 
+// defaultAnthropicMaxTokens is the workshop-side default for the Anthropic
+// provider's required `max_tokens` field. The Anthropic SDK rejects a value
+// of 0, so callers that leave ProviderConfig.MaxTokens unset get this value.
+// 32k fits comfortably inside Sonnet 4.5's 64k output ceiling while leaving
+// room for typical extended-thinking budgets.
+const defaultAnthropicMaxTokens int64 = 32000
+
 // newProvider constructs a provider.Provider from generic ProviderConfig.
 func newProvider(pc ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
 	switch pc.Kind {
@@ -602,6 +623,36 @@ func newProvider(pc ProviderConfig, tracer trace.Tracer) (provider.Provider, err
 			opts = append(opts, openai.WithTracer(tracer))
 		}
 		return openai.New(opts...)
+	case "anthropic":
+		if pc.APIKey == "" {
+			return nil, fmt.Errorf("missing required provider config: api_key")
+		}
+		if pc.Model == "" {
+			return nil, fmt.Errorf("missing required provider config: model")
+		}
+		// Apply the workshop default when the user did not set MaxTokens.
+		// The Anthropic SDK rejects a zero value, so a non-zero default is
+		// mandatory. Callers can always override.
+		if pc.MaxTokens == 0 {
+			pc.MaxTokens = defaultAnthropicMaxTokens
+		}
+		// Warn when the thinking budget would consume the entire output
+		// budget — that configuration produces no visible response.
+		if pc.ThinkingBudget > 0 && pc.MaxTokens <= pc.ThinkingBudget {
+			slog.Warn("provider.max-tokens is <= provider.thinking-budget; the model may exhaust its output budget on thinking and produce no visible response",
+				"max_tokens", pc.MaxTokens,
+				"thinking_budget", pc.ThinkingBudget,
+			)
+		}
+		var opts []anthropic.Option
+		opts = append(opts, anthropic.WithAPIKey(pc.APIKey), anthropic.WithModel(pc.Model))
+		if pc.BaseURL != "" {
+			opts = append(opts, anthropic.WithBaseURL(pc.BaseURL))
+		}
+		if tracer != nil {
+			opts = append(opts, anthropic.WithTracer(tracer))
+		}
+		return anthropic.New(opts...)
 	default:
 		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
 	}

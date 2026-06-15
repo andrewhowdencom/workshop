@@ -1,9 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,6 +72,135 @@ func TestNewProvider_UnsupportedKind(t *testing.T) {
 	want := `unsupported provider kind: "unsupported"`
 	if err.Error() != want {
 		t.Errorf("unexpected error message: %q, want %q", err.Error(), want)
+	}
+}
+
+func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
+	pc := ProviderConfig{Kind: "anthropic", Model: "claude-sonnet-4-5"}
+	_, err := newProvider(pc, nil)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+	if err.Error() != "missing required provider config: api_key" {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
+	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test"}
+	_, err := newProvider(pc, nil)
+	if err == nil {
+		t.Fatal("expected error for missing model")
+	}
+	if err.Error() != "missing required provider config: model" {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestNewProvider_Anthropic_Constructs(t *testing.T) {
+	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
+	prov, err := newProvider(pc, nil)
+	if err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("expected non-nil provider for valid anthropic config")
+	}
+}
+
+func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
+	// Smoke test: an OpenRouter base URL must not break construction. The
+	// auth-header dispatch is verified by the anthropic package's own
+	// tests (TestNew_OpenRouterBaseURL); workshop only needs to confirm
+	// the option is forwarded.
+	pc := ProviderConfig{
+		Kind:    "anthropic",
+		APIKey:  "sk-or-test",
+		Model:   "anthropic/claude-sonnet-4-5",
+		BaseURL: "https://openrouter.ai/api/v1",
+	}
+	prov, err := newProvider(pc, nil)
+	if err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("expected non-nil provider for valid anthropic+openrouter config")
+	}
+}
+
+func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
+	// The Anthropic SDK rejects a zero MaxTokens. Confirm that leaving
+	// MaxTokens unset does not surface an error (i.e. the default is
+	// applied in newProvider before reaching the SDK).
+	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider with zero MaxTokens returned error; default not applied: %v", err)
+	}
+}
+
+// captureSlog redirects the default slog handler to a buffer for the
+// duration of a test, returning the buffer so callers can inspect emitted
+// records. Restores the previous default on test cleanup.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	prev := slog.Default()
+	buf := &bytes.Buffer{}
+	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+func TestNewProvider_Anthropic_WarnsOnMaxTokensLeqThinkingBudget(t *testing.T) {
+	buf := captureSlog(t)
+	pc := ProviderConfig{
+		Kind:           "anthropic",
+		APIKey:         "sk-ant-test",
+		Model:          "claude-sonnet-4-5",
+		MaxTokens:      1000,
+		ThinkingBudget: 2000,
+	}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "provider.max-tokens is <=") {
+		t.Errorf("expected warning not emitted; got: %s", buf.String())
+	}
+}
+
+func TestNewProvider_Anthropic_SilentWhenMaxTokensExceedsThinkingBudget(t *testing.T) {
+	buf := captureSlog(t)
+	pc := ProviderConfig{
+		Kind:           "anthropic",
+		APIKey:         "sk-ant-test",
+		Model:          "claude-sonnet-4-5",
+		MaxTokens:      16000,
+		ThinkingBudget: 8000,
+	}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
+		t.Errorf("did not expect warning; got: %s", buf.String())
+	}
+}
+
+func TestNewProvider_Anthropic_SilentWhenThinkingBudgetZero(t *testing.T) {
+	// A zero ThinkingBudget disables extended thinking entirely. With
+	// thinking off, MaxTokens can be any value without risk of truncation.
+	buf := captureSlog(t)
+	pc := ProviderConfig{
+		Kind:      "anthropic",
+		APIKey:    "sk-ant-test",
+		Model:     "claude-sonnet-4-5",
+		MaxTokens: 1000,
+		// ThinkingBudget omitted (zero)
+	}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
+		t.Errorf("did not expect warning when thinking is disabled; got: %s", buf.String())
 	}
 }
 
