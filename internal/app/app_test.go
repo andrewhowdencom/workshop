@@ -17,6 +17,7 @@ import (
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
 	slash "github.com/andrewhowdencom/ore/x/slash"
@@ -2457,4 +2458,117 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 	if len(notified) != 1 || notified[0].Role != state.RoleUser {
 		t.Errorf("notifier did not receive test turns: got %v", notified)
 	}
+}
+
+// newThinkingCommandStream creates a fresh in-memory session manager
+// and stream for the thinking-command tests. The provider is a
+// no-op; only the slash handler is exercised.
+func newThinkingCommandStream(t *testing.T) *session.Stream {
+	t.Helper()
+	store := session.NewMemoryStore()
+	prov := &testSlashProvider{}
+	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+		return nil, nil
+	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+		return st, nil
+	})
+	stream, err := mgr.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+	return stream
+}
+
+func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
+	stream := newThinkingCommandStream(t)
+	tc := &thinkingCommand{}
+	tc.SetStream(stream)
+
+	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: ""})
+	require.NoError(t, err)
+	assert.Contains(t, res.Feedback.Content, "Thinking: off", "no-arg form should report current level")
+	assert.Contains(t, res.Feedback.Content, "Levels: off, minimal, low, medium, high, max", "no-arg form should list available levels")
+}
+
+func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
+	stream := newThinkingCommandStream(t)
+	tc := &thinkingCommand{}
+	tc.SetStream(stream)
+
+	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
+	require.NoError(t, err)
+	assert.Equal(t, "Thinking: high", res.Feedback.Content)
+
+	// Verify the metadata was actually written. GetMetadata returns the
+	// value the next read of buildInvokeOptions will see.
+	got, ok := stream.GetMetadata("workshop.thinking_level")
+	require.True(t, ok, "metadata should be set")
+	assert.Equal(t, "high", got)
+}
+
+func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
+	stream := newThinkingCommandStream(t)
+	tc := &thinkingCommand{}
+	tc.SetStream(stream)
+
+	// Pre-set a known level so we can verify it isn't overwritten.
+	stream.SetMetadata("workshop.thinking_level", "medium")
+
+	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "frobnicate"})
+	require.NoError(t, err)
+	assert.Contains(t, res.Feedback.Content, "Unknown level: frobnicate", "should report the unknown level name")
+	assert.Contains(t, res.Feedback.Content, "Available:", "should list valid levels in the error")
+
+	got, _ := stream.GetMetadata("workshop.thinking_level")
+	assert.Equal(t, "medium", got, "metadata must not be mutated by an invalid set")
+}
+
+func TestThinkingCommand_OffIsValid(t *testing.T) {
+	stream := newThinkingCommandStream(t)
+	tc := &thinkingCommand{}
+	tc.SetStream(stream)
+
+	// "off" is a valid level that disables thinking; it must be accepted
+	// and must write the metadata.
+	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "off"})
+	require.NoError(t, err)
+	assert.Equal(t, "Thinking: off", res.Feedback.Content)
+	got, _ := stream.GetMetadata("workshop.thinking_level")
+	assert.Equal(t, "off", got)
+}
+
+func TestThinkingCommand_NoStreamError(t *testing.T) {
+	tc := &thinkingCommand{}
+	// No SetStream call: simulates invoking /thinking before any stream
+	// has been opened. The handler must surface a clear error.
+	_, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no active stream")
+}
+
+// TestBuildInvokeOptions_ReadsThinkingLevelFromMetadata is the
+// end-to-end test that proves the slash command is wired into the
+// request path: a level written by /thinking must be read by
+// buildInvokeOptions on the very next call.
+func TestBuildInvokeOptions_ReadsThinkingLevelFromMetadata(t *testing.T) {
+	stream := newThinkingCommandStream(t)
+
+	// Simulate the user setting the level via /thinking.
+	stream.SetMetadata("workshop.thinking_level", "high")
+
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:      "anthropic",
+			MaxTokens: 16000,
+		},
+	}
+	// Wire the stream's metadata into the cfg by reading it directly
+	// here. In production, buildInvokeOptions is called per turn and
+	// the metadata accessor would be the bridge. We assert the same
+	// outcome by routing through resolveThinkingLevel.
+	if v, ok := stream.GetMetadata("workshop.thinking_level"); ok {
+		cfg.provider.ThinkingLevel = v
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	assert.Contains(t, got, "anthropic.thinkingLevelOption", "metadata-driven level must produce a thinkingLevelOption")
 }

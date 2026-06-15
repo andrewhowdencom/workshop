@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/provider"
@@ -307,6 +308,94 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	return slash.Result{}, nil
 }
 
+// thinkingCommand handles the /thinking slash command for changing
+// the active thread's thinking level without triggering an LLM turn.
+// The level is stored in stream metadata under "workshop.thinking_level"
+// so it persists across turns and across thread resume. SetMetadata
+// emits a loop.PropertiesEvent so the TUI status bar updates in real
+// time; buildInvokeOptions reads the same key at request time.
+type thinkingCommand struct {
+	mu     sync.Mutex
+	stream *session.Stream
+}
+
+// SetStream updates the shared stream reference. Called by the
+// stepFactory on every stream open.
+func (c *thinkingCommand) SetStream(s *session.Stream) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stream = s
+}
+
+// currentThinkingLevel reads the active stream's thinking level from
+// metadata, defaulting to ThinkingLevelOff when unset. The empty
+// string is treated as off, matching resolveThinkingLevel's contract.
+func (c *thinkingCommand) currentThinkingLevel() provider.ThinkingLevel {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stream == nil {
+		return provider.ThinkingLevelOff
+	}
+	v, ok := c.stream.GetMetadata("workshop.thinking_level")
+	if !ok || v == "" {
+		return provider.ThinkingLevelOff
+	}
+	level, err := provider.ParseThinkingLevel(v)
+	if err != nil {
+		return provider.ThinkingLevelOff
+	}
+	return level
+}
+
+// Handler validates the level name and updates the stream metadata.
+// With no argument, returns the current level and the list of
+// available levels as a Result.Feedback message. An unknown level
+// returns a feedback message and leaves state unchanged. Successful
+// sets also return a feedback message confirming the change.
+func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
+	args := slash.Fields(cmd.Input)
+	current := c.currentThinkingLevel()
+
+	if len(args) == 0 {
+		// No-arg form: report current + available levels.
+		available := []string{
+			string(provider.ThinkingLevelOff),
+			string(provider.ThinkingLevelMinimal),
+			string(provider.ThinkingLevelLow),
+			string(provider.ThinkingLevelMedium),
+			string(provider.ThinkingLevelHigh),
+			string(provider.ThinkingLevelMax),
+		}
+		return slash.Result{
+			Feedback: artifact.Text{
+				Content: fmt.Sprintf("Thinking: %s\nLevels: %s\nUsage: /thinking <level>",
+					current, strings.Join(available, ", ")),
+			},
+		}, nil
+	}
+
+	wanted := args[0]
+	level, err := provider.ParseThinkingLevel(wanted)
+	if err != nil {
+		// Unknown level: report the error but do not mutate.
+		return slash.Result{
+			Feedback: artifact.Text{
+				Content: fmt.Sprintf("Unknown level: %s. Available: off, minimal, low, medium, high, max", wanted),
+			},
+		}, nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stream == nil {
+		return slash.Result{}, fmt.Errorf("no active stream")
+	}
+	c.stream.SetMetadata("workshop.thinking_level", string(level))
+	return slash.Result{
+		Feedback: artifact.Text{Content: fmt.Sprintf("Thinking: %s", level)},
+	}, nil
+}
+
 // SetStream updates the shared stream reference.
 func (c *roleCommand) SetStream(s *session.Stream) {
 	c.mu.Lock()
@@ -418,16 +507,21 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	// Create compact command handler.
 	cc := &compactCommand{compactor: compactor, notifier: cfg.compactionNotifier}
 
+	// Create thinking-level command handler.
+	tc := &thinkingCommand{}
+
 	// Create slash command registry.
 	slashReg := slash.NewRegistry()
 	slashReg.Bind("role", "Switch to a different role", rc.Handler)
 	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
+	slashReg.Bind("thinking", "Set the thinking level for this thread", tc.Handler)
 	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
 
 	// Step factory: inject system prompt and guardrails as transforms.
 	stepFactory := func(stream *session.Stream) ([]loop.Option, error) {
 		rc.SetStream(stream)
 		cc.SetStream(stream)
+		tc.SetStream(stream)
 
 		// Set up progressive skill discovery from repo and home directories.
 		var discoverers []skills.Discoverer
