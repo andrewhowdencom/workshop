@@ -26,7 +26,7 @@ func init() {
 	rootCmd.PersistentFlags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
 	rootCmd.PersistentFlags().String("provider.base-url", "", "Custom API base URL")
 	rootCmd.PersistentFlags().Float64("provider.temperature", 0, "Sampling temperature for the provider (0 = default)")
-	rootCmd.PersistentFlags().String("provider.thinking-level", "off", "Thinking effort level: off, minimal, low, medium, high, max. Default: off.")
+	rootCmd.PersistentFlags().String("provider.thinking-level", "", "Thinking effort level: off, minimal, low, medium, high, max. Default: off (openai-compatible), medium (anthropic).")
 	rootCmd.PersistentFlags().Int64("provider.max-tokens", 0, "Maximum output tokens per request (anthropic only; 0 = use provider default of 32000)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
 	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
@@ -107,14 +107,41 @@ func configureLogging(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// defaultThinkingLevelForKind returns the per-kind default thinking
+// level, applied only when the user has not configured one. Anthropic
+// defaults to "medium" because every supported model benefits from
+// extended thinking on hard turns. OpenAI-compatible providers keep
+// "off" as the default, matching historical behavior. Any unknown or
+// future kind falls back to "off" until a default is added here.
+func defaultThinkingLevelForKind(kind string) string {
+	if kind == "anthropic" {
+		return "medium"
+	}
+	return "off"
+}
+
+// resolveThinkingLevelForConfig is the single source of truth for the
+// "what thinking level should workshop use?" policy. When the user has
+// not set a level (raw is the empty flag default), the per-kind default
+// is substituted. Explicit user values — including "off" for Anthropic
+// — are returned verbatim: a user who has chosen "off" in their config
+// must keep getting "off", not get silently upgraded to "medium".
+func resolveThinkingLevelForConfig(kind, raw string) string {
+	if raw != "" {
+		return raw
+	}
+	return defaultThinkingLevelForKind(kind)
+}
+
 func makeProviderConfig() app.ProviderConfig {
+	kind := viper.GetString("provider.kind")
 	return app.ProviderConfig{
-		Kind:          viper.GetString("provider.kind"),
+		Kind:          kind,
 		APIKey:        viper.GetString("provider.api-key"),
 		Model:         viper.GetString("provider.model"),
 		BaseURL:       viper.GetString("provider.base-url"),
 		Temperature:   viper.GetFloat64("provider.temperature"),
-		ThinkingLevel: viper.GetString("provider.thinking-level"),
+		ThinkingLevel: resolveThinkingLevelForConfig(kind, viper.GetString("provider.thinking-level")),
 		MaxTokens:     viper.GetInt64("provider.max-tokens"),
 	}
 }

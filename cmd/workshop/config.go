@@ -57,16 +57,17 @@ func buildConfigMap() map[string]interface{} {
 		storeDir = defaultStoreDir()
 	}
 
+	kind := viper.GetString("provider.kind")
 	return map[string]interface{}{
 		"log-level": viper.GetString("log-level"),
 		"provider": map[string]interface{}{
-			"kind":          viper.GetString("provider.kind"),
-			"api-key":       viper.GetString("provider.api-key"),
-			"model":         viper.GetString("provider.model"),
-			"base-url":      viper.GetString("provider.base-url"),
-			"temperature":   viper.GetFloat64("provider.temperature"),
-			"thinking-level": viper.GetString("provider.thinking-level"),
-			"max-tokens":    viper.GetInt64("provider.max-tokens"),
+			"kind":           kind,
+			"api-key":        viper.GetString("provider.api-key"),
+			"model":          viper.GetString("provider.model"),
+			"base-url":       viper.GetString("provider.base-url"),
+			"temperature":    viper.GetFloat64("provider.temperature"),
+			"thinking-level": resolveThinkingLevelForConfig(kind, viper.GetString("provider.thinking-level")),
+			"max-tokens":     viper.GetInt64("provider.max-tokens"),
 		},
 		"store": map[string]interface{}{
 			"dir": storeDir,

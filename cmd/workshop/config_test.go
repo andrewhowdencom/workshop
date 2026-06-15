@@ -17,8 +17,7 @@ func setViperValue(t *testing.T, key, value string) {
 }
 
 // setViperInt64Value mirrors setViperValue for int64 keys, restoring the
-// previous value on test cleanup. Used for the new provider.max-tokens and
-// provider.thinking-budget flags.
+// previous value on test cleanup. Used for the provider.max-tokens flag.
 func setViperInt64Value(t *testing.T, key string, value int64) {
 	old := viper.GetInt64(key)
 	viper.Set(key, value)
@@ -41,9 +40,8 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	setViperValue(t, "provider.model", "gpt-4o")
 	setViperValue(t, "provider.base-url", "http://test")
 	setViperValue(t, "provider.temperature", "0.7")
-	setViperValue(t, "provider.reasoning-effort", "medium")
+	setViperValue(t, "provider.thinking-level", "medium")
 	setViperInt64Value(t, "provider.max-tokens", 32000)
-	setViperInt64Value(t, "provider.thinking-budget", 8000)
 	setViperValue(t, "store.dir", "/tmp/store")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
@@ -84,15 +82,12 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	if got, want := prov["temperature"], 0.7; got != want {
 		t.Errorf("provider.temperature = %v, want %v", got, want)
 	}
-	if got, want := prov["reasoning-effort"], "medium"; got != want {
-		t.Errorf("provider.reasoning-effort = %v, want %v", got, want)
+	if got, want := prov["thinking-level"], "medium"; got != want {
+		t.Errorf("provider.thinking-level = %v, want %v", got, want)
 	}
 	// YAML round-trips int64 as int; compare as int (values fit comfortably).
 	if got, want := prov["max-tokens"], 32000; got != want {
 		t.Errorf("provider.max-tokens = %v (%T), want %v (%T)", got, got, want, want)
-	}
-	if got, want := prov["thinking-budget"], 8000; got != want {
-		t.Errorf("provider.thinking-budget = %v (%T), want %v (%T)", got, got, want, want)
 	}
 
 	compaction, ok := settings["compaction"].(map[string]interface{})
@@ -205,4 +200,55 @@ func TestRunConfigInitWithPath_OverwritesExisting(t *testing.T) {
 	if got, want := prov["model"], "second-model"; got != want {
 		t.Errorf("provider.model after overwrite = %v, want %v", got, want)
 	}
+}
+
+// TestBuildConfigMap_AppliesAnthropicDefault verifies that the emitted
+// YAML from `workshop config init` reflects the per-kind default:
+// an anthropic user who has not configured --provider.thinking-level
+// gets "medium" in the written config, so the round-trip is honest
+// about what workshop will do at runtime. An openai user keeps "off".
+// A user who has explicitly set "off" for anthropic keeps "off" (no
+// silent upgrade).
+func TestBuildConfigMap_AppliesAnthropicDefault(t *testing.T) {
+	t.Run("anthropic empty -> medium", func(t *testing.T) {
+		setViperValue(t, "provider.kind", "anthropic")
+		setViperValue(t, "provider.thinking-level", "")
+
+		settings := buildConfigMap()
+		prov, ok := settings["provider"].(map[string]interface{})
+		if !ok {
+			t.Fatal("provider section missing or not a map")
+		}
+		if got, want := prov["thinking-level"], "medium"; got != want {
+			t.Errorf("provider.thinking-level = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("openai empty -> off", func(t *testing.T) {
+		setViperValue(t, "provider.kind", "openai")
+		setViperValue(t, "provider.thinking-level", "")
+
+		settings := buildConfigMap()
+		prov, ok := settings["provider"].(map[string]interface{})
+		if !ok {
+			t.Fatal("provider section missing or not a map")
+		}
+		if got, want := prov["thinking-level"], "off"; got != want {
+			t.Errorf("provider.thinking-level = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("anthropic explicit off -> off (no silent upgrade)", func(t *testing.T) {
+		setViperValue(t, "provider.kind", "anthropic")
+		setViperValue(t, "provider.thinking-level", "off")
+
+		settings := buildConfigMap()
+		prov, ok := settings["provider"].(map[string]interface{})
+		if !ok {
+			t.Fatal("provider section missing or not a map")
+		}
+		if got, want := prov["thinking-level"], "off"; got != want {
+			t.Errorf("provider.thinking-level = %v, want %v (explicit user value must be preserved)", got, want)
+		}
+	})
 }
