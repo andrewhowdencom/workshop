@@ -403,7 +403,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Build provider from generic config.
-	prov, err := newProvider(cfg.provider, tracer)
+	prov, err := newProvider(&cfg.provider, tracer)
 	if err != nil {
 		return nil, fmt.Errorf("create provider: %w", err)
 	}
@@ -639,7 +639,13 @@ func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption 
 }
 
 // newProvider constructs a provider.Provider from generic ProviderConfig.
-func newProvider(pc ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
+//
+// newProvider takes a pointer to ProviderConfig because the anthropic
+// branch mutates pc.MaxTokens to apply the default; a value-pass would
+// discard that mutation, causing buildInvokeOptions to see a zero value
+// and skip the WithMaxTokens option (which would then default to
+// max_tokens=1 on the wire).
+func newProvider(pc *ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
 	switch pc.Kind {
 	case "", "openai":
 		if pc.APIKey == "" {
