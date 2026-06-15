@@ -16,18 +16,18 @@ import (
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/provider"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
-	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/compaction"
+	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // keepLastN is a test-only compaction strategy that retains only the last N turns.
@@ -144,6 +144,7 @@ func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
 			defaultAnthropicMaxTokens, pc.MaxTokens)
 	}
 }
+
 // (The three "WarnsOnMaxTokensLeqThinkingBudget" tests were removed
 // when the absolute ThinkingBudget knob was replaced with the
 // portable ThinkingLevel. The level's percentage-of-max_tokens
@@ -269,9 +270,9 @@ func TestResolveThinkingLevel(t *testing.T) {
 		{"medium", provider.ThinkingLevelMedium},
 		{"high", provider.ThinkingLevelHigh},
 		{"max", provider.ThinkingLevelMax},
-		{"MEDIUM", provider.ThinkingLevelOff},   // case-sensitive
-		{"foo", provider.ThinkingLevelOff},      // unknown -> off
-		{" off", provider.ThinkingLevelOff},     // whitespace-sensitive
+		{"MEDIUM", provider.ThinkingLevelOff}, // case-sensitive
+		{"foo", provider.ThinkingLevelOff},    // unknown -> off
+		{" off", provider.ThinkingLevelOff},   // whitespace-sensitive
 	}
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, resolveThinkingLevel(tc.in), "input %q", tc.in)
@@ -328,9 +329,9 @@ func TestBuildInvokeOptions_Anthropic_OmitsOpenAIThinkingLevel(t *testing.T) {
 func TestBuildInvokeOptions_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
 	cfg := &config{
 		provider: ProviderConfig{
-			Kind:    "anthropic",
-			APIKey:  "sk-ant-test",
-			Model:   "claude-sonnet-4-5",
+			Kind:   "anthropic",
+			APIKey: "sk-ant-test",
+			Model:  "claude-sonnet-4-5",
 			// MaxTokens intentionally left at 0 to trigger the
 			// defaulting path.
 		},
@@ -621,7 +622,6 @@ func (p *testSummarizeProvider) Invoke(ctx context.Context, s state.State, ch ch
 	ch <- artifact.Text{Content: "summary"}
 	return nil
 }
-
 
 func TestRoleToolSchemas(t *testing.T) {
 	tests := []struct {
@@ -1555,7 +1555,6 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 		t.Errorf("prompt should not end with blank separator when no agents files exist: %q", text.Content)
 	}
 }
-
 
 // mockSkillDiscoverer is a test double for skills.Discoverer.
 type mockSkillDiscoverer struct {
