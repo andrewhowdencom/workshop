@@ -16,6 +16,7 @@ import (
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/provider"
+	"github.com/stretchr/testify/assert"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
 	slash "github.com/andrewhowdencom/ore/x/slash"
@@ -178,6 +179,25 @@ func TestBuildInvokeOptions_OpenAI_IncludesToolsAndThinkingLevel(t *testing.T) {
 	}
 }
 
+// TestBuildInvokeOptions_OpenAI_ClampsLevelToOffIfUnknown verifies
+// that an unknown level string is treated as off (no thinkingLevelOption
+// appended) so the openai path is robust to config typos.
+func TestBuildInvokeOptions_OpenAI_ClampsLevelToOffIfUnknown(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:          "openai",
+			Temperature:   0.5,
+			ThinkingLevel: "frobnicate",
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "openai.thinkingLevelOption" {
+			t.Errorf("did not expect thinkingLevelOption for unknown level; got %v", got)
+		}
+	}
+}
+
 func TestBuildInvokeOptions_OpenAI_OmitsThinkingLevelWhenOff(t *testing.T) {
 	cfg := &config{
 		provider: ProviderConfig{
@@ -227,6 +247,33 @@ func TestBuildInvokeOptions_Anthropic_OmitsThinkingLevelWhenOff(t *testing.T) {
 		if ty == "anthropic.thinkingLevelOption" {
 			t.Errorf("did not expect thinkingLevelOption when ThinkingLevel is empty; got %v", got)
 		}
+	}
+}
+
+// TestResolveThinkingLevel is a focused unit test for the helper
+// that parses user-supplied level strings. The empty string and
+// unknown values must both map to ThinkingLevelOff so callers do
+// not need to defensively check the parse result.
+func TestResolveThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want provider.ThinkingLevel
+	}{
+		{"", provider.ThinkingLevelOff},
+		{"off", provider.ThinkingLevelOff},
+		{"minimal", provider.ThinkingLevelMinimal},
+		{"low", provider.ThinkingLevelLow},
+		{"medium", provider.ThinkingLevelMedium},
+		{"high", provider.ThinkingLevelHigh},
+		{"max", provider.ThinkingLevelMax},
+		{"MEDIUM", provider.ThinkingLevelOff},   // case-sensitive
+		{"foo", provider.ThinkingLevelOff},      // unknown -> off
+		{" off", provider.ThinkingLevelOff},     // whitespace-sensitive
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, resolveThinkingLevel(tc.in), "input %q", tc.in)
 	}
 }
 
