@@ -45,9 +45,12 @@ go run ./cmd/workshop
 The Anthropic provider requires a per-request `max_tokens`. When unset,
 workshop applies a default of 32000 (overridable via
 `--provider.max-tokens`). To enable Anthropic's extended thinking, set
-`--provider.thinking-budget` to the number of thinking tokens you want
-to allow; `max-tokens` must exceed the thinking budget by enough to
-leave room for the visible response.
+`--provider.thinking-level` to one of `minimal`, `low`, `medium`, `high`,
+or `max`; the level is translated at request time to a percentage of
+`max_tokens` for `thinking.budget_tokens` (with a 1024-token floor and
+a `(max_tokens - 1024)` ceiling so the visible response always has
+room). The level is also settable at runtime via the `/thinking` slash
+command; see "Slash commands" below.
 
 ### OpenRouter (via the Anthropic Messages mirror)
 
@@ -207,9 +210,9 @@ provider:
   model: gpt-4o
   base-url: ""
   temperature: 0          # 0 = provider default; range 0–2 for OpenAI
-  reasoning-effort: ""    # "low", "medium", or "high" for o1 models
+  reasoning-effort: ""    # DEPRECATED; use thinking-level instead
   max-tokens: 0           # hard cap on output tokens; 0 = workshop default (anthropic only)
-  thinking-budget: 0      # extended-thinking budget; 0 = disabled (anthropic only)
+  thinking-level: "off"   # off, minimal, low, medium, high, max (shared by every backend)
 store:
   dir: ""              # empty = use $XDG_DATA_HOME/workshop/threads
 http:
@@ -244,6 +247,23 @@ You can also force compaction at any time by typing `/compact` in the TUI or
 stdio interface. This immediately compacts the conversation history regardless
 of the current token count. If compaction is disabled (`--compaction.max-tokens 0`),
 the command will return an error.
+
+### Slash commands
+
+Workshop exposes a small set of in-conversation slash commands that mutate
+thread state without triggering an LLM turn. They are entered as the first
+text of a user message and processed by the slash interceptor before the
+provider is invoked. The auto-generated `/help` lists every bound command.
+
+- `/role <name>` — switch the active role (see Roles).
+- `/compact` — force compaction of the conversation history (see Compaction).
+- `/thinking` — report the current thinking level and the available levels.
+- `/thinking <level>` — set the thinking level for this thread, where
+  `<level>` is `off`, `minimal`, `low`, `medium`, `high`, or `max`. The
+  change is persisted in stream metadata, so it survives across turns and
+  across thread resume, and is reflected in the TUI's status bar
+  immediately. The level is per-thread; different threads can run at
+  different levels simultaneously.
 
 When running in TUI mode, the conversation history is automatically reloaded
 after compaction so the display reflects the newly compacted state.
@@ -285,9 +305,8 @@ When enabled, the profile index is available at
 | `--provider.model` | `WORKSHOP_PROVIDER_MODEL` | `gpt-4o` | Model name |
 | `--provider.base-url` | `WORKSHOP_PROVIDER_BASE_URL` | — | Custom API base URL |
 | `--provider.temperature` | `WORKSHOP_PROVIDER_TEMPERATURE` | `0` | Sampling temperature (0 = default) |
-| `--provider.reasoning-effort` | `WORKSHOP_PROVIDER_REASONING_EFFORT` | — | Reasoning effort (low, medium, high) (openai only) |
+| `--provider.thinking-level` | `WORKSHOP_PROVIDER_THINKING_LEVEL` | `off` | Thinking effort level: `off`, `minimal`, `low`, `medium`, `high`, or `max`. Shared by every backend; each adapter translates to its own wire format. |
 | `--provider.max-tokens` | `WORKSHOP_PROVIDER_MAX_TOKENS` | `0` | Hard cap on output tokens per request (anthropic only; 0 = workshop default of 32000) |
-| `--provider.thinking-budget` | `WORKSHOP_PROVIDER_THINKING_BUDGET` | `0` | Extended-thinking token budget (anthropic only; 0 = disabled) |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | `$XDG_DATA_HOME/workshop/threads` | Directory for persistent JSON thread storage |
 | `--format` | — | `text` | Export format (text, json, html) (thread export command only) |
 | `--output` | — | — | Output file path (default: stdout) (thread export command only) |
