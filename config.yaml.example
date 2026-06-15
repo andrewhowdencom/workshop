@@ -1,0 +1,35 @@
+# Example workshop configuration. Copy to config.yaml and customize, or use
+# `workshop config init` to materialize one from the current environment.
+#
+# Two provider kinds are supported:
+#   - "openai" (default) for OpenAI and OpenAI-compatible endpoints
+#   - "anthropic" for Anthropic native and OpenRouter's /api/v1/messages
+#     mirror (the auth header is auto-selected from base-url)
+
+provider:
+  # --- OpenAI-compatible example (Fireworks) ---
+  kind: openai
+  api-key: ""
+  base-url: "https://api.fireworks.ai/inference/v1"
+  model: accounts/fireworks/models/kimi-k2p6
+  temperature: 0
+  # reasoning-effort is OpenAI-only ("low" / "medium" / "high" for o1-class models):
+  # reasoning-effort: ""
+
+  # --- Anthropic example ---
+  # To use Anthropic, comment out the openai block above and uncomment:
+  # kind: anthropic
+  # api-key: sk-ant-...
+  # model: claude-sonnet-4-5
+  # max-tokens: 0          # 0 = workshop default of 32000
+  # thinking-budget: 0     # 0 = disabled; counts against max-tokens
+
+log-level: info
+pprof: true
+store:
+  dir: ""
+telemetry:
+  traces:
+    endpoint: "http://localhost:4318"   # OTLP/HTTP endpoint; empty = disabled
+  metrics:
+    endpoint: "http://localhost:4318"   # OTLP/HTTP endpoint; empty = disabled
