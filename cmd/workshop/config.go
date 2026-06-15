@@ -66,6 +66,8 @@ func buildConfigMap() map[string]interface{} {
 			"base-url":         viper.GetString("provider.base-url"),
 			"temperature":      viper.GetFloat64("provider.temperature"),
 			"reasoning-effort": viper.GetString("provider.reasoning-effort"),
+			"max-tokens":       viper.GetInt64("provider.max-tokens"),
+			"thinking-budget":  viper.GetInt64("provider.thinking-budget"),
 		},
 		"store": map[string]interface{}{
 			"dir": storeDir,
