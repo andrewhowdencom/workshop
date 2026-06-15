@@ -201,14 +201,18 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 			"thread_id":  "context",
 			"cwd":        "context",
 			"git_branch": "context",
-			"workshop.role": "context",
+			"workshop.role":          "context",
+			"workshop.thinking_level": "context",
 			"tui.pid":    "context",
 			"model":      "context",
 			"sent":       "lifecycle",
 			"received":   "lifecycle",
 			"total":      "lifecycle",
 		}),
-		tui.WithStatusLabels(map[string]string{"workshop.role": "role"}),
+		tui.WithStatusLabels(map[string]string{
+			"workshop.role":          "role",
+			"workshop.thinking_level": "thinking",
+		}),
 	)
 	if err != nil {
 		return fmt.Errorf("create TUI conduit: %w", err)
