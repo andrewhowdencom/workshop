@@ -7,7 +7,7 @@ This project demonstrates how to build a fully fledged agentic application outsi
 ## Prerequisites
 
 - [Go](https://go.dev/) 1.26+
-- An OpenAI API key (or compatible API endpoint)
+- An API key for [OpenAI](https://platform.openai.com/), [Anthropic](https://console.anthropic.com/), or a compatible endpoint (e.g. [OpenRouter](https://openrouter.ai/))
 - [Task](https://taskfile.dev/) (optional, for development tasks)
 
 ## Commands
@@ -32,6 +32,41 @@ export WORKSHOP_PROVIDER_API_KEY=sk-...
 export WORKSHOP_PROVIDER_MODEL=gpt-4o   # optional; defaults to gpt-4o
 go run ./cmd/workshop
 ```
+
+### Anthropic (native)
+
+```bash
+export WORKSHOP_PROVIDER_KIND=anthropic
+export WORKSHOP_PROVIDER_API_KEY=sk-ant-...
+export WORKSHOP_PROVIDER_MODEL=claude-sonnet-4-5   # any Anthropic model name
+go run ./cmd/workshop
+```
+
+The Anthropic provider requires a per-request `max_tokens`. When unset,
+workshop applies a default of 32000 (overridable via
+`--provider.max-tokens`). To enable Anthropic's extended thinking, set
+`--provider.thinking-budget` to the number of thinking tokens you want
+to allow; `max-tokens` must exceed the thinking budget by enough to
+leave room for the visible response.
+
+### OpenRouter (via the Anthropic Messages mirror)
+
+OpenRouter exposes an Anthropic-compatible endpoint at
+`https://openrouter.ai/api/v1`. Workshop selects the right auth header
+automatically when the base URL contains `openrouter`, so no separate
+provider kind is needed:
+
+```bash
+export WORKSHOP_PROVIDER_KIND=anthropic
+export WORKSHOP_PROVIDER_API_KEY=sk-or-...                  # OpenRouter key
+export WORKSHOP_PROVIDER_BASE_URL=https://openrouter.ai/api/v1
+export WORKSHOP_PROVIDER_MODEL=anthropic/claude-sonnet-4-5 # OpenRouter model id
+go run ./cmd/workshop
+```
+
+The `Authorization: Bearer <key>` header is sent in place of
+Anthropic's `x-api-key`; everything else behaves identically to the
+native flow.
 
 ### Web UI (HTTP server)
 
@@ -173,6 +208,8 @@ provider:
   base-url: ""
   temperature: 0          # 0 = provider default; range 0–2 for OpenAI
   reasoning-effort: ""    # "low", "medium", or "high" for o1 models
+  max-tokens: 0           # hard cap on output tokens; 0 = workshop default (anthropic only)
+  thinking-budget: 0      # extended-thinking budget; 0 = disabled (anthropic only)
 store:
   dir: ""              # empty = use $XDG_DATA_HOME/workshop/threads
 http:
@@ -248,7 +285,9 @@ When enabled, the profile index is available at
 | `--provider.model` | `WORKSHOP_PROVIDER_MODEL` | `gpt-4o` | Model name |
 | `--provider.base-url` | `WORKSHOP_PROVIDER_BASE_URL` | — | Custom API base URL |
 | `--provider.temperature` | `WORKSHOP_PROVIDER_TEMPERATURE` | `0` | Sampling temperature (0 = default) |
-| `--provider.reasoning-effort` | `WORKSHOP_PROVIDER_REASONING_EFFORT` | — | Reasoning effort (low, medium, high) |
+| `--provider.reasoning-effort` | `WORKSHOP_PROVIDER_REASONING_EFFORT` | — | Reasoning effort (low, medium, high) (openai only) |
+| `--provider.max-tokens` | `WORKSHOP_PROVIDER_MAX_TOKENS` | `0` | Hard cap on output tokens per request (anthropic only; 0 = workshop default of 32000) |
+| `--provider.thinking-budget` | `WORKSHOP_PROVIDER_THINKING_BUDGET` | `0` | Extended-thinking token budget (anthropic only; 0 = disabled) |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | `$XDG_DATA_HOME/workshop/threads` | Directory for persistent JSON thread storage |
 | `--format` | — | `text` | Export format (text, json, html) (thread export command only) |
 | `--output` | — | — | Output file path (default: stdout) (thread export command only) |
