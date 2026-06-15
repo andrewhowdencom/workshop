@@ -130,12 +130,18 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 }
 
 func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
-	// The Anthropic SDK rejects a zero MaxTokens. Confirm that leaving
-	// MaxTokens unset does not surface an error (i.e. the default is
-	// applied in newProvider before reaching the SDK).
+	// TestNewProvider_Anthropic_AppliesDefaultMaxTokens verifies that the
+	// default MaxTokens is applied and propagates back to the caller. This
+	// is a regression test for the by-value pass bug — if the signature
+	// reverts to value-pass, the post-call assertion below fails because
+	// the local mutation is discarded.
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
 	if _, err := newProvider(&pc, nil); err != nil {
 		t.Fatalf("newProvider with zero MaxTokens returned error; default not applied: %v", err)
+	}
+	if pc.MaxTokens != defaultAnthropicMaxTokens {
+		t.Errorf("expected pc.MaxTokens to be mutated to default (%d) after newProvider; got %d (by-value pass would discard the default)",
+			defaultAnthropicMaxTokens, pc.MaxTokens)
 	}
 }
 
@@ -319,6 +325,42 @@ func TestBuildInvokeOptions_Anthropic_OmitsReasoningEffort(t *testing.T) {
 			t.Errorf("did not expect openai.reasoningEffortOption on the anthropic path; got %v", got)
 		}
 	}
+}
+
+// TestBuildInvokeOptions_Anthropic_AppliesDefaultMaxTokens is an
+// end-to-end regression test: when the user leaves provider.max-tokens
+// unset on the anthropic kind, the full pipeline (newProvider applies
+// the 32000 default to the caller's struct, then buildInvokeOptions
+// reads the same struct and appends the WithMaxTokens option) must
+// include a maxTokensOption. This mirrors the production flow in
+// buildManager, which calls newProvider once at construction time and
+// buildInvokeOptions per turn. If the by-value bug in newProvider
+// regresses, the post-newProvider state of cfg.provider.MaxTokens is
+// still 0, and this test fails because the option is missing from
+// the slice.
+func TestBuildInvokeOptions_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:    "anthropic",
+			APIKey:  "sk-ant-test",
+			Model:   "claude-sonnet-4-5",
+			// MaxTokens intentionally left at 0 to trigger the
+			// defaulting path.
+		},
+	}
+	// newProvider applies the 32000 default to cfg.provider.MaxTokens.
+	// This is the production setup; the per-turn buildInvokeOptions
+	// below reads from the same struct.
+	if _, err := newProvider(&cfg.provider, nil); err != nil {
+		t.Fatalf("newProvider: %v", err)
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "anthropic.maxTokensOption" {
+			return
+		}
+	}
+	t.Errorf("expected anthropic.maxTokensOption in result, got %v", got)
 }
 
 func TestMakeCurrentPrompt_Fallback(t *testing.T) {
