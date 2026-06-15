@@ -16,6 +16,15 @@ func setViperValue(t *testing.T, key, value string) {
 	t.Cleanup(func() { viper.Set(key, old) })
 }
 
+// setViperInt64Value mirrors setViperValue for int64 keys, restoring the
+// previous value on test cleanup. Used for the new provider.max-tokens and
+// provider.thinking-budget flags.
+func setViperInt64Value(t *testing.T, key string, value int64) {
+	old := viper.GetInt64(key)
+	viper.Set(key, value)
+	t.Cleanup(func() { viper.Set(key, old) })
+}
+
 func TestBuildConfigMap_ExcludesThread(t *testing.T) {
 	setViperValue(t, "thread", "uuid-123")
 	settings := buildConfigMap()
@@ -33,6 +42,8 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	setViperValue(t, "provider.base-url", "http://test")
 	setViperValue(t, "provider.temperature", "0.7")
 	setViperValue(t, "provider.reasoning-effort", "medium")
+	setViperInt64Value(t, "provider.max-tokens", 32000)
+	setViperInt64Value(t, "provider.thinking-budget", 8000)
 	setViperValue(t, "store.dir", "/tmp/store")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
@@ -75,6 +86,13 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	}
 	if got, want := prov["reasoning-effort"], "medium"; got != want {
 		t.Errorf("provider.reasoning-effort = %v, want %v", got, want)
+	}
+	// YAML round-trips int64 as int; compare as int (values fit comfortably).
+	if got, want := prov["max-tokens"], 32000; got != want {
+		t.Errorf("provider.max-tokens = %v (%T), want %v (%T)", got, got, want, want)
+	}
+	if got, want := prov["thinking-budget"], 8000; got != want {
+		t.Errorf("provider.thinking-budget = %v (%T), want %v (%T)", got, got, want, want)
 	}
 
 	compaction, ok := settings["compaction"].(map[string]interface{})

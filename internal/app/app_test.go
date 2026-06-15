@@ -1,12 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,6 +73,251 @@ func TestNewProvider_UnsupportedKind(t *testing.T) {
 	want := `unsupported provider kind: "unsupported"`
 	if err.Error() != want {
 		t.Errorf("unexpected error message: %q, want %q", err.Error(), want)
+	}
+}
+
+func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
+	pc := ProviderConfig{Kind: "anthropic", Model: "claude-sonnet-4-5"}
+	_, err := newProvider(pc, nil)
+	if err == nil {
+		t.Fatal("expected error for missing API key")
+	}
+	if err.Error() != "missing required provider config: api_key" {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
+	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test"}
+	_, err := newProvider(pc, nil)
+	if err == nil {
+		t.Fatal("expected error for missing model")
+	}
+	if err.Error() != "missing required provider config: model" {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestNewProvider_Anthropic_Constructs(t *testing.T) {
+	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
+	prov, err := newProvider(pc, nil)
+	if err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("expected non-nil provider for valid anthropic config")
+	}
+}
+
+func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
+	// Smoke test: an OpenRouter base URL must not break construction. The
+	// auth-header dispatch is verified by the anthropic package's own
+	// tests (TestNew_OpenRouterBaseURL); workshop only needs to confirm
+	// the option is forwarded.
+	pc := ProviderConfig{
+		Kind:    "anthropic",
+		APIKey:  "sk-or-test",
+		Model:   "anthropic/claude-sonnet-4-5",
+		BaseURL: "https://openrouter.ai/api/v1",
+	}
+	prov, err := newProvider(pc, nil)
+	if err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if prov == nil {
+		t.Fatal("expected non-nil provider for valid anthropic+openrouter config")
+	}
+}
+
+func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
+	// The Anthropic SDK rejects a zero MaxTokens. Confirm that leaving
+	// MaxTokens unset does not surface an error (i.e. the default is
+	// applied in newProvider before reaching the SDK).
+	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider with zero MaxTokens returned error; default not applied: %v", err)
+	}
+}
+
+// captureSlog redirects the default slog handler to a buffer for the
+// duration of a test, returning the buffer so callers can inspect emitted
+// records. Restores the previous default on test cleanup.
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	prev := slog.Default()
+	buf := &bytes.Buffer{}
+	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	slog.SetDefault(slog.New(h))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+func TestNewProvider_Anthropic_WarnsOnMaxTokensLeqThinkingBudget(t *testing.T) {
+	buf := captureSlog(t)
+	pc := ProviderConfig{
+		Kind:           "anthropic",
+		APIKey:         "sk-ant-test",
+		Model:          "claude-sonnet-4-5",
+		MaxTokens:      1000,
+		ThinkingBudget: 2000,
+	}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "provider.max-tokens is <=") {
+		t.Errorf("expected warning not emitted; got: %s", buf.String())
+	}
+}
+
+func TestNewProvider_Anthropic_SilentWhenMaxTokensExceedsThinkingBudget(t *testing.T) {
+	buf := captureSlog(t)
+	pc := ProviderConfig{
+		Kind:           "anthropic",
+		APIKey:         "sk-ant-test",
+		Model:          "claude-sonnet-4-5",
+		MaxTokens:      16000,
+		ThinkingBudget: 8000,
+	}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
+		t.Errorf("did not expect warning; got: %s", buf.String())
+	}
+}
+
+func TestNewProvider_Anthropic_SilentWhenThinkingBudgetZero(t *testing.T) {
+	// A zero ThinkingBudget disables extended thinking entirely. With
+	// thinking off, MaxTokens can be any value without risk of truncation.
+	buf := captureSlog(t)
+	pc := ProviderConfig{
+		Kind:      "anthropic",
+		APIKey:    "sk-ant-test",
+		Model:     "claude-sonnet-4-5",
+		MaxTokens: 1000,
+		// ThinkingBudget omitted (zero)
+	}
+	if _, err := newProvider(pc, nil); err != nil {
+		t.Fatalf("newProvider error: %v", err)
+	}
+	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
+		t.Errorf("did not expect warning when thinking is disabled; got: %s", buf.String())
+	}
+}
+
+// optionTypes returns a slice of %T-formatted type names for the supplied
+// options. Tests use this to assert that buildInvokeOptions produced the
+// expected per-provider option types without depending on unexported fields.
+func optionTypes(opts []provider.InvokeOption) []string {
+	out := make([]string, len(opts))
+	for i, o := range opts {
+		out[i] = fmt.Sprintf("%T", o)
+	}
+	return out
+}
+
+func TestBuildInvokeOptions_OpenAI_IncludesToolsAndReasoningEffort(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:            "openai",
+			Temperature:     0.5,
+			ReasoningEffort: "medium",
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	want := []string{
+		"provider.ToolsOption",
+		"openai.temperatureOption",
+		"openai.reasoningEffortOption",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("option types = %v, want %v", got, want)
+	}
+}
+
+func TestBuildInvokeOptions_OpenAI_OmitsReasoningEffortWhenEmpty(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:        "openai",
+			Temperature: 0.5,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "openai.reasoningEffortOption" {
+			t.Errorf("did not expect reasoningEffortOption when ReasoningEffort is empty; got %v", got)
+		}
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:           "anthropic",
+			MaxTokens:      16000,
+			ThinkingBudget: 8000,
+			Temperature:    0.3,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	want := []string{
+		"provider.ToolsOption",
+		"anthropic.temperatureOption",
+		"anthropic.maxTokensOption",
+		"anthropic.thinkingBudgetOption",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("option types = %v, want %v", got, want)
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_OmitsThinkingBudgetWhenZero(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:        "anthropic",
+			MaxTokens:   16000,
+			Temperature: 0,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "anthropic.thinkingBudgetOption" {
+			t.Errorf("did not expect thinkingBudgetOption when ThinkingBudget is zero; got %v", got)
+		}
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_OmitsTemperatureWhenZero(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:      "anthropic",
+			MaxTokens: 16000,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "anthropic.temperatureOption" {
+			t.Errorf("did not expect temperatureOption when Temperature is zero; got %v", got)
+		}
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_OmitsReasoningEffort(t *testing.T) {
+	// ReasoningEffort is OpenAI-only. The anthropic branch must not produce
+	// a reasoningEffortOption even when the field is set, so the openai
+	// option is not silently forwarded to a backend that ignores it.
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:            "anthropic",
+			MaxTokens:       16000,
+			ReasoningEffort: "high",
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "openai.reasoningEffortOption" {
+			t.Errorf("did not expect openai.reasoningEffortOption on the anthropic path; got %v", got)
+		}
 	}
 }
 
@@ -1637,12 +1885,12 @@ func TestReadFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 
-	content, ok := result.(string)
+	content, ok := result.(*filesystem.ReadFileResult)
 	if !ok {
-		t.Fatalf("result type = %T, want string", result)
+		t.Fatalf("result type = %T, want *filesystem.ReadFileResult", result)
 	}
-	if !strings.Contains(content, "hello worktree") {
-		t.Errorf("content = %q, want 'hello worktree'", content)
+	if !strings.Contains(content.Content, "hello worktree") {
+		t.Errorf("content = %q, want 'hello worktree'", content.Content)
 	}
 }
 
@@ -1666,12 +1914,12 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 
-	content, ok := result.(string)
+	content, ok := result.(*filesystem.ReadFileResult)
 	if !ok {
-		t.Fatalf("result type = %T, want string", result)
+		t.Fatalf("result type = %T, want *filesystem.ReadFileResult", result)
 	}
-	if !strings.Contains(content, "outside content") {
-		t.Errorf("content = %q, want 'outside content'", content)
+	if !strings.Contains(content.Content, "outside content") {
+		t.Errorf("content = %q, want 'outside content'", content.Content)
 	}
 }
 
@@ -1756,12 +2004,12 @@ func TestListDirectory_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatalf("ListDirectory error: %v", err)
 	}
 
-	entries, ok := result.([]string)
+	entries, ok := result.(*filesystem.ListDirectoryResult)
 	if !ok {
-		t.Fatalf("result type = %T, want []string", result)
+		t.Fatalf("result type = %T, want *filesystem.ListDirectoryResult", result)
 	}
-	if len(entries) != 2 {
-		t.Errorf("len(entries) = %d, want 2", len(entries))
+	if len(entries.Entries) != 2 {
+		t.Errorf("len(entries) = %d, want 2", len(entries.Entries))
 	}
 }
 
@@ -1787,12 +2035,12 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatalf("SearchFiles error: %v", err)
 	}
 
-	results, ok := result.([]filesystem.SearchResult)
+	results, ok := result.(*filesystem.SearchFilesResult)
 	if !ok {
-		t.Fatalf("result type = %T, want []filesystem.SearchResult", result)
+		t.Fatalf("result type = %T, want *filesystem.SearchFilesResult", result)
 	}
-	if len(results) != 1 {
-		t.Errorf("len(results) = %d, want 1", len(results))
+	if len(results.Results) != 1 {
+		t.Errorf("len(results) = %d, want 1", len(results.Results))
 	}
 }
 

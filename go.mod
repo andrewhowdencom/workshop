@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.8.0
+	github.com/andrewhowdencom/ore v0.9.0
 	github.com/andrewhowdencom/ore/x/analytics v0.2.0
 	github.com/andrewhowdencom/ore/x/compaction v0.4.2
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1
@@ -33,12 +33,23 @@ require (
 )
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.50.1 // indirect
+	github.com/bahlo/generic-list-go v0.2.0 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
+	github.com/invopop/jsonschema v0.14.0 // indirect
+	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
+	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
+)
+
+require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
 	charm.land/bubbletea/v2 v2.0.7 // indirect
 	charm.land/lipgloss/v2 v2.0.4 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
 	github.com/andrewhowdencom/ore/x/llmbytes v0.1.0 // indirect
+	github.com/andrewhowdencom/ore/x/provider/anthropic v0.1.0
 	github.com/andrewhowdencom/ore/x/tool/truncate v0.1.0 // indirect
 	github.com/andrewhowdencom/ore/x/verifier v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -117,5 +128,7 @@ replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
 replace github.com/andrewhowdencom/ore => ../ore
 
 replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
+
+replace github.com/andrewhowdencom/ore/x/provider/anthropic => ../ore/x/provider/anthropic
 
 replace github.com/andrewhowdencom/ore/x/llmbytes => ../ore/x/llmbytes
