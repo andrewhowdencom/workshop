@@ -13,8 +13,13 @@ provider:
   base-url: "https://api.fireworks.ai/inference/v1"
   model: accounts/fireworks/models/kimi-k2p6
   temperature: 0
-  # reasoning-effort is OpenAI-only ("low" / "medium" / "high" for o1-class models):
-  # reasoning-effort: ""
+  # thinking-level is a portable knob shared by every backend. Valid
+  # values: off (default), minimal, low, medium, high, max. For
+  # OpenAI-compatible providers, the level is mapped to
+  # reasoning_effort; for Anthropic, it becomes a percentage of
+  # max_tokens for thinking.budget_tokens. Set per-thread at runtime
+  # via the /thinking slash command.
+  # thinking-level: "off"
 
   # --- Anthropic example ---
   # To use Anthropic, comment out the openai block above and uncomment:
@@ -22,7 +27,7 @@ provider:
   # api-key: sk-ant-...
   # model: claude-sonnet-4-5
   # max-tokens: 0          # 0 = workshop default of 32000
-  # thinking-budget: 0     # 0 = disabled; counts against max-tokens
+  # thinking-level: "off"  # off, minimal, low, medium, high, max
 
 log-level: info
 pprof: true

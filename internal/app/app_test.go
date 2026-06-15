@@ -1,11 +1,9 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -144,72 +142,11 @@ func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
 			defaultAnthropicMaxTokens, pc.MaxTokens)
 	}
 }
-
-// captureSlog redirects the default slog handler to a buffer for the
-// duration of a test, returning the buffer so callers can inspect emitted
-// records. Restores the previous default on test cleanup.
-func captureSlog(t *testing.T) *bytes.Buffer {
-	t.Helper()
-	prev := slog.Default()
-	buf := &bytes.Buffer{}
-	h := slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})
-	slog.SetDefault(slog.New(h))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-	return buf
-}
-
-func TestNewProvider_Anthropic_WarnsOnMaxTokensLeqThinkingBudget(t *testing.T) {
-	buf := captureSlog(t)
-	pc := ProviderConfig{
-		Kind:           "anthropic",
-		APIKey:         "sk-ant-test",
-		Model:          "claude-sonnet-4-5",
-		MaxTokens:      1000,
-		ThinkingBudget: 2000,
-	}
-	if _, err := newProvider(&pc, nil); err != nil {
-		t.Fatalf("newProvider error: %v", err)
-	}
-	if !strings.Contains(buf.String(), "provider.max-tokens is <=") {
-		t.Errorf("expected warning not emitted; got: %s", buf.String())
-	}
-}
-
-func TestNewProvider_Anthropic_SilentWhenMaxTokensExceedsThinkingBudget(t *testing.T) {
-	buf := captureSlog(t)
-	pc := ProviderConfig{
-		Kind:           "anthropic",
-		APIKey:         "sk-ant-test",
-		Model:          "claude-sonnet-4-5",
-		MaxTokens:      16000,
-		ThinkingBudget: 8000,
-	}
-	if _, err := newProvider(&pc, nil); err != nil {
-		t.Fatalf("newProvider error: %v", err)
-	}
-	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
-		t.Errorf("did not expect warning; got: %s", buf.String())
-	}
-}
-
-func TestNewProvider_Anthropic_SilentWhenThinkingBudgetZero(t *testing.T) {
-	// A zero ThinkingBudget disables extended thinking entirely. With
-	// thinking off, MaxTokens can be any value without risk of truncation.
-	buf := captureSlog(t)
-	pc := ProviderConfig{
-		Kind:      "anthropic",
-		APIKey:    "sk-ant-test",
-		Model:     "claude-sonnet-4-5",
-		MaxTokens: 1000,
-		// ThinkingBudget omitted (zero)
-	}
-	if _, err := newProvider(&pc, nil); err != nil {
-		t.Fatalf("newProvider error: %v", err)
-	}
-	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
-		t.Errorf("did not expect warning when thinking is disabled; got: %s", buf.String())
-	}
-}
+// (The three "WarnsOnMaxTokensLeqThinkingBudget" tests were removed
+// when the absolute ThinkingBudget knob was replaced with the
+// portable ThinkingLevel. The level's percentage-of-max_tokens
+// translation enforces the floor/ceiling invariants inside the
+// adapter, so no application-side warning is needed.)
 
 // optionTypes returns a slice of %T-formatted type names for the supplied
 // options. Tests use this to assert that buildInvokeOptions produced the
@@ -222,26 +159,26 @@ func optionTypes(opts []provider.InvokeOption) []string {
 	return out
 }
 
-func TestBuildInvokeOptions_OpenAI_IncludesToolsAndReasoningEffort(t *testing.T) {
+func TestBuildInvokeOptions_OpenAI_IncludesToolsAndThinkingLevel(t *testing.T) {
 	cfg := &config{
 		provider: ProviderConfig{
-			Kind:            "openai",
-			Temperature:     0.5,
-			ReasoningEffort: "medium",
+			Kind:          "openai",
+			Temperature:   0.5,
+			ThinkingLevel: "medium",
 		},
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	want := []string{
 		"provider.ToolsOption",
 		"openai.temperatureOption",
-		"openai.reasoningEffortOption",
+		"openai.thinkingLevelOption",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("option types = %v, want %v", got, want)
 	}
 }
 
-func TestBuildInvokeOptions_OpenAI_OmitsReasoningEffortWhenEmpty(t *testing.T) {
+func TestBuildInvokeOptions_OpenAI_OmitsThinkingLevelWhenOff(t *testing.T) {
 	cfg := &config{
 		provider: ProviderConfig{
 			Kind:        "openai",
@@ -250,8 +187,8 @@ func TestBuildInvokeOptions_OpenAI_OmitsReasoningEffortWhenEmpty(t *testing.T) {
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
-		if ty == "openai.reasoningEffortOption" {
-			t.Errorf("did not expect reasoningEffortOption when ReasoningEffort is empty; got %v", got)
+		if ty == "openai.thinkingLevelOption" {
+			t.Errorf("did not expect thinkingLevelOption when ThinkingLevel is empty; got %v", got)
 		}
 	}
 }
@@ -259,10 +196,10 @@ func TestBuildInvokeOptions_OpenAI_OmitsReasoningEffortWhenEmpty(t *testing.T) {
 func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
 	cfg := &config{
 		provider: ProviderConfig{
-			Kind:           "anthropic",
-			MaxTokens:      16000,
-			ThinkingBudget: 8000,
-			Temperature:    0.3,
+			Kind:          "anthropic",
+			MaxTokens:     16000,
+			ThinkingLevel: "high",
+			Temperature:   0.3,
 		},
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
@@ -270,14 +207,14 @@ func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
 		"provider.ToolsOption",
 		"anthropic.temperatureOption",
 		"anthropic.maxTokensOption",
-		"anthropic.thinkingBudgetOption",
+		"anthropic.thinkingLevelOption",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("option types = %v, want %v", got, want)
 	}
 }
 
-func TestBuildInvokeOptions_Anthropic_OmitsThinkingBudgetWhenZero(t *testing.T) {
+func TestBuildInvokeOptions_Anthropic_OmitsThinkingLevelWhenOff(t *testing.T) {
 	cfg := &config{
 		provider: ProviderConfig{
 			Kind:        "anthropic",
@@ -287,8 +224,8 @@ func TestBuildInvokeOptions_Anthropic_OmitsThinkingBudgetWhenZero(t *testing.T) 
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
-		if ty == "anthropic.thinkingBudgetOption" {
-			t.Errorf("did not expect thinkingBudgetOption when ThinkingBudget is zero; got %v", got)
+		if ty == "anthropic.thinkingLevelOption" {
+			t.Errorf("did not expect thinkingLevelOption when ThinkingLevel is empty; got %v", got)
 		}
 	}
 }
@@ -308,21 +245,23 @@ func TestBuildInvokeOptions_Anthropic_OmitsTemperatureWhenZero(t *testing.T) {
 	}
 }
 
-func TestBuildInvokeOptions_Anthropic_OmitsReasoningEffort(t *testing.T) {
-	// ReasoningEffort is OpenAI-only. The anthropic branch must not produce
-	// a reasoningEffortOption even when the field is set, so the openai
-	// option is not silently forwarded to a backend that ignores it.
+func TestBuildInvokeOptions_Anthropic_OmitsOpenAIThinkingLevel(t *testing.T) {
+	// The thinking level is a portable knob shared by every backend,
+	// but each adapter has its own option type. The anthropic branch
+	// must not produce an openai.thinkingLevelOption even when the
+	// field is set, so the openai option is not silently forwarded
+	// to a backend that ignores it.
 	cfg := &config{
 		provider: ProviderConfig{
-			Kind:            "anthropic",
-			MaxTokens:       16000,
-			ReasoningEffort: "high",
+			Kind:          "anthropic",
+			MaxTokens:     16000,
+			ThinkingLevel: "high",
 		},
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
-		if ty == "openai.reasoningEffortOption" {
-			t.Errorf("did not expect openai.reasoningEffortOption on the anthropic path; got %v", got)
+		if ty == "openai.thinkingLevelOption" {
+			t.Errorf("did not expect openai.thinkingLevelOption on the anthropic path; got %v", got)
 		}
 	}
 }

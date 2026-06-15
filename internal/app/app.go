@@ -16,7 +16,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,12 +57,19 @@ import (
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
 type ProviderConfig struct {
-	Kind            string // e.g. "openai"
-	APIKey          string
-	Model           string
-	BaseURL         string
-	Temperature     float64
-	ReasoningEffort string
+	Kind        string // e.g. "openai"
+	APIKey      string
+	Model       string
+	BaseURL     string
+	Temperature float64
+	// ThinkingLevel is the qualitative reasoning effort. "off" disables
+	// extended thinking entirely. The non-off levels (minimal, low,
+	// medium, high, max) are translated to provider-specific parameters
+	// at request time: percentage of max_tokens for Anthropic's
+	// thinking.budget_tokens, or OpenAI's reasoning_effort vocabulary
+	// (low | medium | high) for OpenAI-compatible providers. The empty
+	// string is treated as "off". Default: "off".
+	ThinkingLevel string
 	// MaxTokens is the hard cap on output tokens per request. Required by the
 	// Anthropic provider (set to 0 to apply the workshop default of 32000);
 	// accepted but optional for OpenAI-compatible providers.
@@ -71,11 +77,6 @@ type ProviderConfig struct {
 	// Note: distinct from CompactionConfig.MaxTokens, which is a token budget
 	// for the conversation-history compactor (not a per-request output cap).
 	MaxTokens int64
-	// ThinkingBudget is the soft cap on extended-thinking tokens for the
-	// Anthropic provider. 0 disables extended thinking. When non-zero, it
-	// counts against MaxTokens; MaxTokens must therefore exceed
-	// ThinkingBudget by enough to leave room for the visible response.
-	ThinkingBudget int64
 }
 
 // CompactionConfig holds the configuration for the state compaction
@@ -600,9 +601,10 @@ const defaultAnthropicMaxTokens int64 = 32000
 
 // buildInvokeOptions assembles the per-invocation options for the configured
 // provider. It branches on cfg.provider.Kind so the right per-provider
-// options are applied for each backend; notably ReasoningEffort is only
-// meaningful for OpenAI-compatible providers, and MaxTokens/ThinkingBudget
-// are only meaningful for the Anthropic provider.
+// options are applied for each backend. The thinking level is a portable
+// qualitative knob shared by every backend; each adapter translates it to
+// its own wire format (percentage of max_tokens for Anthropic,
+// reasoning_effort for OpenAI).
 //
 // Each per-provider option is appended only when its preconditions are met
 // (e.g. Temperature is appended only when non-zero), matching the
@@ -622,8 +624,8 @@ func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption 
 		if cfg.provider.MaxTokens > 0 {
 			opts = append(opts, anthropic.WithMaxTokens(cfg.provider.MaxTokens))
 		}
-		if cfg.provider.ThinkingBudget > 0 {
-			opts = append(opts, anthropic.WithThinkingBudget(cfg.provider.ThinkingBudget))
+		if level := resolveThinkingLevel(cfg.provider.ThinkingLevel); level != provider.ThinkingLevelOff {
+			opts = append(opts, anthropic.WithThinkingLevel(level))
 		}
 	default:
 		// OpenAI-compatible path (Kind == "" or "openai").
@@ -631,11 +633,27 @@ func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption 
 		if cfg.provider.Temperature != 0 {
 			opts = append(opts, openai.WithTemperature(cfg.provider.Temperature))
 		}
-		if cfg.provider.ReasoningEffort != "" {
-			opts = append(opts, openai.WithReasoningEffort(cfg.provider.ReasoningEffort))
+		if level := resolveThinkingLevel(cfg.provider.ThinkingLevel); level != provider.ThinkingLevelOff {
+			opts = append(opts, openai.WithThinkingLevel(level))
 		}
 	}
 	return opts
+}
+
+// resolveThinkingLevel parses the user-supplied level string and
+// returns a normalized ThinkingLevel. The empty string and any
+// unrecognized value are treated as ThinkingLevelOff. This is the
+// single source of truth for "user did not set a level" semantics
+// across the workshop.
+func resolveThinkingLevel(s string) provider.ThinkingLevel {
+	if s == "" {
+		return provider.ThinkingLevelOff
+	}
+	level, err := provider.ParseThinkingLevel(s)
+	if err != nil {
+		return provider.ThinkingLevelOff
+	}
+	return level
 }
 
 // newProvider constructs a provider.Provider from generic ProviderConfig.
@@ -676,14 +694,12 @@ func newProvider(pc *ProviderConfig, tracer trace.Tracer) (provider.Provider, er
 		if pc.MaxTokens == 0 {
 			pc.MaxTokens = defaultAnthropicMaxTokens
 		}
-		// Warn when the thinking budget would consume the entire output
-		// budget — that configuration produces no visible response.
-		if pc.ThinkingBudget > 0 && pc.MaxTokens <= pc.ThinkingBudget {
-			slog.Warn("provider.max-tokens is <= provider.thinking-budget; the model may exhaust its output budget on thinking and produce no visible response",
-				"max_tokens", pc.MaxTokens,
-				"thinking_budget", pc.ThinkingBudget,
-			)
-		}
+		// The thinking level's percentage-of-max_tokens translation
+		// (enforced inside the anthropic adapter) guarantees the
+		// visible response has at least 1024 tokens, so no
+		// "max-tokens too small" warning is needed here. The
+		// previous warn was tied to the absolute ThinkingBudget
+		// knob, which is gone.
 		var opts []anthropic.Option
 		opts = append(opts, anthropic.WithAPIKey(pc.APIKey), anthropic.WithModel(pc.Model))
 		if pc.BaseURL != "" {

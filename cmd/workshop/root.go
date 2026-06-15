@@ -26,9 +26,8 @@ func init() {
 	rootCmd.PersistentFlags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
 	rootCmd.PersistentFlags().String("provider.base-url", "", "Custom API base URL")
 	rootCmd.PersistentFlags().Float64("provider.temperature", 0, "Sampling temperature for the provider (0 = default)")
-	rootCmd.PersistentFlags().String("provider.reasoning-effort", "", "Reasoning effort for the provider (low, medium, high)")
+	rootCmd.PersistentFlags().String("provider.thinking-level", "off", "Thinking effort level: off, minimal, low, medium, high, max. Default: off.")
 	rootCmd.PersistentFlags().Int64("provider.max-tokens", 0, "Maximum output tokens per request (anthropic only; 0 = use provider default of 32000)")
-	rootCmd.PersistentFlags().Int64("provider.thinking-budget", 0, "Extended-thinking token budget (anthropic only; 0 = disabled)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
 	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
 	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
@@ -110,14 +109,13 @@ func configureLogging(cmd *cobra.Command, args []string) error {
 
 func makeProviderConfig() app.ProviderConfig {
 	return app.ProviderConfig{
-		Kind:            viper.GetString("provider.kind"),
-		APIKey:          viper.GetString("provider.api-key"),
-		Model:           viper.GetString("provider.model"),
-		BaseURL:         viper.GetString("provider.base-url"),
-		Temperature:     viper.GetFloat64("provider.temperature"),
-		ReasoningEffort: viper.GetString("provider.reasoning-effort"),
-		MaxTokens:       viper.GetInt64("provider.max-tokens"),
-		ThinkingBudget:  viper.GetInt64("provider.thinking-budget"),
+		Kind:          viper.GetString("provider.kind"),
+		APIKey:        viper.GetString("provider.api-key"),
+		Model:         viper.GetString("provider.model"),
+		BaseURL:       viper.GetString("provider.base-url"),
+		Temperature:   viper.GetFloat64("provider.temperature"),
+		ThinkingLevel: viper.GetString("provider.thinking-level"),
+		MaxTokens:     viper.GetInt64("provider.max-tokens"),
 	}
 }
 

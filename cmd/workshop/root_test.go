@@ -15,9 +15,8 @@ func TestMakeProviderConfig(t *testing.T) {
 	viper.Set("provider.model", "gpt-4o")
 	viper.Set("provider.base-url", "http://test")
 	viper.Set("provider.temperature", 0.7)
-	viper.Set("provider.reasoning-effort", "medium")
+	viper.Set("provider.thinking-level", "medium")
 	viper.Set("provider.max-tokens", int64(32000))
-	viper.Set("provider.thinking-budget", int64(8000))
 
 	t.Cleanup(func() {
 		viper.Set("provider.kind", "openai")
@@ -25,9 +24,8 @@ func TestMakeProviderConfig(t *testing.T) {
 		viper.Set("provider.model", "gpt-4o")
 		viper.Set("provider.base-url", "")
 		viper.Set("provider.temperature", 0)
-		viper.Set("provider.reasoning-effort", "")
+		viper.Set("provider.thinking-level", "off")
 		viper.Set("provider.max-tokens", int64(0))
-		viper.Set("provider.thinking-budget", int64(0))
 	})
 
 	pc := makeProviderConfig()
@@ -47,14 +45,11 @@ func TestMakeProviderConfig(t *testing.T) {
 	if pc.Temperature != 0.7 {
 		t.Errorf("Temperature = %v, want 0.7", pc.Temperature)
 	}
-	if pc.ReasoningEffort != "medium" {
-		t.Errorf("ReasoningEffort = %q, want medium", pc.ReasoningEffort)
+	if pc.ThinkingLevel != "medium" {
+		t.Errorf("ThinkingLevel = %q, want medium", pc.ThinkingLevel)
 	}
 	if pc.MaxTokens != 32000 {
 		t.Errorf("MaxTokens = %d, want 32000", pc.MaxTokens)
-	}
-	if pc.ThinkingBudget != 8000 {
-		t.Errorf("ThinkingBudget = %d, want 8000", pc.ThinkingBudget)
 	}
 }
 
