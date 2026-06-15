@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -201,6 +202,122 @@ func TestNewProvider_Anthropic_SilentWhenThinkingBudgetZero(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
 		t.Errorf("did not expect warning when thinking is disabled; got: %s", buf.String())
+	}
+}
+
+// optionTypes returns a slice of %T-formatted type names for the supplied
+// options. Tests use this to assert that buildInvokeOptions produced the
+// expected per-provider option types without depending on unexported fields.
+func optionTypes(opts []provider.InvokeOption) []string {
+	out := make([]string, len(opts))
+	for i, o := range opts {
+		out[i] = fmt.Sprintf("%T", o)
+	}
+	return out
+}
+
+func TestBuildInvokeOptions_OpenAI_IncludesToolsAndReasoningEffort(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:            "openai",
+			Temperature:     0.5,
+			ReasoningEffort: "medium",
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	want := []string{
+		"provider.ToolsOption",
+		"openai.temperatureOption",
+		"openai.reasoningEffortOption",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("option types = %v, want %v", got, want)
+	}
+}
+
+func TestBuildInvokeOptions_OpenAI_OmitsReasoningEffortWhenEmpty(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:        "openai",
+			Temperature: 0.5,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "openai.reasoningEffortOption" {
+			t.Errorf("did not expect reasoningEffortOption when ReasoningEffort is empty; got %v", got)
+		}
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:           "anthropic",
+			MaxTokens:      16000,
+			ThinkingBudget: 8000,
+			Temperature:    0.3,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	want := []string{
+		"provider.ToolsOption",
+		"anthropic.temperatureOption",
+		"anthropic.maxTokensOption",
+		"anthropic.thinkingBudgetOption",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("option types = %v, want %v", got, want)
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_OmitsThinkingBudgetWhenZero(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:        "anthropic",
+			MaxTokens:   16000,
+			Temperature: 0,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "anthropic.thinkingBudgetOption" {
+			t.Errorf("did not expect thinkingBudgetOption when ThinkingBudget is zero; got %v", got)
+		}
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_OmitsTemperatureWhenZero(t *testing.T) {
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:      "anthropic",
+			MaxTokens: 16000,
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "anthropic.temperatureOption" {
+			t.Errorf("did not expect temperatureOption when Temperature is zero; got %v", got)
+		}
+	}
+}
+
+func TestBuildInvokeOptions_Anthropic_OmitsReasoningEffort(t *testing.T) {
+	// ReasoningEffort is OpenAI-only. The anthropic branch must not produce
+	// a reasoningEffortOption even when the field is set, so the openai
+	// option is not silently forwarded to a backend that ignores it.
+	cfg := &config{
+		provider: ProviderConfig{
+			Kind:            "anthropic",
+			MaxTokens:       16000,
+			ReasoningEffort: "high",
+		},
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil))
+	for _, ty := range got {
+		if ty == "openai.reasoningEffortOption" {
+			t.Errorf("did not expect openai.reasoningEffortOption on the anthropic path; got %v", got)
+		}
 	}
 }
 

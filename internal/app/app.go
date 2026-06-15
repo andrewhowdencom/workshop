@@ -483,13 +483,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// Title management.
 		mustRegisterRaw(registry, "set_title", "Set the conversation title visible to all conduits.", setTitleSchema, settitle.Tool())
 
-		invokeOpts := []provider.InvokeOption{openai.WithTools(registry.Tools())}
-		if cfg.provider.Temperature != 0 {
-			invokeOpts = append(invokeOpts, openai.WithTemperature(cfg.provider.Temperature))
-		}
-		if cfg.provider.ReasoningEffort != "" {
-			invokeOpts = append(invokeOpts, openai.WithReasoningEffort(cfg.provider.ReasoningEffort))
-		}
+		invokeOpts := buildInvokeOptions(cfg, registry.Tools())
 
 		tel := telemetry.New(cfg.meter)
 
@@ -603,6 +597,46 @@ func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *sk
 // 32k fits comfortably inside Sonnet 4.5's 64k output ceiling while leaving
 // room for typical extended-thinking budgets.
 const defaultAnthropicMaxTokens int64 = 32000
+
+// buildInvokeOptions assembles the per-invocation options for the configured
+// provider. It branches on cfg.provider.Kind so the right per-provider
+// options are applied for each backend; notably ReasoningEffort is only
+// meaningful for OpenAI-compatible providers, and MaxTokens/ThinkingBudget
+// are only meaningful for the Anthropic provider.
+//
+// Each per-provider option is appended only when its preconditions are met
+// (e.g. Temperature is appended only when non-zero), matching the
+// "0 = provider default" convention of the underlying SDKs.
+func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption {
+	var opts []provider.InvokeOption
+	switch cfg.provider.Kind {
+	case "anthropic":
+		opts = append(opts, anthropic.WithTools(tools))
+		if cfg.provider.Temperature != 0 {
+			opts = append(opts, anthropic.WithTemperature(cfg.provider.Temperature))
+		}
+		// MaxTokens is set by newProvider to defaultAnthropicMaxTokens when
+		// the user did not configure it, so by the time we reach the helper
+		// on the anthropic path MaxTokens is always > 0. The guard below is
+		// defensive in case that defaulting policy ever changes.
+		if cfg.provider.MaxTokens > 0 {
+			opts = append(opts, anthropic.WithMaxTokens(cfg.provider.MaxTokens))
+		}
+		if cfg.provider.ThinkingBudget > 0 {
+			opts = append(opts, anthropic.WithThinkingBudget(cfg.provider.ThinkingBudget))
+		}
+	default:
+		// OpenAI-compatible path (Kind == "" or "openai").
+		opts = append(opts, openai.WithTools(tools))
+		if cfg.provider.Temperature != 0 {
+			opts = append(opts, openai.WithTemperature(cfg.provider.Temperature))
+		}
+		if cfg.provider.ReasoningEffort != "" {
+			opts = append(opts, openai.WithReasoningEffort(cfg.provider.ReasoningEffort))
+		}
+	}
+	return opts
+}
 
 // newProvider constructs a provider.Provider from generic ProviderConfig.
 func newProvider(pc ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
