@@ -201,3 +201,54 @@ func TestRunConfigInitWithPath_OverwritesExisting(t *testing.T) {
 		t.Errorf("provider.model after overwrite = %v, want %v", got, want)
 	}
 }
+
+// TestBuildConfigMap_AppliesAnthropicDefault verifies that the emitted
+// YAML from `workshop config init` reflects the per-kind default:
+// an anthropic user who has not configured --provider.thinking-level
+// gets "medium" in the written config, so the round-trip is honest
+// about what workshop will do at runtime. An openai user keeps "off".
+// A user who has explicitly set "off" for anthropic keeps "off" (no
+// silent upgrade).
+func TestBuildConfigMap_AppliesAnthropicDefault(t *testing.T) {
+	t.Run("anthropic empty -> medium", func(t *testing.T) {
+		setViperValue(t, "provider.kind", "anthropic")
+		setViperValue(t, "provider.thinking-level", "")
+
+		settings := buildConfigMap()
+		prov, ok := settings["provider"].(map[string]interface{})
+		if !ok {
+			t.Fatal("provider section missing or not a map")
+		}
+		if got, want := prov["thinking-level"], "medium"; got != want {
+			t.Errorf("provider.thinking-level = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("openai empty -> off", func(t *testing.T) {
+		setViperValue(t, "provider.kind", "openai")
+		setViperValue(t, "provider.thinking-level", "")
+
+		settings := buildConfigMap()
+		prov, ok := settings["provider"].(map[string]interface{})
+		if !ok {
+			t.Fatal("provider section missing or not a map")
+		}
+		if got, want := prov["thinking-level"], "off"; got != want {
+			t.Errorf("provider.thinking-level = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("anthropic explicit off -> off (no silent upgrade)", func(t *testing.T) {
+		setViperValue(t, "provider.kind", "anthropic")
+		setViperValue(t, "provider.thinking-level", "off")
+
+		settings := buildConfigMap()
+		prov, ok := settings["provider"].(map[string]interface{})
+		if !ok {
+			t.Fatal("provider section missing or not a map")
+		}
+		if got, want := prov["thinking-level"], "off"; got != want {
+			t.Errorf("provider.thinking-level = %v, want %v (explicit user value must be preserved)", got, want)
+		}
+	})
+}
