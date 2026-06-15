@@ -1885,12 +1885,12 @@ func TestReadFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 
-	content, ok := result.(string)
+	content, ok := result.(*filesystem.ReadFileResult)
 	if !ok {
-		t.Fatalf("result type = %T, want string", result)
+		t.Fatalf("result type = %T, want *filesystem.ReadFileResult", result)
 	}
-	if !strings.Contains(content, "hello worktree") {
-		t.Errorf("content = %q, want 'hello worktree'", content)
+	if !strings.Contains(content.Content, "hello worktree") {
+		t.Errorf("content = %q, want 'hello worktree'", content.Content)
 	}
 }
 
@@ -1914,12 +1914,12 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 		t.Fatalf("ReadFile error: %v", err)
 	}
 
-	content, ok := result.(string)
+	content, ok := result.(*filesystem.ReadFileResult)
 	if !ok {
-		t.Fatalf("result type = %T, want string", result)
+		t.Fatalf("result type = %T, want *filesystem.ReadFileResult", result)
 	}
-	if !strings.Contains(content, "outside content") {
-		t.Errorf("content = %q, want 'outside content'", content)
+	if !strings.Contains(content.Content, "outside content") {
+		t.Errorf("content = %q, want 'outside content'", content.Content)
 	}
 }
 
@@ -2004,12 +2004,12 @@ func TestListDirectory_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatalf("ListDirectory error: %v", err)
 	}
 
-	entries, ok := result.([]string)
+	entries, ok := result.(*filesystem.ListDirectoryResult)
 	if !ok {
-		t.Fatalf("result type = %T, want []string", result)
+		t.Fatalf("result type = %T, want *filesystem.ListDirectoryResult", result)
 	}
-	if len(entries) != 2 {
-		t.Errorf("len(entries) = %d, want 2", len(entries))
+	if len(entries.Entries) != 2 {
+		t.Errorf("len(entries) = %d, want 2", len(entries.Entries))
 	}
 }
 
@@ -2035,12 +2035,12 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatalf("SearchFiles error: %v", err)
 	}
 
-	results, ok := result.([]filesystem.SearchResult)
+	results, ok := result.(*filesystem.SearchFilesResult)
 	if !ok {
-		t.Fatalf("result type = %T, want []filesystem.SearchResult", result)
+		t.Fatalf("result type = %T, want *filesystem.SearchFilesResult", result)
 	}
-	if len(results) != 1 {
-		t.Errorf("len(results) = %d, want 1", len(results))
+	if len(results.Results) != 1 {
+		t.Errorf("len(results) = %d, want 1", len(results.Results))
 	}
 }
 
