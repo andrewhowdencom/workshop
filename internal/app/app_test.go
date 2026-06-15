@@ -44,7 +44,7 @@ func (k keepLastN) Compact(ctx context.Context, turns []state.Turn) ([]state.Tur
 
 func TestNewProvider_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
-	_, err := newProvider(pc, nil)
+	_, err := newProvider(&pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -55,7 +55,7 @@ func TestNewProvider_MissingAPIKey(t *testing.T) {
 
 func TestNewProvider_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", APIKey: "sk-test"}
-	_, err := newProvider(pc, nil)
+	_, err := newProvider(&pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -66,7 +66,7 @@ func TestNewProvider_MissingModel(t *testing.T) {
 
 func TestNewProvider_UnsupportedKind(t *testing.T) {
 	pc := ProviderConfig{Kind: "unsupported", APIKey: "sk-test", Model: "gpt-4o"}
-	_, err := newProvider(pc, nil)
+	_, err := newProvider(&pc, nil)
 	if err == nil {
 		t.Fatal("expected error for unsupported provider kind")
 	}
@@ -78,7 +78,7 @@ func TestNewProvider_UnsupportedKind(t *testing.T) {
 
 func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", Model: "claude-sonnet-4-5"}
-	_, err := newProvider(pc, nil)
+	_, err := newProvider(&pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -89,7 +89,7 @@ func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
 
 func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test"}
-	_, err := newProvider(pc, nil)
+	_, err := newProvider(&pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -100,7 +100,7 @@ func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
 
 func TestNewProvider_Anthropic_Constructs(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
-	prov, err := newProvider(pc, nil)
+	prov, err := newProvider(&pc, nil)
 	if err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 		Model:   "anthropic/claude-sonnet-4-5",
 		BaseURL: "https://openrouter.ai/api/v1",
 	}
-	prov, err := newProvider(pc, nil)
+	prov, err := newProvider(&pc, nil)
 	if err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
 	// MaxTokens unset does not surface an error (i.e. the default is
 	// applied in newProvider before reaching the SDK).
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
-	if _, err := newProvider(pc, nil); err != nil {
+	if _, err := newProvider(&pc, nil); err != nil {
 		t.Fatalf("newProvider with zero MaxTokens returned error; default not applied: %v", err)
 	}
 }
@@ -161,7 +161,7 @@ func TestNewProvider_Anthropic_WarnsOnMaxTokensLeqThinkingBudget(t *testing.T) {
 		MaxTokens:      1000,
 		ThinkingBudget: 2000,
 	}
-	if _, err := newProvider(pc, nil); err != nil {
+	if _, err := newProvider(&pc, nil); err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "provider.max-tokens is <=") {
@@ -178,7 +178,7 @@ func TestNewProvider_Anthropic_SilentWhenMaxTokensExceedsThinkingBudget(t *testi
 		MaxTokens:      16000,
 		ThinkingBudget: 8000,
 	}
-	if _, err := newProvider(pc, nil); err != nil {
+	if _, err := newProvider(&pc, nil); err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
 	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
@@ -197,7 +197,7 @@ func TestNewProvider_Anthropic_SilentWhenThinkingBudgetZero(t *testing.T) {
 		MaxTokens: 1000,
 		// ThinkingBudget omitted (zero)
 	}
-	if _, err := newProvider(pc, nil); err != nil {
+	if _, err := newProvider(&pc, nil); err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
 	if strings.Contains(buf.String(), "provider.max-tokens is <=") {
