@@ -14,11 +14,11 @@ provider:
   model: accounts/fireworks/models/kimi-k2p6
   temperature: 0
   # thinking-level is a portable knob shared by every backend. Valid
-  # values: off (default), minimal, low, medium, high, max. For
-  # OpenAI-compatible providers, the level is mapped to
-  # reasoning_effort; for Anthropic, it becomes a percentage of
-  # max_tokens for thinking.budget_tokens. Set per-thread at runtime
-  # via the /thinking slash command.
+  # values: off, minimal, low, medium, high, max. For OpenAI-compatible
+  # providers, the level is mapped to reasoning_effort; for Anthropic,
+  # it becomes a percentage of max_tokens for thinking.budget_tokens.
+  # Set per-thread at runtime via the /thinking slash command.
+  # Default for openai-compatible providers: off.
   # thinking-level: "off"
 
   # --- Anthropic example ---
@@ -27,7 +27,7 @@ provider:
   # api-key: sk-ant-...
   # model: claude-sonnet-4-5
   # max-tokens: 0          # 0 = workshop default of 32000
-  # thinking-level: "off"  # off, minimal, low, medium, high, max
+  # thinking-level: "medium"  # default for anthropic: medium; values: off, minimal, low, medium, high, max
 
 log-level: info
 pprof: true
