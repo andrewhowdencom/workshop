@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.9.0
+	github.com/andrewhowdencom/ore v0.11.1
 	github.com/andrewhowdencom/ore/x/analytics v0.2.0
 	github.com/andrewhowdencom/ore/x/compaction v0.4.2
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1

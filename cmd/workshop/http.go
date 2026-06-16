@@ -36,9 +36,9 @@ Usage:
 }
 
 func runHTTP(cmd *cobra.Command, args []string) error {
-	pc := makeProviderConfig()
-	if pc.APIKey == "" {
-		return fmt.Errorf("api key is required; set --provider.api-key or WORKSHOP_PROVIDER_API_KEY environment variable")
+	defaultName, providers, err := loadProvidersConfig(viper.GetViper())
+	if err != nil {
+		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -76,8 +76,8 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		cwd = d
 	}
 
-	return app.RunHTTP(ctx,
-		app.WithProvider(pc),
+	opts := []app.Option{
+		app.WithDefaultProviderName(defaultName),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithHTTPAddr(viper.GetString("http.addr")),
 		app.WithWorkingDir(cwd),
@@ -85,7 +85,13 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		app.WithTracer(tracer),
 		app.WithMeter(meter),
 		app.WithCompaction(app.CompactionConfig{
+			Provider:  viper.GetString("compaction.provider"),
 			MaxTokens: viper.GetInt("compaction.max-tokens"),
 		}),
-	)
+	}
+	for name, pc := range providers {
+		opts = append(opts, app.WithProvider(name, pc))
+	}
+
+	return app.RunHTTP(ctx, opts...)
 }

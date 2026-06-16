@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,13 +22,12 @@ import (
 
 func init() {
 	rootCmd.PersistentFlags().String("log-level", "info", "Log level (debug, info, warn, error)")
-	rootCmd.PersistentFlags().String("provider.kind", "openai", "Provider kind (e.g. openai)")
-	rootCmd.PersistentFlags().String("provider.api-key", "", "API key for the provider")
-	rootCmd.PersistentFlags().String("provider.model", "gpt-4o", "Model name (e.g. gpt-4o)")
-	rootCmd.PersistentFlags().String("provider.base-url", "", "Custom API base URL")
-	rootCmd.PersistentFlags().Float64("provider.temperature", 0, "Sampling temperature for the provider (0 = default)")
-	rootCmd.PersistentFlags().String("provider.thinking-level", "", "Thinking effort level: off, minimal, low, medium, high, max. Default: off (openai-compatible), medium (anthropic).")
-	rootCmd.PersistentFlags().Int64("provider.max-tokens", 0, "Maximum output tokens per request (anthropic only; 0 = use provider default of 32000)")
+	// `provider` is the name of the inference (default) provider and
+	// must reference a key in the `providers:` map. Per-named-provider
+	// fields (api-key, model, base-url, etc.) are configured in
+	// config.yaml or via the WORKSHOP_PROVIDER_<NAME>_<FIELD> env vars;
+	// cobra flags don't fit dynamic names, so they're not exposed here.
+	rootCmd.PersistentFlags().String("provider", "", "Name of the default inference provider (must be a key in the providers: section)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
 	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
 	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
@@ -40,6 +40,9 @@ func init() {
 
 	setupViper(viper.GetViper())
 	if err := loadViperConfig(viper.GetViper()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+	}
+	if err := bindNamedProviderEnvVars(viper.GetViper()); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: %v\n", err)
 	}
 
@@ -133,23 +136,108 @@ func resolveThinkingLevelForConfig(kind, raw string) string {
 	return defaultThinkingLevelForKind(kind)
 }
 
-func makeProviderConfig() app.ProviderConfig {
-	kind := viper.GetString("provider.kind")
-	return app.ProviderConfig{
-		Kind:          kind,
-		APIKey:        viper.GetString("provider.api-key"),
-		Model:         viper.GetString("provider.model"),
-		BaseURL:       viper.GetString("provider.base-url"),
-		Temperature:   viper.GetFloat64("provider.temperature"),
-		ThinkingLevel: resolveThinkingLevelForConfig(kind, viper.GetString("provider.thinking-level")),
-		MaxTokens:     viper.GetInt64("provider.max-tokens"),
+// namedProviderFields is the canonical list of fields that
+// loadProvidersConfig reads for each defined named provider, and that
+// bindNamedProviderEnvVars binds an env var for. Order is not
+// significant; the list exists so the two functions cannot drift
+// apart.
+var namedProviderFields = []string{
+	"kind",
+	"api-key",
+	"model",
+	"base-url",
+	"temperature",
+	"thinking-level",
+	"max-tokens",
+}
+
+// bindNamedProviderEnvVars discovers the named providers from the
+// already-loaded config file and binds each per-name field to a
+// per-name env var (WORKSHOP_PROVIDER_<UPPER_NAME>_<FIELD>). This
+// must run AFTER loadViperConfig (so the names are known) and BEFORE
+// viper.BindPFlags (so the flag takes precedence over env, per viper's
+// standard priority: explicit Set > flag > env > config > default).
+//
+// The mapping uses the singular WORKSHOP_PROVIDER_ prefix (matching
+// the user's mental model of "a provider config") rather than
+// WORKSHOP_PROVIDERS_ (which is what the default dot-to-underscore
+// replacer would produce from the viper key `providers.<name>.<field>`).
+//
+// Env-var-only configurations (no config file, names supplied via
+// env) are not supported by design: the names must be declared in
+// the config file so the loader can discover them.
+func bindNamedProviderEnvVars(v *viper.Viper) error {
+	raw := v.GetStringMap("providers")
+	for name := range raw {
+		if name == "" {
+			continue
+		}
+		for _, field := range namedProviderFields {
+			envKey := "WORKSHOP_PROVIDER_" + strings.ToUpper(name) + "_" + strings.ToUpper(strings.ReplaceAll(field, "-", "_"))
+			if err := v.BindEnv("providers."+name+"."+field, envKey); err != nil {
+				return fmt.Errorf("bind env %s for providers.%s.%s: %w", envKey, name, field, err)
+			}
+		}
 	}
+	return nil
+}
+
+// loadProvidersConfig reads the named-providers shape from viper and
+// returns (defaultName, providers, nil) on success or ("", nil, err)
+// on any validation failure. Each named provider's ThinkingLevel is
+// run through resolveThinkingLevelForConfig so the per-kind default
+// (medium for anthropic, off for openai) is applied when the user has
+// not configured one. The env-var binding pass must have run first so
+// any WORKSHOP_PROVIDER_<NAME>_<FIELD> env vars are visible to the
+// per-leaf viper reads.
+func loadProvidersConfig(v *viper.Viper) (string, map[string]app.ProviderConfig, error) {
+	defaultName := v.GetString("provider")
+	if defaultName == "" {
+		return "", nil, fmt.Errorf("provider: <name> is required; set the default inference provider in config.yaml or via --provider")
+	}
+
+	raw := v.GetStringMap("providers")
+	if len(raw) == 0 {
+		return "", nil, fmt.Errorf("no providers defined; set the providers: section in config.yaml")
+	}
+
+	providers := make(map[string]app.ProviderConfig, len(raw))
+	for name := range raw {
+		kind := v.GetString("providers." + name + ".kind")
+		pc := app.ProviderConfig{
+			Kind:          kind,
+			APIKey:        v.GetString("providers." + name + ".api-key"),
+			Model:         v.GetString("providers." + name + ".model"),
+			BaseURL:       v.GetString("providers." + name + ".base-url"),
+			Temperature:   v.GetFloat64("providers." + name + ".temperature"),
+			ThinkingLevel: resolveThinkingLevelForConfig(kind, v.GetString("providers."+name+".thinking-level")),
+			MaxTokens:     v.GetInt64("providers." + name + ".max-tokens"),
+		}
+		providers[name] = pc
+	}
+
+	if _, ok := providers[defaultName]; !ok {
+		return "", nil, fmt.Errorf("default provider %q is not defined in providers: section (defined: %s)", defaultName, definedProviderNames(providers))
+	}
+
+	return defaultName, providers, nil
+}
+
+// definedProviderNames returns the keys of the providers map in a
+// stable, sorted order for use in error messages.
+func definedProviderNames(m map[string]app.ProviderConfig) string {
+	names := make([]string, 0, len(m))
+	for k := range m {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func runRoot(cmd *cobra.Command, args []string) error {
-	pc := makeProviderConfig()
-	if pc.APIKey == "" {
-		return fmt.Errorf("api key is required; set --provider.api-key or WORKSHOP_PROVIDER_API_KEY environment variable")
+	defaultName, providers, err := loadProvidersConfig(viper.GetViper())
+	if err != nil {
+		return err
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -188,15 +276,21 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	opts := []app.Option{
 		app.WithThreadID(viper.GetString("thread")),
-		app.WithProvider(pc),
+		app.WithDefaultProviderName(defaultName),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithWorkingDir(cwd),
 		app.WithRole(viper.GetString("role")),
 		app.WithTracer(tracer),
 		app.WithMeter(meter),
 		app.WithCompaction(app.CompactionConfig{
+			Provider:  viper.GetString("compaction.provider"),
 			MaxTokens: viper.GetInt("compaction.max-tokens"),
 		}),
+	}
+	// Register every defined named provider. Order doesn't matter
+	// because the consumers (inference, compaction) look up by name.
+	for name, pc := range providers {
+		opts = append(opts, app.WithProvider(name, pc))
 	}
 
 	if term.IsTerminal(int(os.Stdin.Fd())) {

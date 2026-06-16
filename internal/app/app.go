@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,7 +84,17 @@ type ProviderConfig struct {
 // CompactionConfig holds the configuration for the state compaction
 // framework that reduces conversation history before each inference turn.
 type CompactionConfig struct {
-	MaxTokens int // 0 = disabled
+	// Provider is the name of the named provider to use for the
+	// compaction call. When empty, the compactor reuses the default
+	// (inference) provider. When set, it must reference a key in the
+	// `providers:` map; an undefined name errors at startup.
+	Provider string
+	// MaxTokens is the trigger threshold: when the most recent
+	// artifact.Usage reports more than this many tokens, compaction
+	// fires. 0 disables compaction entirely. Distinct from
+	// SummarizeStrategy.MaxTokens (the per-invocation output budget),
+	// which is currently a constant in the ore/compaction package.
+	MaxTokens int
 }
 
 // compactionNotifier is a thread-safe callback bridge that forwards compacted
@@ -114,15 +125,30 @@ type config struct {
 	threadID   string
 	storeDir   string
 	httpAddr   string
-	provider   ProviderConfig
-	compaction CompactionConfig
-	workingDir string
-	role       string
-	tracer     trace.Tracer
-	meter      metric.Meter
-	conduit    string // e.g. "TUI", "HTTP", "stdio"
+	providers  map[string]ProviderConfig
+	// defaultProviderName is the name of the provider used for inference
+	// (the main loop, the system prompt, the git_commit trailer, etc.).
+	// It must reference a key in providers. Compaction has its own
+	// reference (CompactionConfig.Provider); if that is empty, compaction
+	// reuses the default.
+	defaultProviderName string
+	compaction          CompactionConfig
+	workingDir          string
+	role                string
+	tracer              trace.Tracer
+	meter               metric.Meter
+	conduit             string // e.g. "TUI", "HTTP", "stdio"
 
 	compactionNotifier *compactionNotifier
+}
+
+// defaultProviderConfig returns the ProviderConfig of the inference
+// provider. Callers are expected to have already validated that
+// defaultProviderName references a defined name; this helper does not
+// defensively check. A missing default panics so the failure mode is
+// loud and the call site is obvious.
+func (c *config) defaultProviderConfig() ProviderConfig {
+	return c.providers[c.defaultProviderName]
 }
 
 // Option configures the application via functional options.
@@ -133,9 +159,23 @@ func WithThreadID(id string) Option {
 	return func(c *config) { c.threadID = id }
 }
 
-// WithProvider sets the provider configuration.
-func WithProvider(p ProviderConfig) Option {
-	return func(c *config) { c.provider = p }
+// WithProvider registers a named provider under the given name. The
+// same name can be used as the default (see WithDefaultProviderName)
+// or as the compaction provider (see CompactionConfig.Provider).
+func WithProvider(name string, p ProviderConfig) Option {
+	return func(c *config) {
+		if c.providers == nil {
+			c.providers = make(map[string]ProviderConfig)
+		}
+		c.providers[name] = p
+	}
+}
+
+// WithDefaultProviderName sets the name of the provider used for
+// inference. The name must reference a key registered via
+// WithProvider; validation happens in buildManager.
+func WithDefaultProviderName(name string) Option {
+	return func(c *config) { c.defaultProviderName = name }
 }
 
 // WithStoreDir sets the directory for persistent JSON thread storage.
@@ -496,14 +536,26 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		return nil, fmt.Errorf("create JSON store: %w", err)
 	}
 
-	// Build provider from generic config.
-	prov, err := newProvider(&cfg.provider, tracer)
+	// Build the providers: validate every defined named provider,
+	// compile each one, and resolve the default (inference) name
+	// plus the compaction name (which falls back to the default
+	// when unset).
+	compiled, err := compileProviders(cfg, tracer)
 	if err != nil {
-		return nil, fmt.Errorf("create provider: %w", err)
+		return nil, err
 	}
+	prov := compiled[cfg.defaultProviderName]
+	compactionName := cfg.compaction.Provider
+	if compactionName == "" {
+		compactionName = cfg.defaultProviderName
+	}
+	if _, ok := compiled[compactionName]; !ok {
+		return nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
+	}
+	compactionProv := compiled[compactionName]
 
 	// Build compactor if compaction is enabled.
-	compactor := newCompactor(cfg.compaction, prov)
+	compactor := newCompactor(cfg.compaction, compactionProv)
 
 	// Create role command handler.
 	rc := &roleCommand{rdir: roleDir()}
@@ -577,7 +629,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		// Workspace and git tools.
 		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(stream))
 		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this session.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(stream))
-		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(stream, cfg.provider))
+		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(stream, cfg.defaultProviderConfig()))
 
 		// Title management.
 		mustRegisterRaw(registry, "set_title", "Set the conversation title visible to all conduits.", setTitleSchema, settitle.Tool())
@@ -676,16 +728,18 @@ func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *sk
 			)
 		}),
 		systemprompt.WithContentFunc(func() string {
-			if cfg.provider.Model == "" {
+			pc := cfg.defaultProviderConfig()
+			if pc.Model == "" {
 				return ""
 			}
-			return "You are running on model " + cfg.provider.Model + "."
+			return "You are running on model " + pc.Model + "."
 		}),
 		systemprompt.WithContentFunc(func() string {
-			if cfg.provider.Kind == "" {
+			pc := cfg.defaultProviderConfig()
+			if pc.Kind == "" {
 				return ""
 			}
-			return "Provider backend: " + cfg.provider.Kind
+			return "Provider backend: " + pc.Kind
 		}),
 	)
 }
@@ -698,40 +752,41 @@ func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *sk
 const defaultAnthropicMaxTokens int64 = 32000
 
 // buildInvokeOptions assembles the per-invocation options for the configured
-// provider. It branches on cfg.provider.Kind so the right per-provider
-// options are applied for each backend. The thinking level is a portable
-// qualitative knob shared by every backend; each adapter translates it to
-// its own wire format (percentage of max_tokens for Anthropic,
-// reasoning_effort for OpenAI).
+// provider. It branches on the default provider's Kind so the right
+// per-provider options are applied for each backend. The thinking level is
+// a portable qualitative knob shared by every backend; each adapter
+// translates it to its own wire format (percentage of max_tokens for
+// Anthropic, reasoning_effort for OpenAI).
 //
 // Each per-provider option is appended only when its preconditions are met
 // (e.g. Temperature is appended only when non-zero), matching the
 // "0 = provider default" convention of the underlying SDKs.
 func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption {
+	pc := cfg.defaultProviderConfig()
 	var opts []provider.InvokeOption
-	switch cfg.provider.Kind {
+	switch pc.Kind {
 	case "anthropic":
 		opts = append(opts, anthropic.WithTools(tools))
-		if cfg.provider.Temperature != 0 {
-			opts = append(opts, anthropic.WithTemperature(cfg.provider.Temperature))
+		if pc.Temperature != 0 {
+			opts = append(opts, anthropic.WithTemperature(pc.Temperature))
 		}
 		// MaxTokens is set by newProvider to defaultAnthropicMaxTokens when
 		// the user did not configure it, so by the time we reach the helper
 		// on the anthropic path MaxTokens is always > 0. The guard below is
 		// defensive in case that defaulting policy ever changes.
-		if cfg.provider.MaxTokens > 0 {
-			opts = append(opts, anthropic.WithMaxTokens(cfg.provider.MaxTokens))
+		if pc.MaxTokens > 0 {
+			opts = append(opts, anthropic.WithMaxTokens(pc.MaxTokens))
 		}
-		if level := resolveThinkingLevel(cfg.provider.ThinkingLevel); level != provider.ThinkingLevelOff {
+		if level := resolveThinkingLevel(pc.ThinkingLevel); level != provider.ThinkingLevelOff {
 			opts = append(opts, anthropic.WithThinkingLevel(level))
 		}
 	default:
 		// OpenAI-compatible path (Kind == "" or "openai").
 		opts = append(opts, openai.WithTools(tools))
-		if cfg.provider.Temperature != 0 {
-			opts = append(opts, openai.WithTemperature(cfg.provider.Temperature))
+		if pc.Temperature != 0 {
+			opts = append(opts, openai.WithTemperature(pc.Temperature))
 		}
-		if level := resolveThinkingLevel(cfg.provider.ThinkingLevel); level != provider.ThinkingLevelOff {
+		if level := resolveThinkingLevel(pc.ThinkingLevel); level != provider.ThinkingLevelOff {
 			opts = append(opts, openai.WithThinkingLevel(level))
 		}
 	}
@@ -761,7 +816,7 @@ func resolveThinkingLevel(s string) provider.ThinkingLevel {
 // discard that mutation, causing buildInvokeOptions to see a zero value
 // and skip the WithMaxTokens option (which would then default to
 // max_tokens=1 on the wire).
-func newProvider(pc *ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
+func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
 	switch pc.Kind {
 	case "", "openai":
 		if pc.APIKey == "" {
@@ -810,6 +865,62 @@ func newProvider(pc *ProviderConfig, tracer trace.Tracer) (provider.Provider, er
 	default:
 		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
 	}
+}
+
+// compileProviders validates every defined named provider, compiles
+// each one through newProvider, and returns a map from name to
+// compiled provider.Provider. It is the single source of truth for
+// the per-named-provider validation contract:
+//
+//   - At least one provider must be defined.
+//   - The defaultProviderName must reference a defined name.
+//   - Every defined name must have a non-empty api-key and model.
+//   - Every defined name must have a known kind (or "" for openai).
+//
+// Errors include the offending name so a misconfigured config points
+// the operator at the right entry. The Anthropic default-MaxTokens
+// mutation is applied to the caller's copy via the by-pointer
+// signature, so buildInvokeOptions sees the resolved value when it
+// reads cfg.providers[name] later.
+func compileProviders(cfg *config, tracer trace.Tracer) (map[string]provider.Provider, error) {
+	if len(cfg.providers) == 0 {
+		return nil, fmt.Errorf("no providers defined; configure the providers: section in config.yaml")
+	}
+	if cfg.defaultProviderName == "" {
+		return nil, fmt.Errorf("provider: <name> is required; set the name of the default inference provider")
+	}
+	if _, ok := cfg.providers[cfg.defaultProviderName]; !ok {
+		return nil, fmt.Errorf("default provider %q is not defined in providers:", cfg.defaultProviderName)
+	}
+
+	out := make(map[string]provider.Provider, len(cfg.providers))
+	for name := range cfg.providers {
+		pc := cfg.providers[name]
+		prov, err := newProvider(name, &pc, tracer)
+		if err != nil {
+			return nil, fmt.Errorf("create provider %q: %w", name, err)
+		}
+		// Write the (possibly mutated) per-name config back so
+		// buildInvokeOptions and the system-prompt / git_commit
+		// readers see the resolved MaxTokens / ThinkingLevel.
+		cfg.providers[name] = pc
+		out[name] = prov
+	}
+	return out, nil
+}
+
+// definedProviderNamesAsCompiledKeys returns the keys of the compiled
+// provider map in sorted order, used for error messages that need to
+// list "the defined providers are X, Y, Z". Equivalent to
+// definedProviderNames in cmd/workshop, but operates on the compiled
+// (post-validate) map rather than the raw config.
+func definedProviderNamesAsCompiledKeys(m map[string]provider.Provider) string {
+	names := make([]string, 0, len(m))
+	for k := range m {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // newCompactor builds a compactor from configuration. Returns nil if
