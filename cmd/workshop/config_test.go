@@ -44,6 +44,10 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	setViperValue(t, "providers.haiku.thinking-level", "medium")
 	setViperInt64Value(t, "providers.haiku.max-tokens", 32000)
 	setViperValue(t, "compaction.provider", "haiku")
+	// Pin compaction.max-tokens so a stale value in the user's local
+	// config.yaml doesn't leak into the test. The default pflag value
+	// is 100000; we want the round-trip to assert that exact value.
+	setViperValue(t, "compaction.max-tokens", "100000")
 	setViperValue(t, "store.dir", "/tmp/store")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
