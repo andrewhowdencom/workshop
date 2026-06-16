@@ -312,7 +312,10 @@ thread state without triggering an LLM turn. They are entered as the first
 text of a user message and processed by the slash interceptor before the
 provider is invoked. The auto-generated `/help` lists every bound command.
 
-- `/role <name>` — switch the active role (see Roles).
+- `/role` or `/role help` — show the current role and the list of
+  available role definitions.
+- `/role <name>` — switch the active role (see Roles). Switching to a
+  role that does not exist returns an error.
 - `/compact` — force compaction of the conversation history (see Compaction).
 - `/thinking` — report the current thinking level and the available levels.
 - `/thinking <level>` — set the thinking level for this thread, where
