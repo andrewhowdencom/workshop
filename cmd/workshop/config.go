@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/adrg/xdg"
 	"github.com/spf13/cobra"
@@ -57,18 +58,35 @@ func buildConfigMap() map[string]interface{} {
 		storeDir = defaultStoreDir()
 	}
 
-	kind := viper.GetString("provider.kind")
+	// Resolve the named-providers shape from viper. Each defined name
+	// is emitted as a sub-map under `providers:` with the per-name
+	// fields. The default inference name is emitted as a top-level
+	// `provider:` string. Names are sorted so the emitted YAML is
+	// stable across runs.
+	rawProviders := viper.GetStringMap("providers")
+	providerNames := make([]string, 0, len(rawProviders))
+	for name := range rawProviders {
+		providerNames = append(providerNames, name)
+	}
+	sort.Strings(providerNames)
+	providers := make(map[string]interface{}, len(providerNames))
+	for _, name := range providerNames {
+		kind := viper.GetString("providers." + name + ".kind")
+		providers[name] = map[string]interface{}{
+			"kind":           kind,
+			"api-key":        viper.GetString("providers." + name + ".api-key"),
+			"model":          viper.GetString("providers." + name + ".model"),
+			"base-url":       viper.GetString("providers." + name + ".base-url"),
+			"temperature":    viper.GetFloat64("providers." + name + ".temperature"),
+			"thinking-level": resolveThinkingLevelForConfig(kind, viper.GetString("providers."+name+".thinking-level")),
+			"max-tokens":     viper.GetInt64("providers." + name + ".max-tokens"),
+		}
+	}
+
 	return map[string]interface{}{
 		"log-level": viper.GetString("log-level"),
-		"provider": map[string]interface{}{
-			"kind":           kind,
-			"api-key":        viper.GetString("provider.api-key"),
-			"model":          viper.GetString("provider.model"),
-			"base-url":       viper.GetString("provider.base-url"),
-			"temperature":    viper.GetFloat64("provider.temperature"),
-			"thinking-level": resolveThinkingLevelForConfig(kind, viper.GetString("provider.thinking-level")),
-			"max-tokens":     viper.GetInt64("provider.max-tokens"),
-		},
+		"provider":  viper.GetString("provider"),
+		"providers": providers,
 		"store": map[string]interface{}{
 			"dir": storeDir,
 		},

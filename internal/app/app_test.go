@@ -44,7 +44,7 @@ func (k keepLastN) Compact(ctx context.Context, turns []state.Turn) ([]state.Tur
 
 func TestNewProvider_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
-	_, err := newProvider(&pc, nil)
+	_, err := newProvider("openai-test", &pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -55,7 +55,7 @@ func TestNewProvider_MissingAPIKey(t *testing.T) {
 
 func TestNewProvider_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", APIKey: "sk-test"}
-	_, err := newProvider(&pc, nil)
+	_, err := newProvider("openai-test", &pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -66,7 +66,7 @@ func TestNewProvider_MissingModel(t *testing.T) {
 
 func TestNewProvider_UnsupportedKind(t *testing.T) {
 	pc := ProviderConfig{Kind: "unsupported", APIKey: "sk-test", Model: "gpt-4o"}
-	_, err := newProvider(&pc, nil)
+	_, err := newProvider("unsupported-test", &pc, nil)
 	if err == nil {
 		t.Fatal("expected error for unsupported provider kind")
 	}
@@ -78,7 +78,7 @@ func TestNewProvider_UnsupportedKind(t *testing.T) {
 
 func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", Model: "claude-sonnet-4-5"}
-	_, err := newProvider(&pc, nil)
+	_, err := newProvider("anthropic-test", &pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -89,7 +89,7 @@ func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
 
 func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test"}
-	_, err := newProvider(&pc, nil)
+	_, err := newProvider("anthropic-test", &pc, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -100,7 +100,7 @@ func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
 
 func TestNewProvider_Anthropic_Constructs(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
-	prov, err := newProvider(&pc, nil)
+	prov, err := newProvider("anthropic-test", &pc, nil)
 	if err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 		Model:   "anthropic/claude-sonnet-4-5",
 		BaseURL: "https://openrouter.ai/api/v1",
 	}
-	prov, err := newProvider(&pc, nil)
+	prov, err := newProvider("openrouter-test", &pc, nil)
 	if err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
 	// reverts to value-pass, the post-call assertion below fails because
 	// the local mutation is discarded.
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
-	if _, err := newProvider(&pc, nil); err != nil {
+	if _, err := newProvider("anthropic-test", &pc, nil); err != nil {
 		t.Fatalf("newProvider with zero MaxTokens returned error; default not applied: %v", err)
 	}
 	if pc.MaxTokens != defaultAnthropicMaxTokens {
@@ -163,11 +163,14 @@ func optionTypes(opts []provider.InvokeOption) []string {
 
 func TestBuildInvokeOptions_OpenAI_IncludesToolsAndThinkingLevel(t *testing.T) {
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:          "openai",
-			Temperature:   0.5,
-			ThinkingLevel: "medium",
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:          "openai",
+				Temperature:   0.5,
+				ThinkingLevel: "medium",
+			},
 		},
+		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	want := []string{
@@ -185,11 +188,14 @@ func TestBuildInvokeOptions_OpenAI_IncludesToolsAndThinkingLevel(t *testing.T) {
 // appended) so the openai path is robust to config typos.
 func TestBuildInvokeOptions_OpenAI_ClampsLevelToOffIfUnknown(t *testing.T) {
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:          "openai",
-			Temperature:   0.5,
-			ThinkingLevel: "frobnicate",
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:          "openai",
+				Temperature:   0.5,
+				ThinkingLevel: "frobnicate",
+			},
 		},
+		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
@@ -201,10 +207,13 @@ func TestBuildInvokeOptions_OpenAI_ClampsLevelToOffIfUnknown(t *testing.T) {
 
 func TestBuildInvokeOptions_OpenAI_OmitsThinkingLevelWhenOff(t *testing.T) {
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:        "openai",
-			Temperature: 0.5,
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:        "openai",
+				Temperature: 0.5,
+			},
 		},
+		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
@@ -216,12 +225,15 @@ func TestBuildInvokeOptions_OpenAI_OmitsThinkingLevelWhenOff(t *testing.T) {
 
 func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:          "anthropic",
-			MaxTokens:     16000,
-			ThinkingLevel: "high",
-			Temperature:   0.3,
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:          "anthropic",
+				MaxTokens:     16000,
+				ThinkingLevel: "high",
+				Temperature:   0.3,
+			},
 		},
+		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	want := []string{
@@ -237,11 +249,14 @@ func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
 
 func TestBuildInvokeOptions_Anthropic_OmitsThinkingLevelWhenOff(t *testing.T) {
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:        "anthropic",
-			MaxTokens:   16000,
-			Temperature: 0,
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:        "anthropic",
+				MaxTokens:   16000,
+				Temperature: 0,
+			},
 		},
+		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
@@ -280,10 +295,13 @@ func TestResolveThinkingLevel(t *testing.T) {
 
 func TestBuildInvokeOptions_Anthropic_OmitsTemperatureWhenZero(t *testing.T) {
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:      "anthropic",
-			MaxTokens: 16000,
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:      "anthropic",
+				MaxTokens: 16000,
+			},
 		},
+		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
@@ -300,11 +318,14 @@ func TestBuildInvokeOptions_Anthropic_OmitsOpenAIThinkingLevel(t *testing.T) {
 	// field is set, so the openai option is not silently forwarded
 	// to a backend that ignores it.
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:          "anthropic",
-			MaxTokens:     16000,
-			ThinkingLevel: "high",
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:          "anthropic",
+				MaxTokens:     16000,
+				ThinkingLevel: "high",
+			},
 		},
+		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
@@ -316,30 +337,33 @@ func TestBuildInvokeOptions_Anthropic_OmitsOpenAIThinkingLevel(t *testing.T) {
 
 // TestBuildInvokeOptions_Anthropic_AppliesDefaultMaxTokens is an
 // end-to-end regression test: when the user leaves provider.max-tokens
-// unset on the anthropic kind, the full pipeline (newProvider applies
-// the 32000 default to the caller's struct, then buildInvokeOptions
-// reads the same struct and appends the WithMaxTokens option) must
-// include a maxTokensOption. This mirrors the production flow in
-// buildManager, which calls newProvider once at construction time and
-// buildInvokeOptions per turn. If the by-value bug in newProvider
-// regresses, the post-newProvider state of cfg.provider.MaxTokens is
-// still 0, and this test fails because the option is missing from
-// the slice.
+// unset on the anthropic kind, the full pipeline (compileProviders calls
+// newProvider which applies the 32000 default to the caller's struct,
+// and the mutated struct is then read by buildInvokeOptions to append
+// the WithMaxTokens option) must include a maxTokensOption. This
+// mirrors the production flow in buildManager, which calls
+// compileProviders once at construction time and buildInvokeOptions
+// per turn. If the by-value bug in newProvider regresses, the
+// post-newProvider state of cfg.providers[name].MaxTokens is still 0,
+// and this test fails because the option is missing from the slice.
 func TestBuildInvokeOptions_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:    "anthropic",
-			APIKey:  "sk-ant-test",
-			Model:   "claude-sonnet-4-5",
-			// MaxTokens intentionally left at 0 to trigger the
-			// defaulting path.
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:    "anthropic",
+				APIKey:  "sk-ant-test",
+				Model:   "claude-sonnet-4-5",
+				// MaxTokens intentionally left at 0 to trigger the
+				// defaulting path.
+			},
 		},
+		defaultProviderName: "test",
 	}
-	// newProvider applies the 32000 default to cfg.provider.MaxTokens.
-	// This is the production setup; the per-turn buildInvokeOptions
-	// below reads from the same struct.
-	if _, err := newProvider(&cfg.provider, nil); err != nil {
-		t.Fatalf("newProvider: %v", err)
+	// compileProviders applies the 32000 default to
+	// cfg.providers["test"].MaxTokens. This is the production setup;
+	// the per-turn buildInvokeOptions below reads from the same struct.
+	if _, err := compileProviders(cfg, nil); err != nil {
+		t.Fatalf("compileProviders: %v", err)
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
@@ -727,11 +751,14 @@ func TestRoleToolSchemas(t *testing.T) {
 func TestBuildManager_Smoke(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	})
 	if err != nil {
 		t.Fatalf("buildManager error: %v", err)
@@ -744,11 +771,14 @@ func TestBuildManager_Smoke(t *testing.T) {
 func TestBuildManager_WithCompaction(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 		compaction: CompactionConfig{
 			MaxTokens: 50000,
 		},
@@ -770,11 +800,14 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir:   t.TempDir(),
 		workingDir: dir,
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	})
 	if err != nil {
 		t.Fatalf("buildManager error: %v", err)
@@ -788,11 +821,14 @@ func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		role:     "reviewer",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	})
 	if err != nil {
 		t.Fatalf("buildManager error: %v", err)
@@ -823,11 +859,14 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	mgr1, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "reviewer",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	})
 	if err != nil {
 		t.Fatalf("buildManager error: %v", err)
@@ -852,11 +891,14 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	mgr2, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "planner",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	})
 	if err != nil {
 		t.Fatalf("buildManager error: %v", err)
@@ -1125,11 +1167,14 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 	cfg := &config{
 		workingDir: "/test/project",
 		conduit:    "TUI",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	}
 
 	rdir := t.TempDir()
@@ -1182,11 +1227,14 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 
 	cfg := &config{
 		workingDir: "",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	}
 
 	rdir := t.TempDir()
@@ -1236,11 +1284,14 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 	cfg := &config{
 		workingDir: dir,
 		conduit:    "TUI",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	}
 
 	rdir := t.TempDir()
@@ -1310,11 +1361,14 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 	cfg := &config{
 		workingDir: child,
 		conduit:    "TUI",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	}
 
 	rdir := t.TempDir()
@@ -1379,11 +1433,14 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 	cfg := &config{
 		workingDir: dir,
 		conduit:    "TUI",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	}
 
 	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
@@ -1470,11 +1527,14 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 	cfg := &config{
 		workingDir: child,
 		conduit:    "TUI",
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	}
 
 	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
@@ -1518,11 +1578,14 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 
 	cfg := &config{
 		workingDir: dir,
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 	}
 
 	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
@@ -2435,11 +2498,14 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
-		provider: ProviderConfig{
+providers: map[string]ProviderConfig{
+			"test": {
 			Kind:   "openai",
 			APIKey: "sk-test-dummy",
 			Model:  "test-model",
+			},
 		},
+		defaultProviderName: "test",
 		compaction: CompactionConfig{
 			MaxTokens: 50000,
 		},
@@ -2557,17 +2623,22 @@ func TestBuildInvokeOptions_ReadsThinkingLevelFromMetadata(t *testing.T) {
 	stream.SetMetadata("workshop.thinking_level", "high")
 
 	cfg := &config{
-		provider: ProviderConfig{
-			Kind:      "anthropic",
-			MaxTokens: 16000,
+		providers: map[string]ProviderConfig{
+			"test": {
+				Kind:      "anthropic",
+				MaxTokens: 16000,
+			},
 		},
+		defaultProviderName: "test",
 	}
 	// Wire the stream's metadata into the cfg by reading it directly
 	// here. In production, buildInvokeOptions is called per turn and
 	// the metadata accessor would be the bridge. We assert the same
 	// outcome by routing through resolveThinkingLevel.
 	if v, ok := stream.GetMetadata("workshop.thinking_level"); ok {
-		cfg.provider.ThinkingLevel = v
+		pc := cfg.providers[cfg.defaultProviderName]
+		pc.ThinkingLevel = v
+		cfg.providers[cfg.defaultProviderName] = pc
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	assert.Contains(t, got, "anthropic.thinkingLevelOption", "metadata-driven level must produce a thinkingLevelOption")
