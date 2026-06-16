@@ -438,27 +438,124 @@ func TestRoleSlashHandler(t *testing.T) {
 	rc.SetStream(stream)
 
 	// Valid role
-	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
+	assert.Equal(t, "Role: reviewer", res.Feedback.Content, "successful set should confirm the new role")
 
 	v, ok := stream.GetMetadata("workshop.role")
 	if !ok || v != "reviewer" {
 		t.Errorf("metadata = %q, want reviewer", v)
 	}
 
-	// Invalid role
+	// Invalid role returns an error (preserves the long-standing contract
+	// that switching to a missing role is a hard failure).
 	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent role")
 	}
+	assert.Contains(t, err.Error(), "nonexistent", "error should mention the unknown role name")
+}
 
-	// Missing name
-	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
-	if err == nil {
-		t.Fatal("expected error for missing name")
+// newRoleCommandStream creates a session stream suitable for the
+// role-command tests below. The test provider is a no-op; the role
+// handler does not invoke the LLM.
+func newRoleCommandStream(t *testing.T) *session.Stream {
+	t.Helper()
+	store := session.NewMemoryStore()
+	prov := &testSlashProvider{}
+	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+		return nil, nil
+	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+		return st, nil
+	})
+	stream, err := mgr.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
 	}
+	return stream
+}
+
+func TestRoleCommand_NoArgListsRoles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "planner.md"), []byte("---\ndescription: Plans multi-step work\n---\nBody.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(newRoleCommandStream(t))
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
+	require.NoError(t, err, "no-arg form must not return an error")
+	assert.Contains(t, res.Feedback.Content, "Role: (none)", "no current role should render as (none)")
+	assert.Contains(t, res.Feedback.Content, "  planner (Plans multi-step work)", "description from frontmatter should be shown")
+	assert.Contains(t, res.Feedback.Content, "  reviewer", "role with no description should still appear")
+	assert.Contains(t, res.Feedback.Content, "Usage: /role <name>", "usage hint should be present")
+}
+
+func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(newRoleCommandStream(t))
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "help"})
+	require.NoError(t, err, "/role help must not return an error")
+	assert.Contains(t, res.Feedback.Content, "  reviewer", "help form should list roles")
+}
+
+func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stream := newRoleCommandStream(t)
+	stream.SetMetadata("workshop.role", "reviewer")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
+	require.NoError(t, err)
+	assert.Contains(t, res.Feedback.Content, "Role: reviewer", "should show the active role")
+}
+
+func TestRoleCommand_NoArgEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(newRoleCommandStream(t))
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
+	require.NoError(t, err)
+	assert.Contains(t, res.Feedback.Content, "No roles available in", "empty dir should produce a helpful message")
+	assert.Contains(t, res.Feedback.Content, dir, "the message should point at the configured directory")
+}
+
+func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stream := newRoleCommandStream(t)
+	stream.SetMetadata("workshop.role", "reviewer")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
+	require.NoError(t, err)
+
+	got, _ := stream.GetMetadata("workshop.role")
+	assert.Equal(t, "reviewer", got, "no-arg form must not change the active role")
 }
 
 func TestCompactSlashHandler_Disabled(t *testing.T) {

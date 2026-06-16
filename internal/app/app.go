@@ -326,30 +326,95 @@ type metadataStore interface {
 }
 
 // roleCommand handles the /role slash command for switching roles
-// without triggering an LLM turn.
+// without triggering an LLM turn. With no argument (or an explicit
+// "help" subcommand) it returns a feedback message listing the
+// current role and the available role definitions. With a name it
+// validates the role exists and updates the stream metadata.
 type roleCommand struct {
 	mu     sync.Mutex
 	stream *session.Stream
 	rdir   string
 }
 
-// Handler validates the role name and updates the stream metadata.
+// currentRole returns the active role from stream metadata, or the
+// empty string when no role is set (or no stream is attached). The
+// empty string is rendered as "(none)" by callers.
+func (c *roleCommand) currentRole() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stream == nil {
+		return ""
+	}
+	v, _ := c.stream.GetMetadata("workshop.role")
+	return v
+}
+
+// Handler dispatches the /role slash command. With no argument (or
+// "help") it lists the available roles. With a name it validates the
+// role exists and writes it to stream metadata. An unknown role
+// returns an error so the user sees the failure rather than having
+// their active role silently changed.
 func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	args := slash.Fields(cmd.Input)
-	if len(args) == 0 {
-		return slash.Result{}, fmt.Errorf("missing role name")
+	// "help" is reserved as a subcommand so that /role help always
+	// shows the role list, mirroring /role with no argument. This
+	// matches the convention used by other slash commands and means
+	// a user-defined role cannot collide with the help affordance.
+	if len(args) == 0 || args[0] == "help" {
+		return slash.Result{
+			Feedback: artifact.Text{Content: c.formatRoleList()},
+		}, nil
 	}
+
 	name := args[0]
 	if _, err := loadRole(c.rdir, name, nil); err != nil {
 		return slash.Result{}, fmt.Errorf("role %q not found: %w", name, err)
 	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stream == nil {
 		return slash.Result{}, fmt.Errorf("no active stream")
 	}
 	c.stream.SetMetadata("workshop.role", name)
-	return slash.Result{}, nil
+	return slash.Result{
+		Feedback: artifact.Text{Content: fmt.Sprintf("Role: %s", name)},
+	}, nil
+}
+
+// formatRoleList builds a multi-line help message describing the
+// active role and every role definition on disk. The list is sorted
+// alphabetically for stable output. Used by the no-arg and "help"
+// forms of /role.
+func (c *roleCommand) formatRoleList() string {
+	current := c.currentRole()
+	if current == "" {
+		current = "(none)"
+	}
+
+	roles, err := listRoleDefinitions(c.rdir, nil)
+	if err != nil {
+		return fmt.Sprintf("Role: %s\nError reading roles from %s: %v\nUsage: /role <name>",
+			current, c.rdir, err)
+	}
+
+	if len(roles) == 0 {
+		return fmt.Sprintf("Role: %s\nNo roles available in %s\nUsage: /role <name>",
+			current, c.rdir)
+	}
+
+	sort.Slice(roles, func(i, j int) bool { return roles[i].Name < roles[j].Name })
+
+	lines := []string{fmt.Sprintf("Role: %s", current), "Available:"}
+	for _, r := range roles {
+		if r.Description != "" {
+			lines = append(lines, fmt.Sprintf("  %s (%s)", r.Name, r.Description))
+		} else {
+			lines = append(lines, fmt.Sprintf("  %s", r.Name))
+		}
+	}
+	lines = append(lines, "Usage: /role <name>")
+	return strings.Join(lines, "\n")
 }
 
 // thinkingCommand handles the /thinking slash command for changing
@@ -568,7 +633,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 	// Create slash command registry.
 	slashReg := slash.NewRegistry()
-	slashReg.Bind("role", "Switch to a different role", rc.Handler)
+	slashReg.Bind("role", "Show the current role and available roles, or switch to one by name", rc.Handler)
 	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
 	slashReg.Bind("thinking", "Set the thinking level for this thread", tc.Handler)
 	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
