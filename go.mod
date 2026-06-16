@@ -6,15 +6,15 @@ require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v0.11.1
 	github.com/andrewhowdencom/ore/x/analytics v0.2.0
-	github.com/andrewhowdencom/ore/x/compaction v0.4.2
-	github.com/andrewhowdencom/ore/x/conduit/http v0.7.1
+	github.com/andrewhowdencom/ore/x/compaction v0.4.3
+	github.com/andrewhowdencom/ore/x/conduit/http v0.7.2
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.2
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.10.0
-	github.com/andrewhowdencom/ore/x/provider/openai v0.5.0
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.0
+	github.com/andrewhowdencom/ore/x/provider/openai v0.6.1
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.2
 	github.com/andrewhowdencom/ore/x/tool v0.5.0
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.5
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.0
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.1
 	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.0
 	github.com/andrewhowdencom/ore/x/tool/skills v0.5.0
 	github.com/andrewhowdencom/ore/x/usage v0.1.3
@@ -33,13 +33,13 @@ require (
 )
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.50.1 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.50.2 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/buger/jsonparser v1.1.2 // indirect
+	github.com/buger/jsonparser v1.2.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
-	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.5 // indirect
 )
 
 require (
@@ -48,8 +48,8 @@ require (
 	charm.land/lipgloss/v2 v2.0.4 // indirect
 	github.com/alecthomas/chroma/v2 v2.26.1 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.3 // indirect
-	github.com/andrewhowdencom/ore/x/llmbytes v0.1.0 // indirect
-	github.com/andrewhowdencom/ore/x/provider/anthropic v0.1.0
+	github.com/andrewhowdencom/ore/x/llmbytes v0.1.1 // indirect
+	github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.1
 	github.com/andrewhowdencom/ore/x/tool/truncate v0.1.0 // indirect
 	github.com/andrewhowdencom/ore/x/verifier v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -60,17 +60,17 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260608091853-35bcb7319efa // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260615092913-2399af76d5b1 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260608090822-c3ad58c6c9e5 // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260615092313-b57e5e6d29bb // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.2 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -111,8 +111,8 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260610212136-7ab31c22f7ad // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260610212136-7ab31c22f7ad // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260615183401-62b3387ff324 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260615183401-62b3387ff324 // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
