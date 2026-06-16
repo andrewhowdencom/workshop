@@ -1,33 +1,55 @@
 # Example workshop configuration. Copy to config.yaml and customize, or use
 # `workshop config init` to materialize one from the current environment.
 #
+# Providers are defined as a named map under `providers:`. The top-level
+# `provider:` field is a string name reference that picks the *default*
+# (inference) provider. Other consumers (e.g. compaction) can reference
+# their own named entry to use a different model.
+#
 # Two provider kinds are supported:
 #   - "openai" (default) for OpenAI and OpenAI-compatible endpoints
 #   - "anthropic" for Anthropic native and OpenRouter's /api/v1/messages
 #     mirror (the auth header is auto-selected from base-url)
 
-provider:
-  # --- OpenAI-compatible example (Fireworks) ---
-  kind: openai
-  api-key: ""
-  base-url: "https://api.fireworks.ai/inference/v1"
-  model: accounts/fireworks/models/kimi-k2p6
-  temperature: 0
-  # thinking-level is a portable knob shared by every backend. Valid
-  # values: off, minimal, low, medium, high, max. For OpenAI-compatible
-  # providers, the level is mapped to reasoning_effort; for Anthropic,
-  # it becomes a percentage of max_tokens for thinking.budget_tokens.
-  # Set per-thread at runtime via the /thinking slash command.
-  # Default for openai-compatible providers: off.
-  # thinking-level: "off"
+# The default inference provider; must be a key in the `providers:` map.
+provider: sonnet
 
-  # --- Anthropic example ---
-  # To use Anthropic, comment out the openai block above and uncomment:
-  # kind: anthropic
-  # api-key: sk-ant-...
-  # model: claude-sonnet-4-5
-  # max-tokens: 0          # 0 = workshop default of 32000
-  # thinking-level: "medium"  # default for anthropic: medium; values: off, minimal, low, medium, high, max
+providers:
+  # A cheaper, faster model ideal for background tasks like compaction.
+  haiku:
+    kind: anthropic
+    api-key: sk-ant-...
+    model: claude-haiku-3-5
+    temperature: 0
+    # Default for anthropic: medium; values: off, minimal, low, medium, high, max
+    # thinking-level: "medium"
+    max-tokens: 0                  # 0 = workshop default of 32000
+
+  # The default inference provider: a larger, more capable model.
+  sonnet:
+    kind: anthropic
+    api-key: sk-ant-...
+    model: claude-sonnet-4-5
+    temperature: 0
+    thinking-level: "medium"
+    max-tokens: 0                  # 0 = workshop default of 32000
+
+  # OpenAI-compatible example. To use, set `provider: openai-fast` and
+  # supply the env var WORKSHOP_PROVIDER_OPENAI_FAST_API_KEY.
+  # openai-fast:
+  #   kind: openai
+  #   api-key: ""                  # or set WORKSHOP_PROVIDER_OPENAI_FAST_API_KEY
+  #   base-url: "https://api.fireworks.ai/inference/v1"
+  #   model: accounts/fireworks/models/kimi-k2p6
+  #   temperature: 0
+  #   thinking-level: "off"         # default for openai-compatible
+
+# Compaction: send the summarization call to a different (cheaper) model
+# than the inference provider. Omit `provider:` to reuse the default.
+# Set `max-tokens: 0` to disable compaction entirely.
+compaction:
+  provider: haiku
+  max-tokens: 100000
 
 log-level: info
 pprof: true

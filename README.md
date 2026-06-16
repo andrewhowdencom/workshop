@@ -28,29 +28,44 @@ Role files (e.g. `ideation.md`, `build.md`) are loaded from
 ### TUI (default)
 
 ```bash
-export WORKSHOP_PROVIDER_API_KEY=sk-...
-export WORKSHOP_PROVIDER_MODEL=gpt-4o   # optional; defaults to gpt-4o
-go run ./cmd/workshop
+export WORKSHOP_PROVIDER_DEFAULT_API_KEY=sk-...
+export WORKSHOP_PROVIDER_DEFAULT_MODEL=gpt-4o   # optional; defaults to gpt-4o
+go run ./cmd/workshop --provider default
+```
+
+(Per-named-provider env vars follow the pattern
+`WORKSHOP_PROVIDER_<UPPER_NAME>_<FIELD>`, where `<UPPER_NAME>` is the
+provider name in upper case. The example above uses `default` as the
+name, but any name you declare in `config.yaml` works.)
+
+The equivalent in `config.yaml`:
+
+```yaml
+provider: default
+providers:
+  default:
+    kind: openai
+    api-key: sk-...
+    model: gpt-4o
 ```
 
 ### Anthropic (native)
 
 ```bash
-export WORKSHOP_PROVIDER_KIND=anthropic
-export WORKSHOP_PROVIDER_API_KEY=sk-ant-...
-export WORKSHOP_PROVIDER_MODEL=claude-sonnet-4-5   # any Anthropic model name
-go run ./cmd/workshop
+export WORKSHOP_PROVIDER_SONNET_API_KEY=sk-ant-...
+export WORKSHOP_PROVIDER_SONNET_MODEL=claude-sonnet-4-5   # any Anthropic model name
+go run ./cmd/workshop --provider sonnet
 ```
 
 The Anthropic provider requires a per-request `max_tokens`. When unset,
 workshop applies a default of 32000 (overridable via
-`--provider.max-tokens`). To enable Anthropic's extended thinking, set
-`--provider.thinking-level` to one of `minimal`, `low`, `medium`, `high`,
-or `max`; the level is translated at request time to a percentage of
-`max_tokens` for `thinking.budget_tokens` (with a 1024-token floor and
-a `(max_tokens - 1024)` ceiling so the visible response always has
-room). The level is also settable at runtime via the `/thinking` slash
-command; see "Slash commands" below.
+`providers.<name>.max-tokens`). To enable Anthropic's extended thinking,
+set `providers.<name>.thinking-level` to one of `minimal`, `low`,
+`medium`, `high`, or `max`; the level is translated at request time to
+a percentage of `max_tokens` for `thinking.budget_tokens` (with a
+1024-token floor and a `(max_tokens - 1024)` ceiling so the visible
+response always has room). The level is also settable at runtime via
+the `/thinking` slash command; see "Slash commands" below.
 
 ### OpenRouter (via the Anthropic Messages mirror)
 
@@ -60,11 +75,10 @@ automatically when the base URL contains `openrouter`, so no separate
 provider kind is needed:
 
 ```bash
-export WORKSHOP_PROVIDER_KIND=anthropic
-export WORKSHOP_PROVIDER_API_KEY=sk-or-...                  # OpenRouter key
-export WORKSHOP_PROVIDER_BASE_URL=https://openrouter.ai/api/v1
-export WORKSHOP_PROVIDER_MODEL=anthropic/claude-sonnet-4-5 # OpenRouter model id
-go run ./cmd/workshop
+export WORKSHOP_PROVIDER_OPENROUTER_API_KEY=sk-or-...                  # OpenRouter key
+export WORKSHOP_PROVIDER_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+export WORKSHOP_PROVIDER_OPENROUTER_MODEL=anthropic/claude-sonnet-4-5  # OpenRouter model id
+go run ./cmd/workshop --provider openrouter
 ```
 
 The `Authorization: Bearer <key>` header is sent in place of
@@ -185,10 +199,16 @@ Workshop supports an optional YAML configuration file stored in the XDG config d
 
 | Source | Priority | Example |
 |---|---|---|
-| Flag | 1 (highest) | `--provider.model=gpt-4o` |
-| Environment | 2 | `WORKSHOP_PROVIDER_MODEL=gpt-4o` |
-| Config file | 3 | `provider.model: gpt-4o` |
+| Flag | 1 (highest) | `--provider=sonnet` |
+| Environment | 2 | `WORKSHOP_PROVIDER_SONNET_API_KEY=sk-...` |
+| Config file | 3 | `providers.sonnet.api-key: sk-...` |
 | Default | 4 | Built-in defaults |
+
+Per-named-provider fields (api-key, model, base-url, etc.) are not
+exposed as cobra flags because the names are dynamic. Use the config
+file or `WORKSHOP_PROVIDER_<UPPER_NAME>_<FIELD>` env vars to set
+them. The single `--provider` flag selects which named entry is the
+default (inference) provider.
 
 For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in the config file, unless `--log-level` is also supplied. The same precedence applies to `role`:
 
@@ -198,27 +218,44 @@ For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in t
 | Environment | `WORKSHOP_ROLE=reviewer` |
 | Config file | `role: planner` |
 
-> **Security notice:** `config init` writes `provider.api-key` in plaintext. Ensure the generated file is stored securely and never committed to a public repository.
+> **Security notice:** `config init` writes `providers.<name>.api-key` in plaintext for every defined named provider. Ensure the generated file is stored securely and never committed to a public repository.
 
 Example `config.yaml`:
 
 ```yaml
 log-level: info
-provider:
-  kind: openai
-  api-key: sk-...
-  model: gpt-4o
-  base-url: ""
-  temperature: 0          # 0 = provider default; range 0–2 for OpenAI
-  reasoning-effort: ""    # DEPRECATED; use thinking-level instead
-  max-tokens: 0           # hard cap on output tokens; 0 = workshop default (anthropic only)
-  thinking-level: "off"   # off, minimal, low, medium, high, max (shared by every backend)
+
+# The default (inference) provider; must be a key in `providers:`.
+provider: sonnet
+
+providers:
+  sonnet:
+    kind: anthropic
+    api-key: sk-ant-...
+    model: claude-sonnet-4-5
+    base-url: ""
+    temperature: 0
+    max-tokens: 0           # hard cap on output tokens; 0 = workshop default (anthropic only)
+    thinking-level: "off"   # off, minimal, low, medium, high, max (shared by every backend)
+  haiku:
+    kind: anthropic
+    api-key: sk-ant-...
+    model: claude-haiku-3-5
+    base-url: ""
+    temperature: 0
+    max-tokens: 0
+    thinking-level: "off"
+
+# Compaction reuses the default provider by default; set `provider:`
+# here to send compaction to a different named entry.
+compaction:
+  provider: haiku
+  max-tokens: 100000       # 0 = disabled; trigger compaction when tokens exceed this
+
 store:
   dir: ""              # empty = use $XDG_DATA_HOME/workshop/threads
 http:
   addr: ":8080"
-compaction:
-  max-tokens: 100000    # 0 = disabled; trigger compaction when tokens exceed this
 telemetry:
   traces:
     endpoint: ""         # OTLP/HTTP collector URL for traces (e.g. http://localhost:4318); empty = disabled
@@ -238,14 +275,34 @@ inference. This keeps recent context intact while retaining key facts from
 earlier in the conversation.
 
 Compaction is triggered by token usage reported by the provider
-(`--compaction.max-tokens`). When triggered, turns that exceed the token budget
-are summarized via the same LLM provider, and the result is injected as a
-synthetic system turn. The newest turns that fit within the budget are kept
-verbatim. Set `--compaction.max-tokens 0` to disable.
+(`compaction.max-tokens`). When triggered, turns that exceed the token budget
+are summarized via an LLM provider, and the result is injected as a synthetic
+system turn. The newest turns that fit within the budget are kept verbatim.
+Set `compaction.max-tokens: 0` to disable.
+
+By default, compaction reuses the default (inference) provider. To send
+compaction to a different model — typically a cheaper or faster one — set
+`compaction.provider: <name>` to a different key in the `providers:` map:
+
+```yaml
+provider: sonnet
+providers:
+  sonnet:
+    kind: anthropic
+    api-key: sk-ant-...
+    model: claude-sonnet-4-5
+  haiku:
+    kind: anthropic
+    api-key: sk-ant-...
+    model: claude-haiku-3-5
+compaction:
+  provider: haiku    # summarization calls go to the cheap model
+  max-tokens: 100000
+```
 
 You can also force compaction at any time by typing `/compact` in the TUI or
 stdio interface. This immediately compacts the conversation history regardless
-of the current token count. If compaction is disabled (`--compaction.max-tokens 0`),
+of the current token count. If compaction is disabled (`compaction.max-tokens: 0`),
 the command will return an error.
 
 ### Slash commands
@@ -298,15 +355,16 @@ When enabled, the profile index is available at
 
 ## Flags
 
+The single provider-related flag is `--provider`, which selects the
+name of the default (inference) provider. Per-named-provider fields
+(api-key, model, base-url, etc.) are configured in `config.yaml` or
+via the `WORKSHOP_PROVIDER_<UPPER_NAME>_<FIELD>` env vars, not via
+cobra flags, because the names are dynamic.
+
 | Flag | Environment Variable | Default | Description |
 |---|---|---|---|
-| `--provider.kind` | `WORKSHOP_PROVIDER_KIND` | `openai` | Provider kind (e.g. openai) |
-| `--provider.api-key` | `WORKSHOP_PROVIDER_API_KEY` | — | API key for the provider (**required**) |
-| `--provider.model` | `WORKSHOP_PROVIDER_MODEL` | `gpt-4o` | Model name |
-| `--provider.base-url` | `WORKSHOP_PROVIDER_BASE_URL` | — | Custom API base URL |
-| `--provider.temperature` | `WORKSHOP_PROVIDER_TEMPERATURE` | `0` | Sampling temperature (0 = default) |
-| `--provider.thinking-level` | `WORKSHOP_PROVIDER_THINKING_LEVEL` | `off` | Thinking effort level: `off`, `minimal`, `low`, `medium`, `high`, or `max`. Shared by every backend; each adapter translates to its own wire format. |
-| `--provider.max-tokens` | `WORKSHOP_PROVIDER_MAX_TOKENS` | `0` | Hard cap on output tokens per request (anthropic only; 0 = workshop default of 32000) |
+| `--provider` | — | — | Name of the default (inference) provider. Must be a key in the `providers:` map (required). |
+| `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Trigger compaction when total tokens exceed this threshold (0 = disabled) |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | `$XDG_DATA_HOME/workshop/threads` | Directory for persistent JSON thread storage |
 | `--format` | — | `text` | Export format (text, json, html) (thread export command only) |
 | `--output` | — | — | Output file path (default: stdout) (thread export command only) |

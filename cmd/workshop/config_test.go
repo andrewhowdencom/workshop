@@ -43,6 +43,7 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	setViperValue(t, "providers.haiku.temperature", "0.7")
 	setViperValue(t, "providers.haiku.thinking-level", "medium")
 	setViperInt64Value(t, "providers.haiku.max-tokens", 32000)
+	setViperValue(t, "compaction.provider", "haiku")
 	setViperValue(t, "store.dir", "/tmp/store")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
@@ -106,6 +107,9 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	}
 	if got, want := compaction["max-tokens"], 100000; got != want {
 		t.Errorf("compaction.max-tokens = %v, want %v", got, want)
+	}
+	if got, want := compaction["provider"], "haiku"; got != want {
+		t.Errorf("compaction.provider = %v, want %v", got, want)
 	}
 
 	store, ok := settings["store"].(map[string]interface{})
