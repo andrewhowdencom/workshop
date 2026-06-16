@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,7 +84,17 @@ type ProviderConfig struct {
 // CompactionConfig holds the configuration for the state compaction
 // framework that reduces conversation history before each inference turn.
 type CompactionConfig struct {
-	MaxTokens int // 0 = disabled
+	// Provider is the name of the named provider to use for the
+	// compaction call. When empty, the compactor reuses the default
+	// (inference) provider. When set, it must reference a key in the
+	// `providers:` map; an undefined name errors at startup.
+	Provider string
+	// MaxTokens is the trigger threshold: when the most recent
+	// artifact.Usage reports more than this many tokens, compaction
+	// fires. 0 disables compaction entirely. Distinct from
+	// SummarizeStrategy.MaxTokens (the per-invocation output budget),
+	// which is currently a constant in the ore/compaction package.
+	MaxTokens int
 }
 
 // compactionNotifier is a thread-safe callback bridge that forwards compacted
@@ -526,17 +537,25 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Build the providers: validate every defined named provider,
-	// compile each one, and resolve the default (inference) name.
-	// The compactor's provider is a separate concern and is wired
-	// in a follow-up; for now it reuses the inference provider.
+	// compile each one, and resolve the default (inference) name
+	// plus the compaction name (which falls back to the default
+	// when unset).
 	compiled, err := compileProviders(cfg, tracer)
 	if err != nil {
 		return nil, err
 	}
 	prov := compiled[cfg.defaultProviderName]
+	compactionName := cfg.compaction.Provider
+	if compactionName == "" {
+		compactionName = cfg.defaultProviderName
+	}
+	if _, ok := compiled[compactionName]; !ok {
+		return nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
+	}
+	compactionProv := compiled[compactionName]
 
 	// Build compactor if compaction is enabled.
-	compactor := newCompactor(cfg.compaction, prov)
+	compactor := newCompactor(cfg.compaction, compactionProv)
 
 	// Create role command handler.
 	rc := &roleCommand{rdir: roleDir()}
@@ -888,6 +907,20 @@ func compileProviders(cfg *config, tracer trace.Tracer) (map[string]provider.Pro
 		out[name] = prov
 	}
 	return out, nil
+}
+
+// definedProviderNamesAsCompiledKeys returns the keys of the compiled
+// provider map in sorted order, used for error messages that need to
+// list "the defined providers are X, Y, Z". Equivalent to
+// definedProviderNames in cmd/workshop, but operates on the compiled
+// (post-validate) map rather than the raw config.
+func definedProviderNamesAsCompiledKeys(m map[string]provider.Provider) string {
+	names := make([]string, 0, len(m))
+	for k := range m {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // newCompactor builds a compactor from configuration. Returns nil if

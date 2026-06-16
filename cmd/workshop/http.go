@@ -85,6 +85,7 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		app.WithTracer(tracer),
 		app.WithMeter(meter),
 		app.WithCompaction(app.CompactionConfig{
+			Provider:  viper.GetString("compaction.provider"),
 			MaxTokens: viper.GetInt("compaction.max-tokens"),
 		}),
 	}

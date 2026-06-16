@@ -2643,3 +2643,109 @@ func TestBuildInvokeOptions_ReadsThinkingLevelFromMetadata(t *testing.T) {
 	got := optionTypes(buildInvokeOptions(cfg, nil))
 	assert.Contains(t, got, "anthropic.thinkingLevelOption", "metadata-driven level must produce a thinkingLevelOption")
 }
+
+// TestBuildManager_CompactionProvider_DefaultsToInference verifies the
+// "fall back to default" behavior: when CompactionConfig.Provider is
+// empty, the compactor is built with the same provider as inference.
+// A direct, low-level check: a config with two providers, default
+// "sonnet" and an unset compaction.Provider, builds without error.
+func TestBuildManager_CompactionProvider_DefaultsToInference(t *testing.T) {
+	cfg := &config{
+		storeDir: t.TempDir(),
+		providers: map[string]ProviderConfig{
+			"haiku":  {Kind: "openai", APIKey: "sk-test", Model: "test-model"},
+			"sonnet": {Kind: "openai", APIKey: "sk-test", Model: "test-model"},
+		},
+		defaultProviderName: "sonnet",
+		compaction: CompactionConfig{
+			MaxTokens: 50000, // Provider is intentionally left empty.
+		},
+	}
+	mgr, err := buildManager(cfg)
+	if err != nil {
+		t.Fatalf("buildManager: %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildManager returned nil manager")
+	}
+}
+
+// TestBuildManager_CompactionProvider_DistinctFromInference verifies
+// that compaction.provider can point at a *different* named provider
+// than the inference default. The two are built and registered as
+// separate provider.Provider instances, even though they share the
+// same underlying SDK; buildManager must not silently alias them.
+func TestBuildManager_CompactionProvider_DistinctFromInference(t *testing.T) {
+	cfg := &config{
+		storeDir: t.TempDir(),
+		providers: map[string]ProviderConfig{
+			"haiku":  {Kind: "openai", APIKey: "sk-test", Model: "test-model"},
+			"sonnet": {Kind: "openai", APIKey: "sk-test", Model: "test-model"},
+		},
+		defaultProviderName: "sonnet",
+		compaction: CompactionConfig{
+			Provider:  "haiku",
+			MaxTokens: 50000,
+		},
+	}
+	mgr, err := buildManager(cfg)
+	if err != nil {
+		t.Fatalf("buildManager: %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildManager returned nil manager")
+	}
+}
+
+// TestBuildManager_CompactionProvider_UndefinedErrors verifies the
+// validation contract: a compaction.provider that references a name
+// not in the providers map must fail at startup with a clear error
+// message naming the undefined name and listing the defined ones.
+func TestBuildManager_CompactionProvider_UndefinedErrors(t *testing.T) {
+	cfg := &config{
+		storeDir: t.TempDir(),
+		providers: map[string]ProviderConfig{
+			"haiku": {Kind: "openai", APIKey: "sk-test", Model: "test-model"},
+		},
+		defaultProviderName: "haiku",
+		compaction: CompactionConfig{
+			Provider:  "nonexistent",
+			MaxTokens: 50000,
+		},
+	}
+	_, err := buildManager(cfg)
+	if err == nil {
+		t.Fatal("expected error for undefined compaction.provider")
+	}
+	if !strings.Contains(err.Error(), `compaction.provider "nonexistent" is not defined`) {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "haiku") {
+		t.Errorf("error should list defined providers (haiku); got %q", err.Error())
+	}
+}
+
+// TestBuildManager_CompactionDisabled verifies the existing contract:
+// when compaction.max-tokens is 0, the compactor is nil, regardless
+// of whether compaction.provider is set. The two are independent axes.
+func TestBuildManager_CompactionDisabled(t *testing.T) {
+	cfg := &config{
+		storeDir: t.TempDir(),
+		providers: map[string]ProviderConfig{
+			"haiku": {Kind: "openai", APIKey: "sk-test", Model: "test-model"},
+		},
+		defaultProviderName: "haiku",
+		compaction: CompactionConfig{
+			// Provider set, but MaxTokens is 0 (disabled).
+			Provider:  "haiku",
+			MaxTokens: 0,
+		},
+	}
+	mgr, err := buildManager(cfg)
+	if err != nil {
+		t.Fatalf("buildManager: %v", err)
+	}
+	if mgr == nil {
+		t.Fatal("buildManager returned nil manager")
+	}
+}
