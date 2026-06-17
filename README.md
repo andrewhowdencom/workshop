@@ -324,6 +324,12 @@ provider is invoked. The auto-generated `/help` lists every bound command.
   across thread resume, and is reflected in the TUI's status bar
   immediately. The level is per-thread; different threads can run at
   different levels simultaneously.
+- `/analytics` — render a Markdown table summarising the current
+  thread's per-(Kind, Source) byte and count breakdown. The command
+  is read-only (no LLM call, no state mutation, not exposed as a
+  tool the model can call) and is scoped to the active thread. A
+  fresh thread returns the friendly empty-state message
+  `No artifacts in this thread yet.`
 
 When running in TUI mode, the conversation history is automatically reloaded
 after compaction so the display reflects the newly compacted state.
