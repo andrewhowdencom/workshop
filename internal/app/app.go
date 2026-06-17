@@ -37,6 +37,7 @@ import (
 	"go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/andrewhowdencom/ore/x/compaction"
+	"github.com/andrewhowdencom/ore/x/analytics"
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
 	stdioc "github.com/andrewhowdencom/ore/x/conduit/stdio"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
@@ -555,6 +556,45 @@ func (c *compactCommand) SetStream(s *session.Stream) {
 	c.stream = s
 }
 
+// analyticsCommand handles the /analytics slash command for surfacing a
+// per-(Kind, Source) byte and count breakdown of the current thread's
+// artifacts. The handler is read-only: it never invokes the LLM, never
+// mutates state, and never appears as a tool the model can call.
+// /analytics is slash-only by design so the model cannot spend context
+// budget calling it.
+type analyticsCommand struct {
+	mu     sync.Mutex
+	stream *session.Stream
+}
+
+// Handler analyzes the current thread's turns and renders the result
+// as a Markdown table. When the active stream is unset (e.g. the
+// command is invoked from a unit test without going through the
+// session pipeline), the friendly empty-state message is returned
+// rather than panicking. The event is consumed (no Result.Replace) so
+// no LLM inference is triggered.
+func (c *analyticsCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stream == nil {
+		return slash.Result{
+			Feedback: artifact.Text{Content: "No artifacts in this thread yet."},
+		}, nil
+	}
+	stats := analytics.AnalyzeTurns(c.stream.Turns())
+	return slash.Result{
+		Feedback: artifact.Text{Content: analytics.Render(stats)},
+	}, nil
+}
+
+// SetStream updates the shared stream reference. Called by the
+// stepFactory on every stream open.
+func (c *analyticsCommand) SetStream(s *session.Stream) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stream = s
+}
+
 // workshopSandbox is a FileSandbox that resolves relative paths against the
 // active git worktree stored in stream metadata. Absolute paths pass through
 // unchanged. It also provides WorkingDirectory for command execution defaults.
@@ -631,11 +671,15 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	// Create thinking-level command handler.
 	tc := &thinkingCommand{}
 
+	// Create analytics command handler.
+	ac := &analyticsCommand{}
+
 	// Create slash command registry.
 	slashReg := slash.NewRegistry()
 	slashReg.Bind("role", "Show the current role and available roles, or switch to one by name", rc.Handler)
 	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
 	slashReg.Bind("thinking", "Set the thinking level for this thread", tc.Handler)
+	slashReg.Bind("analytics", "Show per-(kind, source) byte and count breakdown for this thread", ac.Handler)
 	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
 
 	// Step factory: inject system prompt and guardrails as transforms.
@@ -643,6 +687,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		rc.SetStream(stream)
 		cc.SetStream(stream)
 		tc.SetStream(stream)
+		ac.SetStream(stream)
 
 		// Set up progressive skill discovery from repo and home directories.
 		var discoverers []skills.Discoverer

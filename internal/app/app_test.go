@@ -2846,3 +2846,84 @@ func TestBuildManager_CompactionDisabled(t *testing.T) {
 		t.Fatal("buildManager returned nil manager")
 	}
 }
+
+// newAnalyticsCommandStream creates a fresh in-memory session manager
+// and stream for the analytics-command tests. The provider is a no-op;
+// only the slash handler is exercised.
+func newAnalyticsCommandStream(t *testing.T) *session.Stream {
+	t.Helper()
+	store := session.NewMemoryStore()
+	prov := &testSlashProvider{}
+	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+		return nil, nil
+	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+		return st, nil
+	})
+	stream, err := mgr.Create()
+	if err != nil {
+		t.Fatalf("create stream: %v", err)
+	}
+	return stream
+}
+
+func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
+	// With no stream wired, the handler must surface the friendly
+	// empty-state message rather than panicking. This is the
+	// nil-stream-safe contract from the slash command design.
+	ac := &analyticsCommand{}
+	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
+	require.NoError(t, err)
+	assert.Equal(t, "No artifacts in this thread yet.", res.Feedback.Content)
+}
+
+func TestAnalyticsCommand_EmptyThreadFriendlyMessage(t *testing.T) {
+	// A freshly-created thread has no turns yet. AnalyzeTurns returns
+	// nil and Render translates that to the same friendly message.
+	stream := newAnalyticsCommandStream(t)
+	ac := &analyticsCommand{}
+	ac.SetStream(stream)
+
+	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
+	require.NoError(t, err)
+	assert.Equal(t, "No artifacts in this thread yet.", res.Feedback.Content)
+}
+
+func TestAnalyticsCommand_RendersTable(t *testing.T) {
+	// A populated thread produces a Markdown table. We assert on the
+	// structural shape rather than exact formatting so the test is
+	// resilient to changes in the column layout.
+	stream := newAnalyticsCommandStream(t)
+
+	// Seed two turns: one with a single Text artifact, one with two.
+	if err := stream.Process(context.Background(), session.UserMessageEvent{Content: "first"}); err != nil {
+		t.Fatalf("process first turn: %v", err)
+	}
+	if err := stream.Process(context.Background(), session.UserMessageEvent{Content: "second turn"}); err != nil {
+		t.Fatalf("process second turn: %v", err)
+	}
+
+	ac := &analyticsCommand{}
+	ac.SetStream(stream)
+
+	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
+	require.NoError(t, err)
+
+	// Header + separator + at least one data row + totals row.
+	assert.Contains(t, res.Feedback.Content, "| Kind", "must include the header row")
+	assert.Contains(t, res.Feedback.Content, "| ---", "must include the separator row")
+	assert.Contains(t, res.Feedback.Content, "**total**", "must include the bolded totals row")
+}
+
+func TestAnalyticsCommand_ConsumesEvent(t *testing.T) {
+	// /analytics is slash-only by design: the event must be consumed
+	// (Result.Replace is nil) so no LLM inference is triggered. The
+	// slash registry uses Result.Replace to decide whether to feed
+	// the event into the inference pipeline.
+	stream := newAnalyticsCommandStream(t)
+	ac := &analyticsCommand{}
+	ac.SetStream(stream)
+
+	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
+	require.NoError(t, err)
+	assert.Nil(t, res.Replace, "analytics must consume the event (no LLM call)")
+}
