@@ -224,6 +224,37 @@ func WithMeter(meter metric.Meter) Option {
 	return func(c *config) { c.meter = meter }
 }
 
+// statusZoneMapping assigns each status-bar key to a semantic zone.
+// The "lifecycle" zone carries the active turn's counters (phase, title,
+// and the four token counters sent / received / total / thinking);
+// "context" carries thread-level metadata; unmapped keys fall into
+// the "default" zone (lowest priority, only rendered if the higher-
+// priority zones fit within the 3-line status budget). The thinking
+// token is grouped with sent / received / total so the framework's
+// compactTokenSegments can fold it into the same ↑ / ↓ / Σ / Ψ
+// cluster instead of leaving it as an orphan "tokens" segment in
+// the default zone.
+//
+// Keys listed here must match the keys emitted by the upstream
+// handler: x/usage/handler.go emits "sent", "received", "total",
+// and "thinking"; the workshop app emits the others via slash
+// commands and Stream.SetMetadata in defaultMeta.
+var statusZoneMapping = map[string]string{
+	"phase":                   "lifecycle",
+	"title":                   "lifecycle",
+	"thread_id":               "context",
+	"cwd":                     "context",
+	"git_branch":              "context",
+	"workshop.role":           "context",
+	"workshop.thinking_level": "context",
+	"tui.pid":                 "context",
+	"model":                   "context",
+	"sent":                    "lifecycle",
+	"received":                "lifecycle",
+	"total":                   "lifecycle",
+	"thinking":                "lifecycle",
+}
+
 // RunTUI initializes and starts the TUI application.
 func RunTUI(ctx context.Context, opts ...Option) error {
 	cfg := &config{conduit: "TUI"}
@@ -245,20 +276,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		tui.WithThreadID(cfg.threadID),
 		tui.WithName("ws"),
 		tui.WithTracer(cfg.tracer),
-		tui.WithStatusZones(map[string]string{
-			"phase":                   "lifecycle",
-			"title":                   "lifecycle",
-			"thread_id":               "context",
-			"cwd":                     "context",
-			"git_branch":              "context",
-			"workshop.role":           "context",
-			"workshop.thinking_level": "context",
-			"tui.pid":                 "context",
-			"model":                   "context",
-			"sent":                    "lifecycle",
-			"received":                "lifecycle",
-			"total":                   "lifecycle",
-		}),
+		tui.WithStatusZones(statusZoneMapping),
 		tui.WithStatusLabels(map[string]string{
 			"workshop.role":           "role",
 			"workshop.thinking_level": "thinking",
