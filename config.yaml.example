@@ -44,12 +44,16 @@ providers:
   #   temperature: 0
   #   thinking-level: "off"         # default for openai-compatible
 
-# Compaction: send the summarization call to a different (cheaper) model
-# than the inference provider. Omit `provider:` to reuse the default.
-# Set `max-tokens: 0` to disable compaction entirely.
+# Compaction: in ore v0.12 compaction is explicit-only (the /compact
+# slash command); there is no automatic pre-turn trigger. Send the
+# summarization call to a different (cheaper) model than the inference
+# provider by setting `provider:`. Omit `provider:` to reuse the default.
+# `max-tokens:` is now the per-invocation output budget forwarded to
+# compaction.Summarize via models.Spec.MaxOutputTokens (the framework
+# default is 8192). Set `max-tokens: 0` to disable /compact entirely.
 compaction:
   provider: haiku
-  max-tokens: 100000
+  max-tokens: 8192
 
 log-level: info
 pprof: true

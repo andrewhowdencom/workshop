@@ -15,6 +15,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,6 +28,7 @@ import (
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
+	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
@@ -36,8 +38,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
-	"github.com/andrewhowdencom/ore/x/compaction"
 	"github.com/andrewhowdencom/ore/x/analytics"
+	"github.com/andrewhowdencom/ore/x/compaction"
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
 	stdioc "github.com/andrewhowdencom/ore/x/conduit/stdio"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
@@ -73,28 +75,35 @@ type ProviderConfig struct {
 	// (low | medium | high) for OpenAI-compatible providers. The empty
 	// string is treated as "off". Default: "off".
 	ThinkingLevel string
-	// MaxTokens is the hard cap on output tokens per request. Required by the
-	// Anthropic provider (set to 0 to apply the workshop default of 32000);
-	// accepted but optional for OpenAI-compatible providers.
+	// MaxTokens is the per-request output token cap forwarded to the
+	// provider as models.Spec.MaxOutputTokens. Required by the
+	// Anthropic provider (set to 0 to apply the workshop default of
+	// 32000, applied at spec-build time); accepted but optional for
+	// OpenAI-compatible providers.
 	//
-	// Note: distinct from CompactionConfig.MaxTokens, which is a token budget
-	// for the conversation-history compactor (not a per-request output cap).
+	// Note: distinct from CompactionConfig.MaxTokens, which (in the
+	// ore v0.12 explicit-only compaction model) is the per-invocation
+	// output budget for compaction.Summarize, not a request cap.
 	MaxTokens int64
 }
 
-// CompactionConfig holds the configuration for the state compaction
-// framework that reduces conversation history before each inference turn.
+// CompactionConfig holds the configuration for the /compact slash
+// command. In ore v0.12 compaction is explicit-only: there is no
+// automatic pre-turn trigger. The /compact command calls
+// compaction.Summarize and appends the result to the buffer.
 type CompactionConfig struct {
 	// Provider is the name of the named provider to use for the
-	// compaction call. When empty, the compactor reuses the default
+	// compaction call. When empty, the command reuses the default
 	// (inference) provider. When set, it must reference a key in the
 	// `providers:` map; an undefined name errors at startup.
 	Provider string
-	// MaxTokens is the trigger threshold: when the most recent
-	// artifact.Usage reports more than this many tokens, compaction
-	// fires. 0 disables compaction entirely. Distinct from
-	// SummarizeStrategy.MaxTokens (the per-invocation output budget),
-	// which is currently a constant in the ore/compaction package.
+	// MaxTokens is the per-invocation output-token budget forwarded to
+	// compaction.Summarize via models.Spec.MaxOutputTokens. When <= 0
+	// the /compact command is disabled (returns "compaction is not
+	// enabled"); the framework default of 8192 otherwise applies.
+	// In the previous API this field was a trigger threshold
+	// (auto-compact at N tokens); that semantic is gone with the
+	// move to explicit-only compaction.
 	MaxTokens int
 }
 
@@ -123,10 +132,10 @@ func (n *compactionNotifier) Notify(turns []state.Turn) {
 
 // config holds the runtime configuration for the application.
 type config struct {
-	threadID   string
-	storeDir   string
-	httpAddr   string
-	providers  map[string]ProviderConfig
+	threadID  string
+	storeDir  string
+	httpAddr  string
+	providers map[string]ProviderConfig
 	// defaultProviderName is the name of the provider used for inference
 	// (the main loop, the system prompt, the git_commit trailer, etc.).
 	// It must reference a key in providers. Compaction has its own
@@ -237,21 +246,21 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		tui.WithName("ws"),
 		tui.WithTracer(cfg.tracer),
 		tui.WithStatusZones(map[string]string{
-			"phase":      "lifecycle",
-			"title":      "lifecycle",
-			"thread_id":  "context",
-			"cwd":        "context",
-			"git_branch": "context",
-			"workshop.role":          "context",
+			"phase":                   "lifecycle",
+			"title":                   "lifecycle",
+			"thread_id":               "context",
+			"cwd":                     "context",
+			"git_branch":              "context",
+			"workshop.role":           "context",
 			"workshop.thinking_level": "context",
-			"tui.pid":    "context",
-			"model":      "context",
-			"sent":       "lifecycle",
-			"received":   "lifecycle",
-			"total":      "lifecycle",
+			"tui.pid":                 "context",
+			"model":                   "context",
+			"sent":                    "lifecycle",
+			"received":                "lifecycle",
+			"total":                   "lifecycle",
 		}),
 		tui.WithStatusLabels(map[string]string{
-			"workshop.role":          "role",
+			"workshop.role":           "role",
 			"workshop.thinking_level": "thinking",
 		}),
 	)
@@ -440,19 +449,19 @@ func (c *thinkingCommand) SetStream(s *session.Stream) {
 // currentThinkingLevel reads the active stream's thinking level from
 // metadata, defaulting to ThinkingLevelOff when unset. The empty
 // string is treated as off, matching resolveThinkingLevel's contract.
-func (c *thinkingCommand) currentThinkingLevel() provider.ThinkingLevel {
+func (c *thinkingCommand) currentThinkingLevel() models.ThinkingLevel {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.stream == nil {
-		return provider.ThinkingLevelOff
+		return models.ThinkingLevelOff
 	}
 	v, ok := c.stream.GetMetadata("workshop.thinking_level")
 	if !ok || v == "" {
-		return provider.ThinkingLevelOff
+		return models.ThinkingLevelOff
 	}
-	level, err := provider.ParseThinkingLevel(v)
+	level, err := models.ParseThinkingLevel(v)
 	if err != nil {
-		return provider.ThinkingLevelOff
+		return models.ThinkingLevelOff
 	}
 	return level
 }
@@ -469,12 +478,12 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 	if len(args) == 0 {
 		// No-arg form: report current + available levels.
 		available := []string{
-			string(provider.ThinkingLevelOff),
-			string(provider.ThinkingLevelMinimal),
-			string(provider.ThinkingLevelLow),
-			string(provider.ThinkingLevelMedium),
-			string(provider.ThinkingLevelHigh),
-			string(provider.ThinkingLevelMax),
+			string(models.ThinkingLevelOff),
+			string(models.ThinkingLevelMinimal),
+			string(models.ThinkingLevelLow),
+			string(models.ThinkingLevelMedium),
+			string(models.ThinkingLevelHigh),
+			string(models.ThinkingLevelMax),
 		}
 		return slash.Result{
 			Feedback: artifact.Text{
@@ -485,7 +494,7 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 	}
 
 	wanted := args[0]
-	level, err := provider.ParseThinkingLevel(wanted)
+	level, err := models.ParseThinkingLevel(wanted)
 	if err != nil {
 		// Unknown level: report the error but do not mutate.
 		return slash.Result{
@@ -513,13 +522,22 @@ func (c *roleCommand) SetStream(s *session.Stream) {
 	c.stream = s
 }
 
-// compactCommand handles the /compact slash command for forcing conversation
-// compaction without triggering an LLM turn.
+// compactCommand handles the /compact slash command for forcing
+// conversation compaction without triggering an LLM turn.
+//
+// In the ore compaction redesign, /compact is the only entry point:
+// compaction is non-destructive and explicitly invoked. The handler
+// calls compaction.Summarize to obtain a single RoleSystem turn
+// carrying both the LLM-facing summary and the artifact.Compaction
+// metadata, then appends it to the stream via AppendTurn. On
+// ErrTruncatedSummary the buffer is left untouched and the user is
+// told why.
 type compactCommand struct {
-	mu        sync.Mutex
-	stream    *session.Stream
-	compactor *compaction.Compactor
-	notifier  *compactionNotifier
+	mu       sync.Mutex
+	stream   *session.Stream
+	prov     provider.Provider
+	spec     models.Spec
+	notifier *compactionNotifier
 }
 
 // Handler forces an immediate compaction of the active thread's state.
@@ -528,20 +546,34 @@ type compactCommand struct {
 func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.compactor == nil {
+	if c.prov == nil {
 		return slash.Result{}, fmt.Errorf("compaction is not enabled")
 	}
 	if c.stream == nil {
 		return slash.Result{}, fmt.Errorf("no active stream")
 	}
 	turns := c.stream.Turns()
-	compacted, _, err := c.compactor.ForceCompact(ctx, turns)
+	if len(turns) == 0 {
+		return slash.Result{}, fmt.Errorf("no turns to compact")
+	}
+	turn, err := compaction.Summarize(ctx, c.prov, c.spec, turns)
 	if err != nil {
+		// Truncation: the model hit its output cap mid-summary. Leave
+		// the buffer unchanged and surface the failure to the user.
+		if errors.Is(err, compaction.ErrTruncatedSummary) {
+			return slash.Result{
+				Feedback: artifact.Text{
+					Content: "Compaction truncated: model hit its output cap mid-summary; history unchanged.",
+				},
+			}, nil
+		}
 		return slash.Result{}, err
 	}
-	c.stream.LoadTurns(compacted)
+	if err := c.stream.AppendTurn(ctx, turn.Role, turn.Artifacts...); err != nil {
+		return slash.Result{}, fmt.Errorf("append compaction turn: %w", err)
+	}
 	if c.notifier != nil {
-		c.notifier.Notify(compacted)
+		c.notifier.Notify(c.stream.Turns())
 	}
 	if err := c.stream.Save(); err != nil {
 		return slash.Result{}, fmt.Errorf("save thread: %w", err)
@@ -659,14 +691,34 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 	compactionProv := compiled[compactionName]
 
-	// Build compactor if compaction is enabled.
-	compactor := newCompactor(cfg.compaction, compactionProv)
+	// Build the compact command handler. Compaction is explicit-only
+	// (the /compact slash command); there is no automatic trigger.
+	// When CompactionConfig.MaxTokens <= 0 the handler is wired with a
+	// nil provider and /compact reports "compaction is not enabled".
+	// MaxOutputTokens carries through to compaction.Summarize; 0 means
+	// "use framework default" (8192 in the ore/compaction package).
+	var ccProv provider.Provider
+	var ccSpec models.Spec
+	if cfg.compaction.MaxTokens > 0 {
+		ccProv = compactionProv
+		ccSpec = models.Spec{
+			Name:            cfg.providers[compactionName].Model,
+			MaxOutputTokens: int64(cfg.compaction.MaxTokens),
+		}
+	}
+
+	// Build the default model spec carried by every loop invocation.
+	// Model identity, sampling params, and output budget live on the
+	// spec in ore v0.12; per-thread overrides flow through stream
+	// metadata (Stream.Spec). The spec is captured by the step
+	// factory closure below.
+	defaultSpec := buildDefaultSpec(cfg.defaultProviderConfig())
 
 	// Create role command handler.
 	rc := &roleCommand{rdir: roleDir()}
 
 	// Create compact command handler.
-	cc := &compactCommand{compactor: compactor, notifier: cfg.compactionNotifier}
+	cc := &compactCommand{prov: ccProv, spec: ccSpec, notifier: cfg.compactionNotifier}
 
 	// Create thinking-level command handler.
 	tc := &thinkingCommand{}
@@ -749,9 +801,15 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		tel := telemetry.New(cfg.meter)
 
 		return []loop.Option{
-			loop.WithTransforms(sp, gr),
+			// compaction.NewTransform projects the LLM-facing view
+			// through the latest artifact.Compaction in the buffer. It
+			// must sit between the system prompt (which prepends the
+			// persona) and guardrails (which append safety rules on top),
+			// so the summary stands in for everything older than itself.
+			loop.WithTransforms(sp, compaction.NewTransform(), gr),
 			loop.WithHandlers(xtool.NewHandler(registry, xtool.WithTracer(tracer)), usage.New()),
 			loop.WithInvokeOptions(invokeOpts...),
+			loop.WithDefaultSpec(defaultSpec),
 			loop.WithTracer(tracer),
 			loop.WithOnEmit(tel.OnEmit()),
 		}, nil
@@ -788,23 +846,14 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		return defaults
 	}
 
-	// Wrap the ReAct processor with optional compaction.
-	processor := func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
-		if compactor != nil {
-			if buf, ok := st.(*state.Buffer); ok {
-				compacted, didCompact, err := compactor.MaybeCompact(ctx, buf.Turns())
-				if err != nil {
-					return nil, fmt.Errorf("compaction failed: %w", err)
-				}
-				if didCompact {
-					buf.LoadTurns(compacted)
-					if cfg.compactionNotifier != nil {
-						cfg.compactionNotifier.Notify(compacted)
-					}
-				}
-			}
-		}
-		return cognitive.NewTurnProcessor(cognitive.ReActFactory, tracer)(ctx, executor, st, prov)
+	// Wrap the ReAct processor. Compaction in ore v0.12 is explicit-only
+	// (the /compact slash command); there is no automatic pre-turn
+	// trigger, so the processor is the framework ReAct processor with
+	// no extra wrapping. The processor receives the per-turn spec from
+	// the session manager (built from Stream.Spec, which itself reads
+	// the per-thread metadata); we forward it to the ReAct pattern as-is.
+	processor := func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
+		return cognitive.NewTurnProcessor(cognitive.ReActFactory, tracer)(ctx, step, st, prov, spec)
 	}
 
 	// Create session manager.
@@ -856,49 +905,65 @@ func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *sk
 
 // defaultAnthropicMaxTokens is the workshop-side default for the Anthropic
 // provider's required `max_tokens` field. The Anthropic SDK rejects a value
-// of 0, so callers that leave ProviderConfig.MaxTokens unset get this value.
-// 32k fits comfortably inside Sonnet 4.5's 64k output ceiling while leaving
-// room for typical extended-thinking budgets.
+// of 0, so callers that leave ProviderConfig.MaxTokens unset get this value
+// applied to models.Spec.MaxOutputTokens at spec-build time. 32k fits
+// comfortably inside Sonnet 4.5's 64k output ceiling while leaving room for
+// typical extended-thinking budgets.
 const defaultAnthropicMaxTokens int64 = 32000
+
+// buildDefaultSpec assembles the default models.Spec carried by every
+// loop invocation. Model identity and inference configuration live on the
+// spec in ore v0.12 (Spec.Name, Spec.MaxOutputTokens, Spec.Temperature,
+// Spec.ThinkingLevel), so they are not baked into the provider at
+// construction time. Per-thread overrides flow through stream metadata
+// via the Stream.Spec() helper, which takes precedence over the
+// per-loop default.
+//
+// Anthropic-specific: when MaxTokens is left at 0, defaultAnthropicMaxTokens
+// is applied so the Anthropic SDK does not reject the request with
+// max_tokens=0. The OpenAI path does not require a default (its SDK accepts
+// an unset max_tokens).
+//
+// Temperature is forwarded as *float64 to mirror the spec field's "nil means
+// use the model default" convention; a zero value from the user config is
+// treated as "no opinion".
+func buildDefaultSpec(pc ProviderConfig) models.Spec {
+	spec := models.Spec{
+		Name: pc.Model,
+	}
+	if pc.Temperature != 0 {
+		t := pc.Temperature
+		spec.Temperature = &t
+	}
+	if level := resolveThinkingLevel(pc.ThinkingLevel); level != "" {
+		spec.ThinkingLevel = level
+	}
+	maxTokens := pc.MaxTokens
+	if pc.Kind == "anthropic" && maxTokens == 0 {
+		maxTokens = defaultAnthropicMaxTokens
+	}
+	if maxTokens > 0 {
+		spec.MaxOutputTokens = maxTokens
+	}
+	return spec
+}
 
 // buildInvokeOptions assembles the per-invocation options for the configured
 // provider. It branches on the default provider's Kind so the right
-// per-provider options are applied for each backend. The thinking level is
-// a portable qualitative knob shared by every backend; each adapter
-// translates it to its own wire format (percentage of max_tokens for
-// Anthropic, reasoning_effort for OpenAI).
-//
-// Each per-provider option is appended only when its preconditions are met
-// (e.g. Temperature is appended only when non-zero), matching the
-// "0 = provider default" convention of the underlying SDKs.
+// per-provider options are applied for each backend. Per-call model
+// identity and inference configuration live on models.Spec (see
+// buildDefaultSpec and Stream.Spec); buildInvokeOptions only carries
+// provider-specific options that have no spec equivalent (currently just
+// the tool list).
 func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption {
 	pc := cfg.defaultProviderConfig()
 	var opts []provider.InvokeOption
 	switch pc.Kind {
 	case "anthropic":
 		opts = append(opts, anthropic.WithTools(tools))
-		if pc.Temperature != 0 {
-			opts = append(opts, anthropic.WithTemperature(pc.Temperature))
-		}
-		// MaxTokens is set by newProvider to defaultAnthropicMaxTokens when
-		// the user did not configure it, so by the time we reach the helper
-		// on the anthropic path MaxTokens is always > 0. The guard below is
-		// defensive in case that defaulting policy ever changes.
-		if pc.MaxTokens > 0 {
-			opts = append(opts, anthropic.WithMaxTokens(pc.MaxTokens))
-		}
-		if level := resolveThinkingLevel(pc.ThinkingLevel); level != provider.ThinkingLevelOff {
-			opts = append(opts, anthropic.WithThinkingLevel(level))
-		}
 	default:
 		// OpenAI-compatible path (Kind == "" or "openai").
 		opts = append(opts, openai.WithTools(tools))
-		if pc.Temperature != 0 {
-			opts = append(opts, openai.WithTemperature(pc.Temperature))
-		}
-		if level := resolveThinkingLevel(pc.ThinkingLevel); level != provider.ThinkingLevelOff {
-			opts = append(opts, openai.WithThinkingLevel(level))
-		}
 	}
 	return opts
 }
@@ -908,13 +973,13 @@ func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption 
 // unrecognized value are treated as ThinkingLevelOff. This is the
 // single source of truth for "user did not set a level" semantics
 // across the workshop.
-func resolveThinkingLevel(s string) provider.ThinkingLevel {
+func resolveThinkingLevel(s string) models.ThinkingLevel {
 	if s == "" {
-		return provider.ThinkingLevelOff
+		return models.ThinkingLevelOff
 	}
-	level, err := provider.ParseThinkingLevel(s)
+	level, err := models.ParseThinkingLevel(s)
 	if err != nil {
-		return provider.ThinkingLevelOff
+		return models.ThinkingLevelOff
 	}
 	return level
 }
@@ -935,8 +1000,11 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 		if pc.Model == "" {
 			return nil, fmt.Errorf("missing required provider config: model")
 		}
+		// Model identity is no longer carried by the provider in ore
+		// v0.12; it is supplied per-invocation via models.Spec.Name
+		// (configured on the loop as the default spec).
 		var opts []openai.Option
-		opts = append(opts, openai.WithAPIKey(pc.APIKey), openai.WithModel(pc.Model))
+		opts = append(opts, openai.WithAPIKey(pc.APIKey))
 		if pc.BaseURL != "" {
 			opts = append(opts, openai.WithBaseURL(pc.BaseURL))
 		}
@@ -951,20 +1019,12 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 		if pc.Model == "" {
 			return nil, fmt.Errorf("missing required provider config: model")
 		}
-		// Apply the workshop default when the user did not set MaxTokens.
-		// The Anthropic SDK rejects a zero value, so a non-zero default is
-		// mandatory. Callers can always override.
-		if pc.MaxTokens == 0 {
-			pc.MaxTokens = defaultAnthropicMaxTokens
-		}
-		// The thinking level's percentage-of-max_tokens translation
-		// (enforced inside the anthropic adapter) guarantees the
-		// visible response has at least 1024 tokens, so no
-		// "max-tokens too small" warning is needed here. The
-		// previous warn was tied to the absolute ThinkingBudget
-		// knob, which is gone.
+		// Model identity is supplied per-invocation via models.Spec.Name
+		// (see buildDefaultSpec). MaxTokens is now carried by
+		// Spec.MaxOutputTokens and the workshop default is applied at
+		// spec-build time.
 		var opts []anthropic.Option
-		opts = append(opts, anthropic.WithAPIKey(pc.APIKey), anthropic.WithModel(pc.Model))
+		opts = append(opts, anthropic.WithAPIKey(pc.APIKey))
 		if pc.BaseURL != "" {
 			opts = append(opts, anthropic.WithBaseURL(pc.BaseURL))
 		}
@@ -988,10 +1048,10 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 //   - Every defined name must have a known kind (or "" for openai).
 //
 // Errors include the offending name so a misconfigured config points
-// the operator at the right entry. The Anthropic default-MaxTokens
-// mutation is applied to the caller's copy via the by-pointer
-// signature, so buildInvokeOptions sees the resolved value when it
-// reads cfg.providers[name] later.
+// the operator at the right entry. newProvider no longer mutates the
+// per-name config (in ore v0.12 model identity lives on the per-turn
+// spec, not on the provider); the write-back below is a defensive
+// copy so readers see a value that mirrors what was passed in.
 func compileProviders(cfg *config, tracer trace.Tracer) (map[string]provider.Provider, error) {
 	if len(cfg.providers) == 0 {
 		return nil, fmt.Errorf("no providers defined; configure the providers: section in config.yaml")
@@ -1010,9 +1070,6 @@ func compileProviders(cfg *config, tracer trace.Tracer) (map[string]provider.Pro
 		if err != nil {
 			return nil, fmt.Errorf("create provider %q: %w", name, err)
 		}
-		// Write the (possibly mutated) per-name config back so
-		// buildInvokeOptions and the system-prompt / git_commit
-		// readers see the resolved MaxTokens / ThinkingLevel.
 		cfg.providers[name] = pc
 		out[name] = prov
 	}
@@ -1031,20 +1088,6 @@ func definedProviderNamesAsCompiledKeys(m map[string]provider.Provider) string {
 	}
 	sort.Strings(names)
 	return strings.Join(names, ", ")
-}
-
-// newCompactor builds a compactor from configuration. Returns nil if
-// compaction is disabled (MaxTokens <= 0).
-func newCompactor(cfg CompactionConfig, prov provider.Provider) *compaction.Compactor {
-	if cfg.MaxTokens <= 0 {
-		return nil
-	}
-	return compaction.New(
-		compaction.WithTrigger(compaction.TokenUsageTrigger{MaxTokens: cfg.MaxTokens}),
-		compaction.WithStrategy(compaction.SummarizeStrategy{
-			Provider: prov,
-		}),
-	)
 }
 
 // mustRegister panics if tool registration fails. Used for built-in tools

@@ -34,7 +34,7 @@ func init() {
 	rootCmd.PersistentFlags().String("pprof.addr", defaultPProfAddr, "TCP address for the pprof server")
 	rootCmd.PersistentFlags().String("telemetry.traces.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL for traces (e.g. http://localhost:4318); empty = disabled")
 	rootCmd.PersistentFlags().String("telemetry.metrics.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL for metrics (e.g. http://localhost:4318); empty = disabled")
-	rootCmd.PersistentFlags().Int("compaction.max-tokens", 100000, "Trigger compaction when total tokens exceed this threshold (0 = disabled)")
+	rootCmd.PersistentFlags().Int("compaction.max-tokens", 100000, "Per-invocation output budget for /compact, forwarded to compaction.Summarize via models.Spec.MaxOutputTokens (0 = disabled; framework default otherwise is 8192)")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
 

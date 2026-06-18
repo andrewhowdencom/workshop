@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,32 +14,20 @@ import (
 
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/loop"
+	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
 	slash "github.com/andrewhowdencom/ore/x/slash"
-	"github.com/andrewhowdencom/ore/x/compaction"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-// keepLastN is a test-only compaction strategy that retains only the last N turns.
-type keepLastN struct {
-	N int
-}
-
-func (k keepLastN) Compact(ctx context.Context, turns []state.Turn) ([]state.Turn, error) {
-	if len(turns) <= k.N {
-		return turns, nil
-	}
-	return turns[len(turns)-k.N:], nil
-}
 
 func TestNewProvider_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
@@ -129,26 +116,16 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 	}
 }
 
-func TestNewProvider_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
-	// TestNewProvider_Anthropic_AppliesDefaultMaxTokens verifies that the
-	// default MaxTokens is applied and propagates back to the caller. This
-	// is a regression test for the by-value pass bug — if the signature
-	// reverts to value-pass, the post-call assertion below fails because
-	// the local mutation is discarded.
-	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
-	if _, err := newProvider("anthropic-test", &pc, nil); err != nil {
-		t.Fatalf("newProvider with zero MaxTokens returned error; default not applied: %v", err)
-	}
-	if pc.MaxTokens != defaultAnthropicMaxTokens {
-		t.Errorf("expected pc.MaxTokens to be mutated to default (%d) after newProvider; got %d (by-value pass would discard the default)",
-			defaultAnthropicMaxTokens, pc.MaxTokens)
-	}
-}
 // (The three "WarnsOnMaxTokensLeqThinkingBudget" tests were removed
 // when the absolute ThinkingBudget knob was replaced with the
 // portable ThinkingLevel. The level's percentage-of-max_tokens
 // translation enforces the floor/ceiling invariants inside the
 // adapter, so no application-side warning is needed.)
+//
+// TestNewProvider_Anthropic_AppliesDefaultMaxTokens was removed in the
+// ore v0.12 migration: newProvider no longer mutates pc.MaxTokens.
+// The Anthropic 32k default now lives on the per-turn spec, applied
+// by buildDefaultSpec; coverage is in TestBuildDefaultSpec.
 
 // optionTypes returns a slice of %T-formatted type names for the supplied
 // options. Tests use this to assert that buildInvokeOptions produced the
@@ -161,69 +138,58 @@ func optionTypes(opts []provider.InvokeOption) []string {
 	return out
 }
 
-func TestBuildInvokeOptions_OpenAI_IncludesToolsAndThinkingLevel(t *testing.T) {
+// TestBuildInvokeOptions_OpenAI_IncludesTools verifies that the openai
+// path of buildInvokeOptions carries an openai.Tools option (the
+// shared provider.ToolsOption wrapper is type-erased).
+func TestBuildInvokeOptions_OpenAI_IncludesTools(t *testing.T) {
 	cfg := &config{
 		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:          "openai",
-				Temperature:   0.5,
-				ThinkingLevel: "medium",
-			},
+			"test": {Kind: "openai"},
 		},
 		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
-	want := []string{
-		"provider.ToolsOption",
-		"openai.temperatureOption",
-		"openai.thinkingLevelOption",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("option types = %v, want %v", got, want)
-	}
-}
-
-// TestBuildInvokeOptions_OpenAI_ClampsLevelToOffIfUnknown verifies
-// that an unknown level string is treated as off (no thinkingLevelOption
-// appended) so the openai path is robust to config typos.
-func TestBuildInvokeOptions_OpenAI_ClampsLevelToOffIfUnknown(t *testing.T) {
-	cfg := &config{
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:          "openai",
-				Temperature:   0.5,
-				ThinkingLevel: "frobnicate",
-			},
-		},
-		defaultProviderName: "test",
-	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
+	foundTools := false
 	for _, ty := range got {
-		if ty == "openai.thinkingLevelOption" {
-			t.Errorf("did not expect thinkingLevelOption for unknown level; got %v", got)
+		if ty == "provider.ToolsOption" || ty == "*provider.toolsOption" {
+			foundTools = true
 		}
 	}
+	if !foundTools {
+		t.Errorf("expected a tools option on the openai path; got %v", got)
+	}
 }
 
-func TestBuildInvokeOptions_OpenAI_OmitsThinkingLevelWhenOff(t *testing.T) {
+// TestBuildInvokeOptions_Anthropic_IncludesTools verifies that the
+// anthropic path of buildInvokeOptions carries the provider.ToolsOption.
+// In ore v0.12 model identity, sampling params, output budget, and
+// thinking level are all carried on models.Spec and configured on the
+// loop via loop.WithDefaultSpec; buildInvokeOptions is reduced to the
+// provider-specific options that have no spec equivalent.
+func TestBuildInvokeOptions_Anthropic_IncludesTools(t *testing.T) {
 	cfg := &config{
 		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:        "openai",
-				Temperature: 0.5,
-			},
+			"test": {Kind: "anthropic"},
 		},
 		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
+	foundTools := false
 	for _, ty := range got {
-		if ty == "openai.thinkingLevelOption" {
-			t.Errorf("did not expect thinkingLevelOption when ThinkingLevel is empty; got %v", got)
+		if ty == "provider.ToolsOption" || ty == "*provider.toolsOption" {
+			foundTools = true
 		}
+	}
+	if !foundTools {
+		t.Errorf("expected a tools option on the anthropic path; got %v", got)
 	}
 }
 
-func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
+// TestBuildInvokeOptions_DoesNotIncludePerProviderSampling is a guard
+// against regressing the spec migration: temperature, max-tokens and
+// thinking-level are now on the spec, so they must NOT appear as
+// InvokeOptions anymore.
+func TestBuildInvokeOptions_DoesNotIncludePerProviderSampling(t *testing.T) {
 	cfg := &config{
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -236,32 +202,14 @@ func TestBuildInvokeOptions_Anthropic_IncludesMaxTokens(t *testing.T) {
 		defaultProviderName: "test",
 	}
 	got := optionTypes(buildInvokeOptions(cfg, nil))
-	want := []string{
-		"provider.ToolsOption",
-		"anthropic.temperatureOption",
-		"anthropic.maxTokensOption",
-		"anthropic.thinkingLevelOption",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("option types = %v, want %v", got, want)
-	}
-}
-
-func TestBuildInvokeOptions_Anthropic_OmitsThinkingLevelWhenOff(t *testing.T) {
-	cfg := &config{
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:        "anthropic",
-				MaxTokens:   16000,
-				Temperature: 0,
-			},
-		},
-		defaultProviderName: "test",
-	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
 	for _, ty := range got {
-		if ty == "anthropic.thinkingLevelOption" {
-			t.Errorf("did not expect thinkingLevelOption when ThinkingLevel is empty; got %v", got)
+		switch ty {
+		case "anthropic.temperatureOption",
+			"anthropic.maxTokensOption",
+			"anthropic.thinkingLevelOption",
+			"openai.temperatureOption",
+			"openai.thinkingLevelOption":
+			t.Errorf("sampling should live on Spec, not InvokeOptions; saw %s in %v", ty, got)
 		}
 	}
 }
@@ -275,103 +223,89 @@ func TestResolveThinkingLevel(t *testing.T) {
 
 	cases := []struct {
 		in   string
-		want provider.ThinkingLevel
+		want models.ThinkingLevel
 	}{
-		{"", provider.ThinkingLevelOff},
-		{"off", provider.ThinkingLevelOff},
-		{"minimal", provider.ThinkingLevelMinimal},
-		{"low", provider.ThinkingLevelLow},
-		{"medium", provider.ThinkingLevelMedium},
-		{"high", provider.ThinkingLevelHigh},
-		{"max", provider.ThinkingLevelMax},
-		{"MEDIUM", provider.ThinkingLevelOff},   // case-sensitive
-		{"foo", provider.ThinkingLevelOff},      // unknown -> off
-		{" off", provider.ThinkingLevelOff},     // whitespace-sensitive
+		{"", models.ThinkingLevelOff},
+		{"off", models.ThinkingLevelOff},
+		{"minimal", models.ThinkingLevelMinimal},
+		{"low", models.ThinkingLevelLow},
+		{"medium", models.ThinkingLevelMedium},
+		{"high", models.ThinkingLevelHigh},
+		{"max", models.ThinkingLevelMax},
+		{"MEDIUM", models.ThinkingLevelOff}, // case-sensitive
+		{"foo", models.ThinkingLevelOff},    // unknown -> off
+		{" off", models.ThinkingLevelOff},   // whitespace-sensitive
 	}
 	for _, tc := range cases {
 		assert.Equal(t, tc.want, resolveThinkingLevel(tc.in), "input %q", tc.in)
 	}
 }
 
-func TestBuildInvokeOptions_Anthropic_OmitsTemperatureWhenZero(t *testing.T) {
-	cfg := &config{
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:      "anthropic",
-				MaxTokens: 16000,
-			},
-		},
-		defaultProviderName: "test",
-	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
-	for _, ty := range got {
-		if ty == "anthropic.temperatureOption" {
-			t.Errorf("did not expect temperatureOption when Temperature is zero; got %v", got)
-		}
-	}
-}
+// TestBuildDefaultSpec covers the workshop-side defaulting policy:
+// Name is taken from the model, Temperature is forwarded as *float64
+// (nil when the user left it at zero), ThinkingLevel is parsed and
+// normalized, and the Anthropic 32k MaxOutputTokens default kicks in
+// when the user leaves MaxTokens at zero. OpenAI does not get a
+// default.
+func TestBuildDefaultSpec(t *testing.T) {
+	t.Run("anthropic applies default max tokens", func(t *testing.T) {
+		got := buildDefaultSpec(ProviderConfig{
+			Kind:      "anthropic",
+			Model:     "claude-sonnet-4-5",
+			MaxTokens: 0,
+		})
+		assert.Equal(t, "claude-sonnet-4-5", got.Name)
+		assert.Equal(t, defaultAnthropicMaxTokens, got.MaxOutputTokens)
+	})
 
-func TestBuildInvokeOptions_Anthropic_OmitsOpenAIThinkingLevel(t *testing.T) {
-	// The thinking level is a portable knob shared by every backend,
-	// but each adapter has its own option type. The anthropic branch
-	// must not produce an openai.thinkingLevelOption even when the
-	// field is set, so the openai option is not silently forwarded
-	// to a backend that ignores it.
-	cfg := &config{
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:          "anthropic",
-				MaxTokens:     16000,
-				ThinkingLevel: "high",
-			},
-		},
-		defaultProviderName: "test",
-	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
-	for _, ty := range got {
-		if ty == "openai.thinkingLevelOption" {
-			t.Errorf("did not expect openai.thinkingLevelOption on the anthropic path; got %v", got)
-		}
-	}
-}
+	t.Run("anthropic honors explicit max tokens", func(t *testing.T) {
+		got := buildDefaultSpec(ProviderConfig{
+			Kind:      "anthropic",
+			Model:     "claude-sonnet-4-5",
+			MaxTokens: 16000,
+		})
+		assert.Equal(t, int64(16000), got.MaxOutputTokens)
+	})
 
-// TestBuildInvokeOptions_Anthropic_AppliesDefaultMaxTokens is an
-// end-to-end regression test: when the user leaves provider.max-tokens
-// unset on the anthropic kind, the full pipeline (compileProviders calls
-// newProvider which applies the 32000 default to the caller's struct,
-// and the mutated struct is then read by buildInvokeOptions to append
-// the WithMaxTokens option) must include a maxTokensOption. This
-// mirrors the production flow in buildManager, which calls
-// compileProviders once at construction time and buildInvokeOptions
-// per turn. If the by-value bug in newProvider regresses, the
-// post-newProvider state of cfg.providers[name].MaxTokens is still 0,
-// and this test fails because the option is missing from the slice.
-func TestBuildInvokeOptions_Anthropic_AppliesDefaultMaxTokens(t *testing.T) {
-	cfg := &config{
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:    "anthropic",
-				APIKey:  "sk-ant-test",
-				Model:   "claude-sonnet-4-5",
-				// MaxTokens intentionally left at 0 to trigger the
-				// defaulting path.
-			},
-		},
-		defaultProviderName: "test",
-	}
-	// compileProviders applies the 32000 default to
-	// cfg.providers["test"].MaxTokens. This is the production setup;
-	// the per-turn buildInvokeOptions below reads from the same struct.
-	if _, err := compileProviders(cfg, nil); err != nil {
-		t.Fatalf("compileProviders: %v", err)
-	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
-	for _, ty := range got {
-		if ty == "anthropic.maxTokensOption" {
-			return
+	t.Run("openai does not apply default max tokens", func(t *testing.T) {
+		got := buildDefaultSpec(ProviderConfig{
+			Kind:      "openai",
+			Model:     "gpt-4o",
+			MaxTokens: 0,
+		})
+		assert.Equal(t, int64(0), got.MaxOutputTokens)
+	})
+
+	t.Run("temperature forwarded as pointer", func(t *testing.T) {
+		got := buildDefaultSpec(ProviderConfig{
+			Model:       "gpt-4o",
+			Temperature: 0.7,
+		})
+		if assert.NotNil(t, got.Temperature) {
+			assert.Equal(t, 0.7, *got.Temperature)
 		}
-	}
-	t.Errorf("expected anthropic.maxTokensOption in result, got %v", got)
+	})
+
+	t.Run("zero temperature leaves spec field nil", func(t *testing.T) {
+		got := buildDefaultSpec(ProviderConfig{Model: "gpt-4o"})
+		assert.Nil(t, got.Temperature)
+	})
+
+	t.Run("thinking level is normalized", func(t *testing.T) {
+		got := buildDefaultSpec(ProviderConfig{
+			Model:         "gpt-4o",
+			ThinkingLevel: "high",
+		})
+		assert.Equal(t, models.ThinkingLevelHigh, got.ThinkingLevel)
+	})
+
+	t.Run("unknown thinking level clamps to off", func(t *testing.T) {
+		got := buildDefaultSpec(ProviderConfig{
+			Model:         "gpt-4o",
+			ThinkingLevel: "frobnicate",
+		})
+		assert.Equal(t, models.ThinkingLevelOff, got.ThinkingLevel)
+	})
 }
 
 func TestMakeCurrentPrompt_Fallback(t *testing.T) {
@@ -425,7 +359,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
 	})
 
@@ -467,7 +401,7 @@ func newRoleCommandStream(t *testing.T) *session.Stream {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
 	})
 	stream, err := mgr.Create()
@@ -563,7 +497,7 @@ func TestCompactSlashHandler_Disabled(t *testing.T) {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
 	})
 
@@ -572,7 +506,9 @@ func TestCompactSlashHandler_Disabled(t *testing.T) {
 		t.Fatalf("create stream: %v", err)
 	}
 
-	cc := &compactCommand{compactor: nil}
+	// Disabled compaction: prov == nil (handler returns
+	// "compaction is not enabled" before consulting the stream).
+	cc := &compactCommand{}
 	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
@@ -589,7 +525,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	prov := &testSummarizeProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
 	})
 
@@ -598,10 +534,9 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 		t.Fatalf("create stream: %v", err)
 	}
 
-	// Pre-populate the stream with 5 user turns containing long text so
-	// the heuristic token estimate exceeds MaxTokens=1.
+	// Pre-populate the stream with 5 user turns.
 	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), session.UserMessageEvent{Content: strings.Repeat("a", 100)})
+		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
 		if err != nil {
 			t.Fatalf("process event %d: %v", i, err)
 		}
@@ -612,13 +547,16 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 		t.Fatalf("expected 5 turns, got %d", len(turns))
 	}
 
-	compactor := compaction.New(
-		compaction.WithTrigger(compaction.TurnCountTrigger{N: 1}),
-		compaction.WithStrategy(compaction.SummarizeStrategy{
-			Provider: &testSummarizeProvider{},
-		}),
-	)
-	cc := &compactCommand{compactor: compactor}
+	// In ore v0.12 compaction is explicit-only. /compact calls
+	// compaction.Summarize, then appends the resulting RoleSystem turn
+	// (carrying both artifact.Compaction metadata and the summary
+	// artifact.Text) to the stream via AppendTurn. The pre-existing
+	// turns remain in the buffer unchanged; the compaction transform
+	// projects the LLM-facing view through the new marker.
+	cc := &compactCommand{
+		prov: prov,
+		spec: models.Spec{Name: "test-model"},
+	}
 	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
@@ -627,14 +565,23 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	}
 
 	got := stream.Turns()
-	if len(got) != 1 {
-		t.Fatalf("expected 1 turn after compaction, got %d", len(got))
+	if len(got) != 6 {
+		t.Fatalf("expected 6 turns (5 original + 1 compaction), got %d", len(got))
 	}
-	if got[0].Role != state.RoleSystem {
-		t.Errorf("first turn role = %v, want RoleSystem", got[0].Role)
+	compactionTurn := got[5]
+	if compactionTurn.Role != state.RoleSystem {
+		t.Errorf("compaction turn role = %v, want RoleSystem", compactionTurn.Role)
 	}
-	if got[0].Artifacts[0].(artifact.Text).Content != "summary" {
-		t.Errorf("summary turn = %q, want summary", got[0].Artifacts[0].(artifact.Text).Content)
+	// Artifacts order: artifact.Compaction metadata first, then artifact.Text.
+	var summary string
+	for _, a := range compactionTurn.Artifacts {
+		if txt, ok := a.(artifact.Text); ok {
+			summary = txt.Content
+			break
+		}
+	}
+	if summary != "summary" {
+		t.Errorf("compaction turn summary = %q, want %q", summary, "summary")
 	}
 }
 
@@ -732,17 +679,17 @@ func TestNameSlashHandler_TrimsInput(t *testing.T) {
 
 type testSlashProvider struct{}
 
-func (p *testSlashProvider) Invoke(ctx context.Context, s state.State, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+func (p *testSlashProvider) Invoke(ctx context.Context, s state.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
 	return nil
 }
 
 type testSummarizeProvider struct{}
 
-func (p *testSummarizeProvider) Invoke(ctx context.Context, s state.State, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+func (p *testSummarizeProvider) Invoke(ctx context.Context, s state.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
 	ch <- artifact.Text{Content: "summary"}
+	ch <- artifact.StopReason{Reason: artifact.StopReasonStop}
 	return nil
 }
-
 
 func TestRoleToolSchemas(t *testing.T) {
 	tests := []struct {
@@ -848,11 +795,11 @@ func TestRoleToolSchemas(t *testing.T) {
 func TestBuildManager_Smoke(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test-dummy",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test-dummy",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -868,11 +815,11 @@ providers: map[string]ProviderConfig{
 func TestBuildManager_WithCompaction(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test-dummy",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test-dummy",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -897,11 +844,11 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir:   t.TempDir(),
 		workingDir: dir,
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test-dummy",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test-dummy",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -918,11 +865,11 @@ func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		role:     "reviewer",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test-dummy",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test-dummy",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -956,11 +903,11 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	mgr1, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "reviewer",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test-dummy",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test-dummy",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -988,11 +935,11 @@ providers: map[string]ProviderConfig{
 	mgr2, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "planner",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test-dummy",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test-dummy",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1264,11 +1211,11 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 	cfg := &config{
 		workingDir: "/test/project",
 		conduit:    "TUI",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1324,11 +1271,11 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 
 	cfg := &config{
 		workingDir: "",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1381,11 +1328,11 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 	cfg := &config{
 		workingDir: dir,
 		conduit:    "TUI",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1458,11 +1405,11 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 	cfg := &config{
 		workingDir: child,
 		conduit:    "TUI",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1530,11 +1477,11 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 	cfg := &config{
 		workingDir: dir,
 		conduit:    "TUI",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1624,11 +1571,11 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 	cfg := &config{
 		workingDir: child,
 		conduit:    "TUI",
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1675,11 +1622,11 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 
 	cfg := &config{
 		workingDir: dir,
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -1715,7 +1662,6 @@ providers: map[string]ProviderConfig{
 		t.Errorf("prompt should not end with blank separator when no agents files exist: %q", text.Content)
 	}
 }
-
 
 // mockSkillDiscoverer is a test double for skills.Discoverer.
 type mockSkillDiscoverer struct {
@@ -2400,55 +2346,6 @@ func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	}
 }
 
-// invokedRecorder is a test double that records whether Invoke was called.
-type invokedRecorder struct {
-	invoked bool
-}
-
-func (m *invokedRecorder) Invoke(ctx context.Context, s state.State, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
-	m.invoked = true
-	return nil
-}
-
-func TestNewCompactor_Disabled(t *testing.T) {
-	compactor := newCompactor(CompactionConfig{MaxTokens: 0}, nil)
-	if compactor != nil {
-		t.Fatal("expected nil compactor when disabled")
-	}
-}
-
-func TestNewCompactor_UsesSummarizeStrategy(t *testing.T) {
-	mock := &invokedRecorder{}
-	compactor := newCompactor(CompactionConfig{
-		MaxTokens: 100,
-	}, mock)
-
-	if compactor == nil {
-		t.Fatal("expected non-nil compactor")
-	}
-
-	// Trigger compaction: last turn has Usage exceeding MaxTokens,
-	// and the heuristic token estimate exceeds MaxTokens so SummarizeStrategy invokes provider.
-	turns := []state.Turn{
-		{Role: state.RoleUser, Artifacts: []artifact.Artifact{artifact.Text{Content: strings.Repeat("a", 500)}}},
-		{Role: state.RoleAssistant, Artifacts: []artifact.Artifact{
-			artifact.Text{Content: "hi"},
-			artifact.Usage{TotalTokens: 101},
-		}},
-	}
-
-	_, didCompact, err := compactor.MaybeCompact(context.Background(), turns)
-	if err != nil {
-		t.Fatalf("MaybeCompact error: %v", err)
-	}
-	if !didCompact {
-		t.Fatal("expected compaction to fire")
-	}
-	if !mock.invoked {
-		t.Fatal("expected provider to be invoked (SummarizeStrategy calls provider; KeepLastN does not)")
-	}
-}
-
 func TestCompactionNotifier(t *testing.T) {
 	t.Run("NotifyWithoutReloader", func(t *testing.T) {
 		n := &compactionNotifier{}
@@ -2532,10 +2429,10 @@ func TestCompactionNotifier(t *testing.T) {
 
 func TestCompactSlashHandler_Notifies(t *testing.T) {
 	store := session.NewMemoryStore()
-	prov := &testSlashProvider{}
+	prov := &testSummarizeProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
 	})
 
@@ -2557,17 +2454,20 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 		t.Fatalf("expected 5 turns, got %d", len(turns))
 	}
 
-	compactor := compaction.New(
-		compaction.WithStrategy(keepLastN{N: 2}),
-	)
-
+	// In ore v0.12 compaction is explicit-only; /compact calls
+	// compaction.Summarize and appends the result. The notifier
+	// receives the post-append turn slice (5 original + 1 compaction).
 	var notified []state.Turn
 	notifier := &compactionNotifier{}
 	notifier.SetReloader(func(turns []state.Turn) {
 		notified = turns
 	})
 
-	cc := &compactCommand{compactor: compactor, notifier: notifier}
+	cc := &compactCommand{
+		prov:     prov,
+		spec:     models.Spec{Name: "test-model"},
+		notifier: notifier,
+	}
 	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
@@ -2575,14 +2475,11 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	if len(notified) != 2 {
-		t.Fatalf("expected notifier to receive 2 turns, got %d", len(notified))
+	if len(notified) != 6 {
+		t.Fatalf("expected notifier to receive 6 turns (5 original + 1 compaction), got %d", len(notified))
 	}
-	if notified[0].Artifacts[0].(artifact.Text).Content != "message 3" {
-		t.Errorf("first turn = %q, want message 3", notified[0].Artifacts[0].(artifact.Text).Content)
-	}
-	if notified[1].Artifacts[0].(artifact.Text).Content != "message 4" {
-		t.Errorf("second turn = %q, want message 4", notified[1].Artifacts[0].(artifact.Text).Content)
+	if notified[5].Role != state.RoleSystem {
+		t.Errorf("last notified turn role = %v, want RoleSystem", notified[5].Role)
 	}
 }
 
@@ -2595,11 +2492,11 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 
 	mgr, err := buildManager(&config{
 		storeDir: t.TempDir(),
-providers: map[string]ProviderConfig{
+		providers: map[string]ProviderConfig{
 			"test": {
-			Kind:   "openai",
-			APIKey: "sk-test-dummy",
-			Model:  "test-model",
+				Kind:   "openai",
+				APIKey: "sk-test-dummy",
+				Model:  "test-model",
 			},
 		},
 		defaultProviderName: "test",
@@ -2632,7 +2529,7 @@ func newThinkingCommandStream(t *testing.T) *session.Stream {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
 	})
 	stream, err := mgr.Create()
@@ -2709,11 +2606,15 @@ func TestThinkingCommand_NoStreamError(t *testing.T) {
 	assert.Contains(t, err.Error(), "no active stream")
 }
 
-// TestBuildInvokeOptions_ReadsThinkingLevelFromMetadata is the
-// end-to-end test that proves the slash command is wired into the
-// request path: a level written by /thinking must be read by
-// buildInvokeOptions on the very next call.
-func TestBuildInvokeOptions_ReadsThinkingLevelFromMetadata(t *testing.T) {
+// TestThinkingCommand_LevelRoundTripsThroughDefaultSpec verifies the
+// end-to-end path for a metadata-driven thinking level: /thinking
+// writes "high" to stream metadata, the next turn's default spec
+// is built from cfg (which was written from the metadata in
+// production) and surfaces the parsed level on models.Spec.ThinkingLevel.
+// In the ore v0.12 migration this replaces the previous
+// buildInvokeOptions-then-thinkLevelOption path: thinking level
+// lives on the spec, not on InvokeOptions.
+func TestThinkingCommand_LevelRoundTripsThroughDefaultSpec(t *testing.T) {
 	stream := newThinkingCommandStream(t)
 
 	// Simulate the user setting the level via /thinking.
@@ -2723,29 +2624,30 @@ func TestBuildInvokeOptions_ReadsThinkingLevelFromMetadata(t *testing.T) {
 		providers: map[string]ProviderConfig{
 			"test": {
 				Kind:      "anthropic",
+				Model:     "claude-sonnet-4-5",
 				MaxTokens: 16000,
 			},
 		},
 		defaultProviderName: "test",
 	}
-	// Wire the stream's metadata into the cfg by reading it directly
-	// here. In production, buildInvokeOptions is called per turn and
-	// the metadata accessor would be the bridge. We assert the same
-	// outcome by routing through resolveThinkingLevel.
+	// In production, buildManager reads the metadata into cfg once at
+	// step-open time, then buildDefaultSpec reads from cfg. Mirror that
+	// here so the assertion targets the same code path.
 	if v, ok := stream.GetMetadata("workshop.thinking_level"); ok {
 		pc := cfg.providers[cfg.defaultProviderName]
 		pc.ThinkingLevel = v
 		cfg.providers[cfg.defaultProviderName] = pc
 	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
-	assert.Contains(t, got, "anthropic.thinkingLevelOption", "metadata-driven level must produce a thinkingLevelOption")
+
+	spec := buildDefaultSpec(cfg.defaultProviderConfig())
+	assert.Equal(t, models.ThinkingLevelHigh, spec.ThinkingLevel)
 }
 
 // TestBuildManager_CompactionProvider_DefaultsToInference verifies the
 // "fall back to default" behavior: when CompactionConfig.Provider is
-// empty, the compactor is built with the same provider as inference.
-// A direct, low-level check: a config with two providers, default
-// "sonnet" and an unset compaction.Provider, builds without error.
+// empty, /compact uses the same provider as inference. A direct,
+// low-level check: a config with two providers, default "sonnet" and
+// an unset compaction.Provider, builds without error.
 func TestBuildManager_CompactionProvider_DefaultsToInference(t *testing.T) {
 	cfg := &config{
 		storeDir: t.TempDir(),
@@ -2823,8 +2725,9 @@ func TestBuildManager_CompactionProvider_UndefinedErrors(t *testing.T) {
 }
 
 // TestBuildManager_CompactionDisabled verifies the existing contract:
-// when compaction.max-tokens is 0, the compactor is nil, regardless
-// of whether compaction.provider is set. The two are independent axes.
+// when compaction.max-tokens is 0, /compact is disabled (returns
+// "compaction is not enabled"), regardless of whether
+// compaction.provider is set. The two are independent axes.
 func TestBuildManager_CompactionDisabled(t *testing.T) {
 	cfg := &config{
 		storeDir: t.TempDir(),
@@ -2856,7 +2759,7 @@ func newAnalyticsCommandStream(t *testing.T) *session.Stream {
 	prov := &testSlashProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, executor loop.TurnExecutor, st state.State, prov provider.Provider) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
 	})
 	stream, err := mgr.Create()
