@@ -691,6 +691,24 @@ func (p *testSummarizeProvider) Invoke(ctx context.Context, s state.State, spec 
 	return nil
 }
 
+// TestStatusZoneMapping_ThinkingInLifecycle asserts that the
+// "thinking" status key emitted by x/usage/handler.go is routed
+// into the "lifecycle" zone, so the framework's compactTokenSegments
+// folds it into the same ↑ / ↓ / Σ / Ψ cluster as the other token
+// counters. Without this entry, "thinking" falls into the "default"
+// zone and renders as an orphan "tokens: Ψ N" segment on its own
+// status line, separated from sent / received / total.
+func TestStatusZoneMapping_ThinkingInLifecycle(t *testing.T) {
+	if got, want := statusZoneMapping["thinking"], "lifecycle"; got != want {
+		t.Errorf("statusZoneMapping[thinking] = %q, want %q (thinking token must share zone with other token counters)", got, want)
+	}
+	for _, k := range []string{"sent", "received", "total"} {
+		if got, want := statusZoneMapping[k], "lifecycle"; got != want {
+			t.Errorf("statusZoneMapping[%s] = %q, want %q (token key out of zone)", k, got, want)
+		}
+	}
+}
+
 func TestRoleToolSchemas(t *testing.T) {
 	tests := []struct {
 		name   string
