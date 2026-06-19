@@ -371,7 +371,9 @@ func TestRoleSlashHandler(t *testing.T) {
 	rc := &roleCommand{rdir: dir}
 	rc.SetStream(stream)
 
-	// Valid role
+	// Valid role (first set on a fresh thread): a RoleSystem turn with
+	// the "initialised" branch is appended so the LLM sees the role
+	// change and the system prompt update on its next inference.
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -383,13 +385,40 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Errorf("metadata = %q, want reviewer", v)
 	}
 
+	turns := stream.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("len(turns) = %d, want 1 (the initialised handoff)", len(turns))
+	}
+	if turns[0].Role != state.RoleSystem {
+		t.Errorf("handoff turn role = %q, want %q", turns[0].Role, state.RoleSystem)
+	}
+	if !strings.Contains(turns[0].Artifacts[0].(artifact.Text).Content, "[Role initialised: reviewer.") {
+		t.Errorf("handoff text = %q, want substring %q", turns[0].Artifacts[0].(artifact.Text).Content, "[Role initialised: reviewer.")
+	}
+
+	// Switching to the same role is a no-op: no additional turn is
+	// appended. This guards against accidentally re-firing the
+	// handoff on /role X when X is already active.
+	res, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
+	if err != nil {
+		t.Fatalf("handler error on no-op: %v", err)
+	}
+	if got := len(stream.Turns()); got != 1 {
+		t.Errorf("len(turns) after no-op = %d, want 1 (unchanged)", got)
+	}
+	assert.Equal(t, "Role: reviewer", res.Feedback.Content, "no-op should still confirm the active role")
+
 	// Invalid role returns an error (preserves the long-standing contract
-	// that switching to a missing role is a hard failure).
+	// that switching to a missing role is a hard failure) and does not
+	// mutate the state.
 	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent role")
 	}
 	assert.Contains(t, err.Error(), "nonexistent", "error should mention the unknown role name")
+	if got := len(stream.Turns()); got != 1 {
+		t.Errorf("invalid role should not append a turn: len(turns) = %d, want 1", got)
+	}
 }
 
 // newRoleCommandStream creates a session stream suitable for the
@@ -490,6 +519,83 @@ func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
 
 	got, _ := stream.GetMetadata("workshop.role")
 	assert.Equal(t, "reviewer", got, "no-arg form must not change the active role")
+}
+
+// newRoleCommandStreamWithRoles creates a session stream plus two role
+// files on disk (ideation and planner) for the role-switching tests
+// below. The stream has no role set; callers set it explicitly when
+// they need a non-empty starting role.
+func newRoleCommandStreamWithRoles(t *testing.T) (*session.Stream, string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range []string{"ideation", "planner"} {
+		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte("Prompt "+name+".\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return newRoleCommandStream(t), dir
+}
+
+func TestRoleCommand_HandoffAppendsRoleSystemTurn(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithRoles(t)
+	stream.SetMetadata("workshop.role", "ideation")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
+	require.NoError(t, err)
+	assert.Equal(t, "Role: planner", res.Feedback.Content)
+
+	turns := stream.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("len(turns) = %d, want 1 (the handoff turn)", len(turns))
+	}
+	if turns[0].Role != state.RoleSystem {
+		t.Errorf("handoff turn role = %q, want %q", turns[0].Role, state.RoleSystem)
+	}
+	if got := turns[0].Artifacts[0].(artifact.Text).Content; !strings.Contains(got, "[Role handoff] ideation → planner.") {
+		t.Errorf("handoff text = %q, want substring %q", got, "[Role handoff] ideation → planner.")
+	}
+}
+
+func TestRoleCommand_NoChangeIsNoOp(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithRoles(t)
+	stream.SetMetadata("workshop.role", "planner")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
+	require.NoError(t, err)
+	assert.Equal(t, "Role: planner", res.Feedback.Content)
+
+	turns := stream.Turns()
+	if len(turns) != 0 {
+		t.Errorf("len(turns) = %d, want 0 (no handoff when role is unchanged)", len(turns))
+	}
+}
+
+func TestRoleCommand_FirstSetUsesInitialisedBranch(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithRoles(t)
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
+	require.NoError(t, err)
+	assert.Equal(t, "Role: planner", res.Feedback.Content)
+
+	turns := stream.Turns()
+	if len(turns) != 1 {
+		t.Fatalf("len(turns) = %d, want 1 (the initialised handoff)", len(turns))
+	}
+	if turns[0].Role != state.RoleSystem {
+		t.Errorf("handoff turn role = %q, want %q", turns[0].Role, state.RoleSystem)
+	}
+	if got := turns[0].Artifacts[0].(artifact.Text).Content; !strings.Contains(got, "[Role initialised: planner.") {
+		t.Errorf("handoff text = %q, want substring %q", got, "[Role initialised: planner.")
+	}
 }
 
 func TestCompactSlashHandler_Disabled(t *testing.T) {

@@ -1,4 +1,4 @@
-package app
+package role
 
 import (
 	"fmt"
@@ -21,7 +21,7 @@ You are a code reviewer. Focus on bugs.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "reviewer", nil)
+	role, err := LoadRole(dir, "reviewer", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestLoadRole_WithoutFrontmatter(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "default", nil)
+	role, err := LoadRole(dir, "default", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestLoadRole_WithoutFrontmatter(t *testing.T) {
 
 func TestLoadRole_MissingFile(t *testing.T) {
 	dir := t.TempDir()
-	_, err := loadRole(dir, "nonexistent", nil)
+	_, err := LoadRole(dir, "nonexistent", nil)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -82,7 +82,7 @@ Just a prompt.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "empty", nil)
+	role, err := LoadRole(dir, "empty", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -106,7 +106,7 @@ You are a strategic planner.
 		t.Fatal(err)
 	}
 
-	role, err := loadRole(dir, "planner", nil)
+	role, err := LoadRole(dir, "planner", nil)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestListRoleDefinitions_MultipleFiles(t *testing.T) {
 		}
 	}
 
-	roles, err := listRoleDefinitions(dir, nil)
+	roles, err := ListRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestListRoleDefinitions_MultipleFiles(t *testing.T) {
 
 func TestListRoleDefinitions_MissingDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "does-not-exist")
-	roles, err := listRoleDefinitions(dir, nil)
+	roles, err := ListRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestListRoleDefinitions_SkipsMalformed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	roles, err := listRoleDefinitions(dir, nil)
+	roles, err := ListRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestListRoleDefinitions_SkipsMalformedYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	roles, err := listRoleDefinitions(dir, nil)
+	roles, err := ListRoleDefinitions(dir, nil)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestLoadRole_FileSandbox(t *testing.T) {
 		},
 	}
 
-	role, err := loadRole(dir, "original", sb)
+	role, err := LoadRole(dir, "original", sb)
 	if err != nil {
 		t.Fatalf("loadRole error: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestLoadRole_FileSandboxError(t *testing.T) {
 		},
 	}
 
-	_, err := loadRole(t.TempDir(), "test", sb)
+	_, err := LoadRole(t.TempDir(), "test", sb)
 	if err == nil {
 		t.Fatal("expected error for sandbox resolve failure")
 	}
@@ -277,7 +277,7 @@ func TestListRoleDefinitions_FileSandbox(t *testing.T) {
 		},
 	}
 
-	roles, err := listRoleDefinitions(originalDir, sb)
+	roles, err := ListRoleDefinitions(originalDir, sb)
 	if err != nil {
 		t.Fatalf("listRoleDefinitions error: %v", err)
 	}
@@ -296,8 +296,37 @@ func TestListRoleDefinitions_FileSandboxError(t *testing.T) {
 		},
 	}
 
-	_, err := listRoleDefinitions(t.TempDir(), sb)
+	_, err := ListRoleDefinitions(t.TempDir(), sb)
 	if err == nil {
 		t.Fatal("expected error for sandbox resolve failure")
+	}
+}
+
+func TestRenderHandoff(t *testing.T) {
+	tests := []struct {
+		name      string
+		prev      string
+		current   string
+		wantSub   string // substring the result MUST contain; "" if wantEmpty
+		wantEmpty bool
+	}{
+		{"initialised from empty", "", "planner", "[Role initialised: planner.", false},
+		{"handoff between two roles", "ideation", "planner", "[Role handoff] ideation → planner.", false},
+		{"no-op when same role", "planner", "planner", "", true},
+		{"defensive on empty current", "planner", "", "[Role error: cleared.", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderHandoff(tt.prev, tt.current)
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("got %q, want empty", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantSub) {
+				t.Errorf("got %q, want substring %q", got, tt.wantSub)
+			}
+		})
 	}
 }

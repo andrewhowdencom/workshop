@@ -58,6 +58,8 @@ import (
 	"github.com/andrewhowdencom/ore/x/usage"
 
 	"github.com/adrg/xdg"
+
+	"github.com/andrewhowdencom/workshop/internal/role"
 )
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
@@ -377,6 +379,17 @@ func (c *roleCommand) currentRole() string {
 	return v
 }
 
+// currentRoleLocked is the unlocked variant of currentRole. It is
+// intended for callers that already hold c.mu (e.g. Handler after
+// SetMetadata); calling currentRole from such a context would deadlock.
+func (c *roleCommand) currentRoleLocked() string {
+	if c.stream == nil {
+		return ""
+	}
+	v, _ := c.stream.GetMetadata("workshop.role")
+	return v
+}
+
 // Handler dispatches the /role slash command. With no argument (or
 // "help") it lists the available roles. With a name it validates the
 // role exists and writes it to stream metadata. An unknown role
@@ -395,7 +408,7 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	}
 
 	name := args[0]
-	if _, err := loadRole(c.rdir, name, nil); err != nil {
+	if _, err := role.LoadRole(c.rdir, name, nil); err != nil {
 		return slash.Result{}, fmt.Errorf("role %q not found: %w", name, err)
 	}
 
@@ -404,7 +417,27 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	if c.stream == nil {
 		return slash.Result{}, fmt.Errorf("no active stream")
 	}
+	// Read the previous role BEFORE writing the new metadata. The
+	// handoff message is keyed on the transition (prev -> current),
+	// so reading after SetMetadata would collapse the handoff to a
+	// no-op and the LLM would silently miss the role change.
+	prev := c.currentRoleLocked()
 	c.stream.SetMetadata("workshop.role", name)
+
+	// Persist a RoleSystem turn that explicitly tells the LLM the
+	// role changed and the system prompt above is now in effect for
+	// the new role. The handoff is skipped (no append, no save) when
+	// prev == current, i.e. /role X invoked while X is already
+	// active. role.RenderHandoff returns "" for the no-op case.
+	if msg := role.RenderHandoff(prev, name); msg != "" {
+		if err := c.stream.AppendTurn(ctx, state.RoleSystem, artifact.Text{Content: msg}); err != nil {
+			return slash.Result{}, fmt.Errorf("append handoff turn: %w", err)
+		}
+		if err := c.stream.Save(); err != nil {
+			return slash.Result{}, fmt.Errorf("save thread: %w", err)
+		}
+	}
+
 	return slash.Result{
 		Feedback: artifact.Text{Content: fmt.Sprintf("Role: %s", name)},
 	}, nil
@@ -420,7 +453,7 @@ func (c *roleCommand) formatRoleList() string {
 		current = "(none)"
 	}
 
-	roles, err := listRoleDefinitions(c.rdir, nil)
+	roles, err := role.ListRoleDefinitions(c.rdir, nil)
 	if err != nil {
 		return fmt.Sprintf("Role: %s\nError reading roles from %s: %v\nUsage: /role <name>",
 			current, c.rdir, err)
@@ -733,7 +766,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	defaultSpec := buildDefaultSpec(cfg.defaultProviderConfig())
 
 	// Create role command handler.
-	rc := &roleCommand{rdir: roleDir()}
+	rc := &roleCommand{rdir: role.Dir()}
 
 	// Create compact command handler.
 	cc := &compactCommand{prov: ccProv, spec: ccSpec, notifier: cfg.compactionNotifier}
@@ -890,7 +923,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 //
 // The resulting transform is passed to loop.Step via loop.WithTransforms.
 func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
-	rdir := roleDir()
+	rdir := role.Dir()
 	currentPrompt := makeCurrentPrompt(rdir, mr)
 
 	return systemprompt.New(
@@ -1151,7 +1184,7 @@ const defaultPrompt = "You are a terminal-based coding assistant. " +
 func makeCurrentPrompt(rdir string, mr metadataReader) func() string {
 	return func() string {
 		if roleName, ok := mr.GetMetadata("workshop.role"); ok && roleName != "" {
-			if role, err := loadRole(rdir, roleName, nil); err == nil {
+			if role, err := role.LoadRole(rdir, roleName, nil); err == nil {
 				return role.Prompt
 			}
 		}
