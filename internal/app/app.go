@@ -379,6 +379,17 @@ func (c *roleCommand) currentRole() string {
 	return v
 }
 
+// currentRoleLocked is the unlocked variant of currentRole. It is
+// intended for callers that already hold c.mu (e.g. Handler after
+// SetMetadata); calling currentRole from such a context would deadlock.
+func (c *roleCommand) currentRoleLocked() string {
+	if c.stream == nil {
+		return ""
+	}
+	v, _ := c.stream.GetMetadata("workshop.role")
+	return v
+}
+
 // Handler dispatches the /role slash command. With no argument (or
 // "help") it lists the available roles. With a name it validates the
 // role exists and writes it to stream metadata. An unknown role
@@ -406,7 +417,27 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	if c.stream == nil {
 		return slash.Result{}, fmt.Errorf("no active stream")
 	}
+	// Read the previous role BEFORE writing the new metadata. The
+	// handoff message is keyed on the transition (prev -> current),
+	// so reading after SetMetadata would collapse the handoff to a
+	// no-op and the LLM would silently miss the role change.
+	prev := c.currentRoleLocked()
 	c.stream.SetMetadata("workshop.role", name)
+
+	// Persist a RoleSystem turn that explicitly tells the LLM the
+	// role changed and the system prompt above is now in effect for
+	// the new role. The handoff is skipped (no append, no save) when
+	// prev == current, i.e. /role X invoked while X is already
+	// active. role.RenderHandoff returns "" for the no-op case.
+	if msg := role.RenderHandoff(prev, name); msg != "" {
+		if err := c.stream.AppendTurn(ctx, state.RoleSystem, artifact.Text{Content: msg}); err != nil {
+			return slash.Result{}, fmt.Errorf("append handoff turn: %w", err)
+		}
+		if err := c.stream.Save(); err != nil {
+			return slash.Result{}, fmt.Errorf("save thread: %w", err)
+		}
+	}
+
 	return slash.Result{
 		Feedback: artifact.Text{Content: fmt.Sprintf("Role: %s", name)},
 	}, nil
