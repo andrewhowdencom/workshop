@@ -58,6 +58,8 @@ import (
 	"github.com/andrewhowdencom/ore/x/usage"
 
 	"github.com/adrg/xdg"
+
+	"github.com/andrewhowdencom/workshop/internal/role"
 )
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
@@ -395,7 +397,7 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	}
 
 	name := args[0]
-	if _, err := loadRole(c.rdir, name, nil); err != nil {
+	if _, err := role.LoadRole(c.rdir, name, nil); err != nil {
 		return slash.Result{}, fmt.Errorf("role %q not found: %w", name, err)
 	}
 
@@ -420,7 +422,7 @@ func (c *roleCommand) formatRoleList() string {
 		current = "(none)"
 	}
 
-	roles, err := listRoleDefinitions(c.rdir, nil)
+	roles, err := role.ListRoleDefinitions(c.rdir, nil)
 	if err != nil {
 		return fmt.Sprintf("Role: %s\nError reading roles from %s: %v\nUsage: /role <name>",
 			current, c.rdir, err)
@@ -733,7 +735,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	defaultSpec := buildDefaultSpec(cfg.defaultProviderConfig())
 
 	// Create role command handler.
-	rc := &roleCommand{rdir: roleDir()}
+	rc := &roleCommand{rdir: role.Dir()}
 
 	// Create compact command handler.
 	cc := &compactCommand{prov: ccProv, spec: ccSpec, notifier: cfg.compactionNotifier}
@@ -890,7 +892,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 //
 // The resulting transform is passed to loop.Step via loop.WithTransforms.
 func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
-	rdir := roleDir()
+	rdir := role.Dir()
 	currentPrompt := makeCurrentPrompt(rdir, mr)
 
 	return systemprompt.New(
@@ -1151,7 +1153,7 @@ const defaultPrompt = "You are a terminal-based coding assistant. " +
 func makeCurrentPrompt(rdir string, mr metadataReader) func() string {
 	return func() string {
 		if roleName, ok := mr.GetMetadata("workshop.role"); ok && roleName != "" {
-			if role, err := loadRole(rdir, roleName, nil); err == nil {
+			if role, err := role.LoadRole(rdir, roleName, nil); err == nil {
 				return role.Prompt
 			}
 		}

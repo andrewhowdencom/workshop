@@ -1,4 +1,11 @@
-package app
+// Package role owns the role concept for the workshop: discovery of role
+// files on disk, parsing their YAML frontmatter and prompt body, and (in
+// a later task) the rendering of role-handoff messages. The package is
+// intentionally leaf-ish: it depends only on the ore framework's tool
+// sandbox interface and the XDG directory helper, so it can be imported
+// by either the app layer (slash handlers) or any other consumer without
+// cycle risk.
+package role
 
 import (
 	"fmt"
@@ -18,17 +25,17 @@ type RoleDefinition struct {
 	Prompt      string
 }
 
-// roleDir returns the XDG data directory for workshop roles.
-func roleDir() string {
+// Dir returns the XDG data directory for workshop roles.
+func Dir() string {
 	return filepath.Join(xdg.DataHome, "workshop", "roles")
 }
 
-// loadRole reads a role definition from <dir>/<name>.md.
-// If the file starts with "---" on its own line, YAML frontmatter between the
-// first and second "---" delimiters is parsed; everything after the second
-// "---" is the prompt body.
+// LoadRole reads a role definition from <dir>/<name>.md.
+// If the file starts with "---" on its own line, YAML frontmatter between
+// the first and second "---" delimiters is parsed; everything after the
+// second "---" is the prompt body.
 // The sandbox is used for path resolution when a FileSandbox is available.
-func loadRole(dir, name string, sb tool.Sandbox) (*RoleDefinition, error) {
+func LoadRole(dir, name string, sb tool.Sandbox) (*RoleDefinition, error) {
 	path := filepath.Join(dir, name+".md")
 	if fsb, ok := sb.(tool.FileSandbox); ok {
 		var err error
@@ -72,17 +79,17 @@ func loadRole(dir, name string, sb tool.Sandbox) (*RoleDefinition, error) {
 	return role, nil
 }
 
-// listRoleDefinitions scans dir for *.md files and loads each role definition.
+// ListRoleDefinitions scans dir for *.md files and loads each role definition.
 // Returns an empty slice if the directory does not exist. Files that fail to
 // load are skipped silently so that one malformed role does not block
 // discovery of the others.
 // The sandbox is used for path resolution when a FileSandbox is available.
-func listRoleDefinitions(dir string, sb tool.Sandbox) ([]RoleDefinition, error) {
+func ListRoleDefinitions(dir string, sb tool.Sandbox) ([]RoleDefinition, error) {
 	if fsb, ok := sb.(tool.FileSandbox); ok {
 		var err error
 		dir, err = fsb.ResolvePath(dir)
 		if err != nil {
-			return nil, fmt.Errorf("resolve path: %w", err)
+			return nil, fmt.Errorf("resolve roles directory: %w", err)
 		}
 	}
 	entries, err := os.ReadDir(dir)
@@ -103,7 +110,7 @@ func listRoleDefinitions(dir string, sb tool.Sandbox) ([]RoleDefinition, error) 
 			continue
 		}
 		roleName := strings.TrimSuffix(fname, ".md")
-		role, err := loadRole(dir, roleName, sb)
+		role, err := LoadRole(dir, roleName, sb)
 		if err != nil {
 			continue // skip malformed files silently
 		}
