@@ -119,3 +119,36 @@ func ListRoleDefinitions(dir string, sb tool.Sandbox) ([]RoleDefinition, error) 
 
 	return roles, nil
 }
+
+// RenderHandoff formats the system-level message that should be appended
+// to the conversation when a slash command switches the active role. The
+// caller passes the previous role (the empty string when no role was
+// active) and the new role.
+//
+// Returns:
+//
+//   - "[Role initialised: <current>. System prompt updated; re-read for guidance.]"
+//     when prev is empty (first role set on a thread).
+//   - "[Role handoff] <prev> → <current>. System prompt updated; re-read for guidance.]"
+//     when prev and current differ.
+//   - the empty string when prev == current (the caller should treat this
+//     as a no-op and not append a turn).
+//   - "[Role error: cleared. System prompt may be invalid.]" when current
+//     is empty (defensive: a misuse should not produce a silent no-op).
+//
+// The text is intentionally human-authored and static. It is not generated
+// by the LLM; the cost of an extra round-trip per /role invocation is not
+// worth a one-line signal whose content is fully determined by prev and
+// current.
+func RenderHandoff(prev, current string) string {
+	switch {
+	case current == "":
+		return "[Role error: cleared. System prompt may be invalid.]"
+	case prev == "":
+		return fmt.Sprintf("[Role initialised: %s. System prompt updated; re-read for guidance.]", current)
+	case prev == current:
+		return ""
+	default:
+		return fmt.Sprintf("[Role handoff] %s → %s. System prompt updated; re-read for guidance.", prev, current)
+	}
+}

@@ -301,3 +301,32 @@ func TestListRoleDefinitions_FileSandboxError(t *testing.T) {
 		t.Fatal("expected error for sandbox resolve failure")
 	}
 }
+
+func TestRenderHandoff(t *testing.T) {
+	tests := []struct {
+		name      string
+		prev      string
+		current   string
+		wantSub   string // substring the result MUST contain; "" if wantEmpty
+		wantEmpty bool
+	}{
+		{"initialised from empty", "", "planner", "[Role initialised: planner.", false},
+		{"handoff between two roles", "ideation", "planner", "[Role handoff] ideation → planner.", false},
+		{"no-op when same role", "planner", "planner", "", true},
+		{"defensive on empty current", "planner", "", "[Role error: cleared.", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RenderHandoff(tt.prev, tt.current)
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("got %q, want empty", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantSub) {
+				t.Errorf("got %q, want substring %q", got, tt.wantSub)
+			}
+		})
+	}
+}
