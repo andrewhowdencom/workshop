@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -132,9 +133,11 @@ func runThreadExport(cmd *cobra.Command, args []string) error {
 }
 
 func runThreadExportWithStore(store session.Store, id, format string, w io.Writer) error {
-	thread, ok := store.Get(id)
-	if !ok {
+	thread, err := store.Get(id)
+	if errors.Is(err, session.ErrThreadNotFound) {
 		return fmt.Errorf("thread not found: %s", id)
+	} else if err != nil {
+		return fmt.Errorf("get thread: %w", err)
 	}
 
 	switch format {
@@ -185,9 +188,11 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 func runThreadAnalyticsWithStore(days int, id string, store session.Store, w io.Writer) error {
 	var stats []analytics.Stats
 	if id != "" {
-		thread, ok := store.Get(id)
-		if !ok {
+		thread, err := store.Get(id)
+		if errors.Is(err, session.ErrThreadNotFound) {
 			return fmt.Errorf("thread not found: %s", id)
+		} else if err != nil {
+			return fmt.Errorf("get thread: %w", err)
 		}
 		stats = analytics.AnalyzeThread(thread)
 	} else {
