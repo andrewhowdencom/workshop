@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.12.0
+	github.com/andrewhowdencom/ore v0.12.1
 	github.com/andrewhowdencom/ore/x/analytics v0.2.2
 	github.com/andrewhowdencom/ore/x/compaction v0.4.4
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.3
@@ -135,3 +135,5 @@ replace github.com/andrewhowdencom/ore/x/llmbytes => ../ore/x/llmbytes
 replace github.com/andrewhowdencom/ore/x/wire/anthropic => ../ore/x/wire/anthropic
 
 replace github.com/andrewhowdencom/ore/x/wire/openai => ../ore/x/wire/openai
+
+replace github.com/andrewhowdencom/ore/x/usage => ../ore/x/usage

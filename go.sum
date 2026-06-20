@@ -38,8 +38,6 @@ github.com/andrewhowdencom/ore/x/tool/skills v0.5.0 h1:u33okkZR78Gmx45mV/G5B0dUa
 github.com/andrewhowdencom/ore/x/tool/skills v0.5.0/go.mod h1:lOS9WBiD3P2XYygwJGkCb8qli17XLUAs7iHsI9rH08A=
 github.com/andrewhowdencom/ore/x/tool/truncate v0.1.0 h1:cumvWGc/PizBaMBq/hK4LTWSSwgPsgh/x4V4dO6d868=
 github.com/andrewhowdencom/ore/x/tool/truncate v0.1.0/go.mod h1:WLP3YCbkBk26ZY4K0GFQ5HNXglM1t05uYIr0IRQGrNQ=
-github.com/andrewhowdencom/ore/x/usage v0.2.0 h1:dg/h2mlulUqWftjBXdHG0FtPQoPxa1vmZIyIrJpWXPs=
-github.com/andrewhowdencom/ore/x/usage v0.2.0/go.mod h1:bkrRiTl/zztZxxjEpKxoyuDm1LZgHFk6gRnE+TZZ5Eo=
 github.com/andrewhowdencom/ore/x/verifier v0.1.1 h1:RkRd3gFkX/Pd1pJuXmNpO23ZHVorgaqXEnKQuHzTN0M=
 github.com/andrewhowdencom/ore/x/verifier v0.1.1/go.mod h1:FCorXnOAQVtyY+4WcHLoGRpYg23eleOWYN8+KAtB5lw=
 github.com/anthropics/anthropic-sdk-go v1.51.0 h1:eIeH9RexrFU7SXOMm8jlTeDv00WYwXkbDMBhhVjXcVE=
