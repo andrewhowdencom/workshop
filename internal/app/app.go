@@ -403,7 +403,10 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	// a user-defined role cannot collide with the help affordance.
 	if len(args) == 0 || args[0] == "help" {
 		return slash.Result{
-			Feedback: artifact.Text{Content: c.formatRoleList()},
+			Notice: loop.Notice{
+				Content:  c.formatRoleList(),
+				Severity: loop.SeverityInfo,
+			},
 		}, nil
 	}
 
@@ -439,7 +442,10 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	}
 
 	return slash.Result{
-		Feedback: artifact.Text{Content: fmt.Sprintf("Role: %s", name)},
+		Notice: loop.Notice{
+			Content:  fmt.Sprintf("Role: %s", name),
+			Severity: loop.SeverityInfo,
+		},
 	}, nil
 }
 
@@ -537,9 +543,10 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 			string(models.ThinkingLevelMax),
 		}
 		return slash.Result{
-			Feedback: artifact.Text{
+			Notice: loop.Notice{
 				Content: fmt.Sprintf("Thinking: %s\nLevels: %s\nUsage: /thinking <level>",
 					current, strings.Join(available, ", ")),
+				Severity: loop.SeverityInfo,
 			},
 		}, nil
 	}
@@ -549,8 +556,9 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 	if err != nil {
 		// Unknown level: report the error but do not mutate.
 		return slash.Result{
-			Feedback: artifact.Text{
-				Content: fmt.Sprintf("Unknown level: %s. Available: off, minimal, low, medium, high, max", wanted),
+			Notice: loop.Notice{
+				Content:  fmt.Sprintf("Unknown level: %s. Available: off, minimal, low, medium, high, max", wanted),
+				Severity: loop.SeverityError,
 			},
 		}, nil
 	}
@@ -562,7 +570,10 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 	}
 	c.stream.SetMetadata("workshop.thinking_level", string(level))
 	return slash.Result{
-		Feedback: artifact.Text{Content: fmt.Sprintf("Thinking: %s", level)},
+		Notice: loop.Notice{
+			Content:  fmt.Sprintf("Thinking: %s", level),
+			Severity: loop.SeverityInfo,
+		},
 	}, nil
 }
 
@@ -613,8 +624,9 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 		// the buffer unchanged and surface the failure to the user.
 		if errors.Is(err, compaction.ErrTruncatedSummary) {
 			return slash.Result{
-				Feedback: artifact.Text{
-					Content: "Compaction truncated: model hit its output cap mid-summary; history unchanged.",
+				Notice: loop.Notice{
+					Content:  "Compaction truncated: model hit its output cap mid-summary; history unchanged.",
+					Severity: loop.SeverityWarn,
 				},
 			}, nil
 		}
@@ -661,12 +673,18 @@ func (c *analyticsCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slas
 	defer c.mu.Unlock()
 	if c.stream == nil {
 		return slash.Result{
-			Feedback: artifact.Text{Content: "No artifacts in this thread yet."},
+			Notice: loop.Notice{
+				Content:  "No artifacts in this thread yet.",
+				Severity: loop.SeverityInfo,
+			},
 		}, nil
 	}
 	stats := analytics.AnalyzeTurns(c.stream.Turns())
 	return slash.Result{
-		Feedback: artifact.Text{Content: analytics.Render(stats)},
+		Notice: loop.Notice{
+			Content:  analytics.Render(stats),
+			Severity: loop.SeverityInfo,
+		},
 	}, nil
 }
 

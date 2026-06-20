@@ -137,3 +137,9 @@ replace github.com/andrewhowdencom/ore/x/wire/anthropic => ../ore/x/wire/anthrop
 replace github.com/andrewhowdencom/ore/x/wire/openai => ../ore/x/wire/openai
 
 replace github.com/andrewhowdencom/ore/x/usage => ../ore/x/usage
+
+replace github.com/andrewhowdencom/ore/x/conduit => ../ore/x/conduit
+
+replace github.com/andrewhowdencom/ore/x/conduit/http => ../ore/x/conduit/http
+
+replace github.com/andrewhowdencom/ore/x/conduit/stdio => ../ore/x/conduit/stdio
