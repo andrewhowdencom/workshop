@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"text/tabwriter"
 	"time"
 
@@ -42,15 +41,30 @@ var threadAnalyticsCmd = &cobra.Command{
 }
 
 func init() {
-	threadListCmd.Flags().Int("days", 30, "Lookback period in days")
-	cobra.CheckErr(viper.BindPFlags(threadListCmd.Flags()))
+	// thread list: paginated, sorted by recency. The default sort
+	// order is implicit; no lookback filter.
+	threadListCmd.Flags().Int("limit", session.DefaultPageSize,
+		fmt.Sprintf("Page size (default %d, max %d, clamped)", session.DefaultPageSize, session.MaxPageSize))
+	threadListCmd.Flags().String("cursor", "",
+		"Opaque pagination cursor returned by a previous invocation")
+	threadListCmd.Flags().Bool("all", false,
+		"Walk all pages in a single call; suppress the --next hint")
 
 	threadExportCmd.Flags().String("format", "text", "Export format (text, json, html)")
-	threadExportCmd.Flags().String("output", "", "Output file path (default: stdout)")
+	threadExportCmd.Flags().String("output", "", "Export file path (default: stdout)")
 	cobra.CheckErr(viper.BindPFlags(threadExportCmd.Flags()))
 
+	// thread analytics: aggregated lookback. The flag stays on this
+	// subcommand only; the previous shared `--days` binding on
+	// thread list was removed (recency is implicit in the sort order).
 	threadAnalyticsCmd.Flags().Int("days", 30, "Lookback period in days for the store-wide form")
-	cobra.CheckErr(viper.BindPFlags(threadAnalyticsCmd.Flags()))
+	// NOTE: We deliberately do not call viper.BindPFlags on
+	// threadAnalyticsCmd.Flags(). The previous code bound both
+	// `thread list --days` and `thread analytics --days` to the same
+	// viper key, and the second binding won, which silently dropped
+	// the user's `--days 1` on the list command. The analytics path
+	// reads the flag via cmd.Flags().GetInt below instead. The same
+	// pattern applies to the list command's flags (limit, cursor, all).
 
 	threadCmd.AddCommand(threadListCmd)
 	threadCmd.AddCommand(threadExportCmd)
@@ -64,42 +78,84 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 		storeDir = defaultStoreDir()
 	}
 
-	days := viper.GetInt("days")
+	limit, err := cmd.Flags().GetInt("limit")
+	if err != nil {
+		return fmt.Errorf("read --limit: %w", err)
+	}
+	cursor, err := cmd.Flags().GetString("cursor")
+	if err != nil {
+		return fmt.Errorf("read --cursor: %w", err)
+	}
+	all, err := cmd.Flags().GetBool("all")
+	if err != nil {
+		return fmt.Errorf("read --all: %w", err)
+	}
 
 	store, err := session.NewJSONStore(storeDir)
 	if err != nil {
 		return fmt.Errorf("create JSON store: %w", err)
 	}
 
-	return runThreadListWithStore(days, store, os.Stdout)
+	return runThreadListWithStore(limit, cursor, all, store, os.Stdout)
 }
 
-func runThreadListWithStore(days int, store session.Store, w io.Writer) error {
+// runThreadListWithStore renders a single page of threads (or all
+// pages when all is true) sorted by updated_at desc, id asc. When
+// the rendered output is the first page of a multi-page result and
+// all is false, a `-- next: --cursor <opaque>` hint line is emitted
+// after the table so the user can continue.
+//
+// The function is the seam used by tests; runThreadList is the cobra
+// entry point. limit is the page size (clamped by session.Paginate);
+// cursor is the opaque pagination cursor from a previous call (empty
+// for the first page); all walks the cursor to exhaustion and
+// suppresses the hint. The store is read once into a slice; the
+// helper sorts in place and returns sub-slices, so memory cost is
+// O(N) full-thread reads on the first call and O(limit) per
+// subsequent page in --all mode (because Paginate is re-called on
+// the same underlying slice, which the caller is responsible for
+// keeping populated).
+func runThreadListWithStore(limit int, cursor string, all bool, store session.Store, w io.Writer) error {
 	threads, err := store.List()
 	if err != nil {
 		return fmt.Errorf("list threads: %w", err)
 	}
 
-	cutoff := time.Now().AddDate(0, 0, -days)
-
-	var filtered []*session.Thread
-	for _, thr := range threads {
-		if thr.UpdatedAt.After(cutoff) {
-			filtered = append(filtered, thr)
-		}
-	}
-
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].UpdatedAt.After(filtered[j].UpdatedAt)
-	})
-
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(tw, "ID\tCREATED\tUPDATED\tROLE\n")
-	for _, thr := range filtered {
-		role := thr.Metadata["workshop.role"]
-		created := thr.CreatedAt.Format("2006-01-02 15:04")
-		updated := thr.UpdatedAt.Format("2006-01-02 15:04")
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", thr.ID, created, updated, role)
+
+	current := cursor
+	for {
+		page, next, err := session.Paginate(threads, limit, current)
+		if err != nil {
+			if errors.Is(err, session.ErrInvalidCursor) {
+				return fmt.Errorf("invalid --cursor: %w", err)
+			}
+			return fmt.Errorf("paginate threads: %w", err)
+		}
+
+		for _, thr := range page {
+			role := thr.Metadata["workshop.role"]
+			created := thr.CreatedAt.Format("2006-01-02 15:04")
+			updated := thr.UpdatedAt.Format("2006-01-02 15:04")
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", thr.ID, created, updated, role)
+		}
+
+		if all {
+			if next == "" {
+				break
+			}
+			current = next
+			continue
+		}
+
+		// First-page case: render the hint line when more pages
+		// remain so the user knows to invoke again with the cursor.
+		// (The loop runs exactly once in this branch.)
+		if next != "" {
+			fmt.Fprintf(tw, "\n-- next: --cursor %s\n", next)
+		}
+		break
 	}
 
 	return tw.Flush()
@@ -168,7 +224,17 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 		id = args[0]
 	}
 
-	return runThreadAnalyticsWithStore(viper.GetInt("days"), id, store, os.Stdout)
+	// Read --days directly from the command's flag set rather than
+	// from viper. The previous implementation called viper.GetInt
+	// and collided with the now-removed binding on thread list;
+	// reading from cmd.Flags() makes the value the user actually
+	// typed visible to this command.
+	days, err := cmd.Flags().GetInt("days")
+	if err != nil {
+		return fmt.Errorf("read --days: %w", err)
+	}
+
+	return runThreadAnalyticsWithStore(days, id, store, os.Stdout)
 }
 
 // runThreadAnalyticsWithStore aggregates per-(kind, source)
@@ -180,8 +246,7 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 // callers attribute context cost to specific tools, not just kinds.
 //
 // If id is non-empty, only that thread is aggregated. If id is empty,
-// threads older than `days` are excluded first (matched on UpdatedAt),
-// mirroring the --days filter on `workshop thread list`.
+// threads older than `days` are excluded first (matched on UpdatedAt).
 //
 // This function is read-only by construction: it never calls store.Save
 // or store.Create, and only reads from the store via List / Get.
