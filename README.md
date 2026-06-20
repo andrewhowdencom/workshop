@@ -18,6 +18,7 @@ This project demonstrates how to build a fully fledged agentic application outsi
 | `workshop http` | Run the web UI HTTP server |
 | `workshop config init` | Initialize a configuration file from current settings |
 | `workshop version` | Print the build version |
+| `workshop thread list` | List persistent threads (paginated, sorted by recency) |
 | `workshop thread export <id>` | Export a thread to stdout or a file (--format text, json, html; --output file) |
 
 Role files (e.g. `ideation.md`, `build.md`) are loaded from
@@ -139,6 +140,32 @@ Supported formats are `text` (default), `json`, and `html`.
 > The HTML format includes minimal styling; you may wish to redirect it to a file and open it in a browser.
 
 See also: [Persistent JSON store](#persistent-json-store) for the default storage location of thread data.
+
+### `workshop thread list`
+
+```bash
+go run ./cmd/workshop thread list                 # first page (default limit 20)
+go run ./cmd/workshop thread list --limit 2      # first 2 threads
+go run ./cmd/workshop thread list --cursor <opaque>   # next page
+go run ./cmd/workshop thread list --all          # walk all pages in one call
+```
+
+Threads are sorted by `updated_at` descending, with `id` ascending as the
+deterministic tiebreaker for shared timestamps. The first page of a
+multi-page result ends with:
+
+```
+-- next: --cursor <opaque>
+```
+
+Copy that cursor into `--cursor` to continue, or pass `--all` to walk
+every page in a single call (no hint line is emitted in `--all` mode).
+The cursor format is opaque base64; treat it as a string. `--limit` is
+silently clamped to `[1, 100]`.
+
+> **Note:** The previous `--days` flag on `thread list` is removed;
+> recency is now implicit in the sort order. The lookback filter
+> remains on `workshop thread analytics --days N`.
 
 ### Persistent JSON store
 
@@ -376,7 +403,11 @@ cobra flags, because the names are dynamic.
 | `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Trigger compaction when total tokens exceed this threshold (0 = disabled) |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | `$XDG_DATA_HOME/workshop/threads` | Directory for persistent JSON thread storage |
 | `--format` | — | `text` | Export format (text, json, html) (thread export command only) |
-| `--output` | — | — | Output file path (default: stdout) (thread export command only) |
+| `--output` | — | — | Export file path (default: stdout) (thread export command only) |
+| `--limit` | — | `20` | Page size for `workshop thread list` (max 100, clamped to [1, 100]) |
+| `--cursor` | — | — | Opaque pagination cursor for `workshop thread list` (from a previous `--next: --cursor …` line) |
+| `--all` | — | `false` | Walk all pages of `workshop thread list` in a single call; suppress the `--next` hint |
+| `--days` | — | `30` | Lookback period in days for `workshop thread analytics` (store-wide form) |
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
