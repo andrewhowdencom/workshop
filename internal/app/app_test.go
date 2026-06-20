@@ -378,7 +378,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	assert.Equal(t, "Role: reviewer", res.Feedback.Content, "successful set should confirm the new role")
+	assert.Equal(t, "Role: reviewer", res.Notice.Content, "successful set should confirm the new role")
 
 	v, ok := stream.GetMetadata("workshop.role")
 	if !ok || v != "reviewer" {
@@ -406,7 +406,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	if got := len(stream.Turns()); got != 1 {
 		t.Errorf("len(turns) after no-op = %d, want 1 (unchanged)", got)
 	}
-	assert.Equal(t, "Role: reviewer", res.Feedback.Content, "no-op should still confirm the active role")
+	assert.Equal(t, "Role: reviewer", res.Notice.Content, "no-op should still confirm the active role")
 
 	// Invalid role returns an error (preserves the long-standing contract
 	// that switching to a missing role is a hard failure) and does not
@@ -454,10 +454,10 @@ func TestRoleCommand_NoArgListsRoles(t *testing.T) {
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err, "no-arg form must not return an error")
-	assert.Contains(t, res.Feedback.Content, "Role: (none)", "no current role should render as (none)")
-	assert.Contains(t, res.Feedback.Content, "  planner (Plans multi-step work)", "description from frontmatter should be shown")
-	assert.Contains(t, res.Feedback.Content, "  reviewer", "role with no description should still appear")
-	assert.Contains(t, res.Feedback.Content, "Usage: /role <name>", "usage hint should be present")
+	assert.Contains(t, res.Notice.Content, "Role: (none)", "no current role should render as (none)")
+	assert.Contains(t, res.Notice.Content, "  planner (Plans multi-step work)", "description from frontmatter should be shown")
+	assert.Contains(t, res.Notice.Content, "  reviewer", "role with no description should still appear")
+	assert.Contains(t, res.Notice.Content, "Usage: /role <name>", "usage hint should be present")
 }
 
 func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
@@ -471,7 +471,7 @@ func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "help"})
 	require.NoError(t, err, "/role help must not return an error")
-	assert.Contains(t, res.Feedback.Content, "  reviewer", "help form should list roles")
+	assert.Contains(t, res.Notice.Content, "  reviewer", "help form should list roles")
 }
 
 func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
@@ -488,7 +488,7 @@ func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err)
-	assert.Contains(t, res.Feedback.Content, "Role: reviewer", "should show the active role")
+	assert.Contains(t, res.Notice.Content, "Role: reviewer", "should show the active role")
 }
 
 func TestRoleCommand_NoArgEmptyDir(t *testing.T) {
@@ -498,8 +498,8 @@ func TestRoleCommand_NoArgEmptyDir(t *testing.T) {
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err)
-	assert.Contains(t, res.Feedback.Content, "No roles available in", "empty dir should produce a helpful message")
-	assert.Contains(t, res.Feedback.Content, dir, "the message should point at the configured directory")
+	assert.Contains(t, res.Notice.Content, "No roles available in", "empty dir should produce a helpful message")
+	assert.Contains(t, res.Notice.Content, dir, "the message should point at the configured directory")
 }
 
 func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
@@ -545,7 +545,7 @@ func TestRoleCommand_HandoffAppendsRoleSystemTurn(t *testing.T) {
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
 	require.NoError(t, err)
-	assert.Equal(t, "Role: planner", res.Feedback.Content)
+	assert.Equal(t, "Role: planner", res.Notice.Content)
 
 	turns := stream.Turns()
 	if len(turns) != 1 {
@@ -568,7 +568,7 @@ func TestRoleCommand_NoChangeIsNoOp(t *testing.T) {
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
 	require.NoError(t, err)
-	assert.Equal(t, "Role: planner", res.Feedback.Content)
+	assert.Equal(t, "Role: planner", res.Notice.Content)
 
 	turns := stream.Turns()
 	if len(turns) != 0 {
@@ -584,7 +584,7 @@ func TestRoleCommand_FirstSetUsesInitialisedBranch(t *testing.T) {
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
 	require.NoError(t, err)
-	assert.Equal(t, "Role: planner", res.Feedback.Content)
+	assert.Equal(t, "Role: planner", res.Notice.Content)
 
 	turns := stream.Turns()
 	if len(turns) != 1 {
@@ -712,8 +712,8 @@ func TestNameSlashHandler_ValidInput_EmitsPropertiesEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	if result.Feedback.Content != "" {
-		t.Errorf("Feedback = %q, want empty on valid input", result.Feedback.Content)
+	if result.Notice.Content != "" {
+		t.Errorf("Notice = %q, want empty on valid input", result.Notice.Content)
 	}
 	if result.Replace != nil {
 		t.Errorf("Replace = %v, want nil on valid input", result.Replace)
@@ -739,8 +739,8 @@ func TestNameSlashHandler_EmptyInput_ReturnsFeedback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	if result.Feedback.Content != "Usage: /name <text>" {
-		t.Errorf("Feedback = %q, want %q", result.Feedback.Content, "Usage: /name <text>")
+	if result.Notice.Content != "Usage: /name <text>" {
+		t.Errorf("Notice = %q, want %q", result.Notice.Content, "Usage: /name <text>")
 	}
 	if result.Replace != nil {
 		t.Errorf("Replace = %v, want nil on empty input", result.Replace)
@@ -758,8 +758,8 @@ func TestNameSlashHandler_WhitespaceInput_ReturnsFeedback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	if result.Feedback.Content != "Usage: /name <text>" {
-		t.Errorf("Feedback = %q, want %q", result.Feedback.Content, "Usage: /name <text>")
+	if result.Notice.Content != "Usage: /name <text>" {
+		t.Errorf("Notice = %q, want %q", result.Notice.Content, "Usage: /name <text>")
 	}
 	if len(emitter.events) != 0 {
 		t.Errorf("expected no events on whitespace input, got %d", len(emitter.events))
@@ -2670,8 +2670,8 @@ func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: ""})
 	require.NoError(t, err)
-	assert.Contains(t, res.Feedback.Content, "Thinking: off", "no-arg form should report current level")
-	assert.Contains(t, res.Feedback.Content, "Levels: off, minimal, low, medium, high, max", "no-arg form should list available levels")
+	assert.Contains(t, res.Notice.Content, "Thinking: off", "no-arg form should report current level")
+	assert.Contains(t, res.Notice.Content, "Levels: off, minimal, low, medium, high, max", "no-arg form should list available levels")
 }
 
 func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
@@ -2681,7 +2681,7 @@ func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
 	require.NoError(t, err)
-	assert.Equal(t, "Thinking: high", res.Feedback.Content)
+	assert.Equal(t, "Thinking: high", res.Notice.Content)
 
 	// Verify the metadata was actually written. GetMetadata returns the
 	// value the next read of buildInvokeOptions will see.
@@ -2700,8 +2700,8 @@ func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "frobnicate"})
 	require.NoError(t, err)
-	assert.Contains(t, res.Feedback.Content, "Unknown level: frobnicate", "should report the unknown level name")
-	assert.Contains(t, res.Feedback.Content, "Available:", "should list valid levels in the error")
+	assert.Contains(t, res.Notice.Content, "Unknown level: frobnicate", "should report the unknown level name")
+	assert.Contains(t, res.Notice.Content, "Available:", "should list valid levels in the error")
 
 	got, _ := stream.GetMetadata("workshop.thinking_level")
 	assert.Equal(t, "medium", got, "metadata must not be mutated by an invalid set")
@@ -2716,7 +2716,7 @@ func TestThinkingCommand_OffIsValid(t *testing.T) {
 	// and must write the metadata.
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "off"})
 	require.NoError(t, err)
-	assert.Equal(t, "Thinking: off", res.Feedback.Content)
+	assert.Equal(t, "Thinking: off", res.Notice.Content)
 	got, _ := stream.GetMetadata("workshop.thinking_level")
 	assert.Equal(t, "off", got)
 }
@@ -2900,7 +2900,7 @@ func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
 	ac := &analyticsCommand{}
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
 	require.NoError(t, err)
-	assert.Equal(t, "No artifacts in this thread yet.", res.Feedback.Content)
+	assert.Equal(t, "No artifacts in this thread yet.", res.Notice.Content)
 }
 
 func TestAnalyticsCommand_EmptyThreadFriendlyMessage(t *testing.T) {
@@ -2912,7 +2912,7 @@ func TestAnalyticsCommand_EmptyThreadFriendlyMessage(t *testing.T) {
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
 	require.NoError(t, err)
-	assert.Equal(t, "No artifacts in this thread yet.", res.Feedback.Content)
+	assert.Equal(t, "No artifacts in this thread yet.", res.Notice.Content)
 }
 
 func TestAnalyticsCommand_RendersTable(t *testing.T) {
@@ -2936,9 +2936,9 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	require.NoError(t, err)
 
 	// Header + separator + at least one data row + totals row.
-	assert.Contains(t, res.Feedback.Content, "| Kind", "must include the header row")
-	assert.Contains(t, res.Feedback.Content, "| ---", "must include the separator row")
-	assert.Contains(t, res.Feedback.Content, "**total**", "must include the bolded totals row")
+	assert.Contains(t, res.Notice.Content, "| Kind", "must include the header row")
+	assert.Contains(t, res.Notice.Content, "| ---", "must include the separator row")
+	assert.Contains(t, res.Notice.Content, "**total**", "must include the bolded totals row")
 }
 
 func TestAnalyticsCommand_ConsumesEvent(t *testing.T) {
