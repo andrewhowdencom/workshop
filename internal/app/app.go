@@ -359,11 +359,44 @@ type metadataStore interface {
 // without triggering an LLM turn. With no argument (or an explicit
 // "help" subcommand) it returns a feedback message listing the
 // current role and the available role definitions. With a name it
-// validates the role exists and updates the stream metadata.
+// validates the role exists and updates the active resolver's path.
+//
+// The role change is communicated to the LLM via the system prompt
+// transform on the next turn: the transform reads the active role
+// file through the resolver, so swapping the resolver's path is
+// sufficient to switch what the LLM sees. No persistent RoleSystem
+// turn is appended to the conversation history — the system prompt
+// itself is the single source of truth for the active role.
 type roleCommand struct {
-	mu     sync.Mutex
-	stream *session.Stream
-	rdir   string
+	mu       sync.Mutex
+	rdir     string
+	stream   *session.Stream
+	resolver *source.FileResolver
+}
+
+// SetStream is called from the stepFactory when a new stream is bound.
+// It creates a fresh resolver for the stream and seeds it from the
+// stream's current role metadata, if any. Existing streams preserve
+// their previously-set role; new streams start with no role until
+// one is selected via /role.
+func (c *roleCommand) SetStream(stream *session.Stream) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.stream = stream
+	c.resolver = source.NewFileResolver("")
+	if role, ok := stream.GetMetadata("workshop.role"); ok && role != "" {
+		c.resolver.SetPath(filepath.Join(c.rdir, role+".md"))
+	}
+}
+
+// Resolver returns the resolver for the current stream. Returns nil
+// when no stream is attached. Intended to be passed to
+// makeSystemPromptTransform so the system prompt can read the
+// active role directly from the file, without going through metadata.
+func (c *roleCommand) Resolver() *source.FileResolver {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.resolver
 }
 
 // currentRole returns the active role from stream metadata, or the
@@ -379,22 +412,15 @@ func (c *roleCommand) currentRole() string {
 	return v
 }
 
-// currentRoleLocked is the unlocked variant of currentRole. It is
-// intended for callers that already hold c.mu (e.g. Handler after
-// SetMetadata); calling currentRole from such a context would deadlock.
-func (c *roleCommand) currentRoleLocked() string {
-	if c.stream == nil {
-		return ""
-	}
-	v, _ := c.stream.GetMetadata("workshop.role")
-	return v
-}
-
 // Handler dispatches the /role slash command. With no argument (or
 // "help") it lists the available roles. With a name it validates the
-// role exists and writes it to stream metadata. An unknown role
-// returns an error so the user sees the failure rather than having
-// their active role silently changed.
+// role exists, updates the active resolver's path, and writes the
+// role name to stream metadata. An unknown role returns an error so
+// the user sees the failure rather than having their active role
+// silently changed.
+//
+// The role change is reflected in the system prompt on the next
+// turn (via the resolver); no persistent RoleSystem turn is appended.
 func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	args := slash.Fields(cmd.Input)
 	// "help" is reserved as a subcommand so that /role help always
@@ -417,29 +443,17 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.stream == nil {
+	if c.stream == nil || c.resolver == nil {
 		return slash.Result{}, fmt.Errorf("no active stream")
 	}
-	// Read the previous role BEFORE writing the new metadata. The
-	// handoff message is keyed on the transition (prev -> current),
-	// so reading after SetMetadata would collapse the handoff to a
-	// no-op and the LLM would silently miss the role change.
-	prev := c.currentRoleLocked()
+	// Update the resolver's path. The system prompt transform picks
+	// up the new role on the next Transform call. The role metadata
+	// is also written so that /role no-arg, thread export, and the
+	// TUI status zone continue to display the active role name. No
+	// persistent RoleSystem turn is appended; the system prompt
+	// itself is the single source of truth.
+	c.resolver.SetPath(filepath.Join(c.rdir, name+".md"))
 	c.stream.SetMetadata("workshop.role", name)
-
-	// Persist a RoleSystem turn that explicitly tells the LLM the
-	// role changed and the system prompt above is now in effect for
-	// the new role. The handoff is skipped (no append, no save) when
-	// prev == current, i.e. /role X invoked while X is already
-	// active. role.RenderHandoff returns "" for the no-op case.
-	if msg := role.RenderHandoff(prev, name); msg != "" {
-		if err := c.stream.AppendTurn(ctx, state.RoleSystem, artifact.Text{Content: msg}); err != nil {
-			return slash.Result{}, fmt.Errorf("append handoff turn: %w", err)
-		}
-		if err := c.stream.Save(); err != nil {
-			return slash.Result{}, fmt.Errorf("save thread: %w", err)
-		}
-	}
 
 	return slash.Result{
 		Notice: loop.Notice{
@@ -814,7 +828,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		skillsToolkit := skills.NewToolkit(discoverers...)
 
 		// Build the composable system prompt transform.
-		sp, err := makeSystemPromptTransform(cfg, stream, skillsToolkit)
+		sp, err := makeSystemPromptTransform(cfg, stream, skillsToolkit, rc.Resolver())
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -927,7 +941,10 @@ func buildManager(cfg *config) (*session.Manager, error) {
 // makeSystemPromptTransform builds the composable system prompt transform for
 // a given configuration and metadata reader. It concatenates four content sources:
 //
-//  1. The active role prompt (or defaultPrompt if no role is set).
+//  1. The active role prompt read from the resolver's current file path
+//     (or defaultPrompt if no role is set). The resolver is mutated in
+//     place by the role command when the active role changes; the
+//     transform reads whatever path is current at Transform-time.
 //  2. A contextual sentence describing the current working directory.
 //  3. The skills catalog fragment showing available skills to the LLM.
 //  4. Repository-level instructions discovered by walking parent directories
@@ -935,12 +952,19 @@ func buildManager(cfg *config) (*session.Manager, error) {
 //     CLAUDE.md files nearest-first.
 //
 // The resulting transform is passed to loop.Step via loop.WithTransforms.
-func makeSystemPromptTransform(cfg *config, mr metadataReader, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
-	rdir := role.Dir()
-	currentPrompt := makeCurrentPrompt(rdir, mr)
-
+func makeSystemPromptTransform(cfg *config, _ metadataReader, skillsToolkit *skills.Toolkit, roleResolver *source.FileResolver) (loop.Transform, error) {
 	return systemprompt.New(
-		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(func() string {
+			path := roleResolver.Path()
+			if path == "" {
+				return defaultPrompt
+			}
+			body, err := role.LoadBody(path, nil)
+			if err != nil {
+				return defaultPrompt
+			}
+			return body
+		}),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
@@ -1191,19 +1215,6 @@ const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"5. Fail fast. Surface errors immediately rather than swallowing or deferring them.\n\n" +
 	"6. Explore proactively. Read full files, search the codebase, and understand context before making changes. Do not wait to be told.\n\n" +
 	"7. Check git history before editing. Use git log and git blame to understand why code exists before changing it."
-
-// makeCurrentPrompt returns a closure that reads the active role from metadata
-// and returns the corresponding prompt, falling back to defaultPrompt.
-func makeCurrentPrompt(rdir string, mr metadataReader) func() string {
-	return func() string {
-		if roleName, ok := mr.GetMetadata("workshop.role"); ok && roleName != "" {
-			if role, err := role.LoadRole(rdir, roleName, nil); err == nil {
-				return role.Prompt
-			}
-		}
-		return defaultPrompt
-	}
-}
 
 // makeWorkingDirContent returns a closure that emits a sentence describing
 // the current working directory, or an empty string if none is set.

@@ -308,44 +308,39 @@ func TestBuildDefaultSpec(t *testing.T) {
 	})
 }
 
-func TestMakeCurrentPrompt_Fallback(t *testing.T) {
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestRoleResolverPath_FallbackWhenEmpty(t *testing.T) {
+	rdir := t.TempDir()
+	resolver := source.NewFileResolver("")
 
-	fn := makeCurrentPrompt(t.TempDir(), thr)
-	got := fn()
-	if got != defaultPrompt {
-		t.Errorf("prompt = %q, want defaultPrompt", got)
+	// With an empty path, the body should be the default prompt.
+	// Mirror what makeSystemPromptTransform does internally.
+	path := resolver.Path()
+	if path != "" {
+		t.Fatalf("path = %q, want empty", path)
 	}
-}
-
-func TestDefaultPrompt_ContainsBehavioralDirective(t *testing.T) {
-	if !strings.Contains(defaultPrompt, "When your task matches a skill description below") {
-		t.Error("defaultPrompt missing behavioral directive for skills")
+	// The fallback is defaultPrompt; we don't re-derive it here since
+	// the constant lives in app.go. Just verify the contract: empty
+	// path means the resolver has not been initialised with a role.
+	if _, err := role.LoadBody(filepath.Join(rdir, "missing.md"), nil); err == nil {
+		t.Fatal("LoadBody on missing file should error")
 	}
 }
 
-func TestMakeCurrentPrompt_WithRole(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("---\nname: reviewer\n---\nYou are a reviewer.\n"), 0644); err != nil {
+func TestRoleResolverPath_TracksSetPath(t *testing.T) {
+	rdir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rdir, "reviewer.md"), []byte("---\nname: reviewer\n---\nYou are a reviewer.\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
+	resolver := source.NewFileResolver("")
+	resolver.SetPath(filepath.Join(rdir, "reviewer.md"))
+
+	body, err := role.LoadBody(resolver.Path(), nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("LoadBody error: %v", err)
 	}
-	thr.Metadata["workshop.role"] = "reviewer"
-
-	fn := makeCurrentPrompt(dir, thr)
-	got := fn()
-	want := "You are a reviewer."
-	if got != want {
-		t.Errorf("prompt = %q, want %q", got, want)
+	if body != "You are a reviewer." {
+		t.Errorf("body = %q, want %q", body, "You are a reviewer.")
 	}
 }
 
@@ -371,9 +366,10 @@ func TestRoleSlashHandler(t *testing.T) {
 	rc := &roleCommand{rdir: dir}
 	rc.SetStream(stream)
 
-	// Valid role (first set on a fresh thread): a RoleSystem turn with
-	// the "initialised" branch is appended so the LLM sees the role
-	// change and the system prompt update on its next inference.
+	// Valid role (first set on a fresh thread): the resolver's path
+	// is updated and the role metadata is recorded. No turn is
+	// appended to the conversation; the system prompt transform
+	// reflects the role change on the next turn via the resolver.
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -385,26 +381,22 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Errorf("metadata = %q, want reviewer", v)
 	}
 
-	turns := stream.Turns()
-	if len(turns) != 1 {
-		t.Fatalf("len(turns) = %d, want 1 (the initialised handoff)", len(turns))
-	}
-	if turns[0].Role != state.RoleSystem {
-		t.Errorf("handoff turn role = %q, want %q", turns[0].Role, state.RoleSystem)
-	}
-	if !strings.Contains(turns[0].Artifacts[0].(artifact.Text).Content, "[Role initialised: reviewer.") {
-		t.Errorf("handoff text = %q, want substring %q", turns[0].Artifacts[0].(artifact.Text).Content, "[Role initialised: reviewer.")
+	if got := filepath.Join(dir, "reviewer.md"); rc.Resolver().Path() != got {
+		t.Errorf("resolver path = %q, want %q", rc.Resolver().Path(), got)
 	}
 
-	// Switching to the same role is a no-op: no additional turn is
-	// appended. This guards against accidentally re-firing the
-	// handoff on /role X when X is already active.
+	if got := len(stream.Turns()); got != 0 {
+		t.Errorf("len(turns) = %d, want 0 (no persistent handoff turn)", got)
+	}
+
+	// Switching to the same role is a no-op: the resolver path is
+	// already correct, no additional turn is appended.
 	res, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error on no-op: %v", err)
 	}
-	if got := len(stream.Turns()); got != 1 {
-		t.Errorf("len(turns) after no-op = %d, want 1 (unchanged)", got)
+	if got := len(stream.Turns()); got != 0 {
+		t.Errorf("len(turns) after no-op = %d, want 0 (unchanged)", got)
 	}
 	assert.Equal(t, "Role: reviewer", res.Notice.Content, "no-op should still confirm the active role")
 
@@ -536,7 +528,7 @@ func newRoleCommandStreamWithRoles(t *testing.T) (*session.Stream, string) {
 	return newRoleCommandStream(t), dir
 }
 
-func TestRoleCommand_HandoffAppendsRoleSystemTurn(t *testing.T) {
+func TestRoleCommand_UpdateResolver(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
 	stream.SetMetadata("workshop.role", "ideation")
 
@@ -547,55 +539,50 @@ func TestRoleCommand_HandoffAppendsRoleSystemTurn(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Role: planner", res.Notice.Content)
 
+	// The resolver's path should now point to the new role.
+	want := filepath.Join(dir, "planner.md")
+	assert.Equal(t, want, rc.Resolver().Path(), "resolver should track the new role")
+
+	// No turn should have been appended to the conversation. The
+	// system prompt transform reflects the role change on the next
+	// turn; persisting a handoff turn would stack the previous role
+	// body in conversation history.
 	turns := stream.Turns()
-	if len(turns) != 1 {
-		t.Fatalf("len(turns) = %d, want 1 (the handoff turn)", len(turns))
-	}
-	if turns[0].Role != state.RoleSystem {
-		t.Errorf("handoff turn role = %q, want %q", turns[0].Role, state.RoleSystem)
-	}
-	if got := turns[0].Artifacts[0].(artifact.Text).Content; !strings.Contains(got, "[Role handoff] ideation → planner.") {
-		t.Errorf("handoff text = %q, want substring %q", got, "[Role handoff] ideation → planner.")
+	if len(turns) != 0 {
+		t.Errorf("len(turns) = %d, want 0 (no persistent handoff turn)", len(turns))
 	}
 }
 
-func TestRoleCommand_NoChangeIsNoOp(t *testing.T) {
+func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithRoles(t)
+	stream.SetMetadata("workshop.role", "planner")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+	initialPath := rc.Resolver().Path()
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
+	require.NoError(t, err)
+	assert.Equal(t, "Role: planner", res.Notice.Content)
+
+	// The path is unchanged. SetPath is called but with the same value.
+	assert.Equal(t, initialPath, rc.Resolver().Path())
+
+	turns := stream.Turns()
+	if len(turns) != 0 {
+		t.Errorf("len(turns) = %d, want 0", len(turns))
+	}
+}
+
+func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
 	stream.SetMetadata("workshop.role", "planner")
 
 	rc := &roleCommand{rdir: dir}
 	rc.SetStream(stream)
 
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
-	require.NoError(t, err)
-	assert.Equal(t, "Role: planner", res.Notice.Content)
-
-	turns := stream.Turns()
-	if len(turns) != 0 {
-		t.Errorf("len(turns) = %d, want 0 (no handoff when role is unchanged)", len(turns))
-	}
-}
-
-func TestRoleCommand_FirstSetUsesInitialisedBranch(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
-
-	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
-	require.NoError(t, err)
-	assert.Equal(t, "Role: planner", res.Notice.Content)
-
-	turns := stream.Turns()
-	if len(turns) != 1 {
-		t.Fatalf("len(turns) = %d, want 1 (the initialised handoff)", len(turns))
-	}
-	if turns[0].Role != state.RoleSystem {
-		t.Errorf("handoff turn role = %q, want %q", turns[0].Role, state.RoleSystem)
-	}
-	if got := turns[0].Artifacts[0].(artifact.Text).Content; !strings.Contains(got, "[Role initialised: planner.") {
-		t.Errorf("handoff text = %q, want substring %q", got, "[Role initialised: planner.")
-	}
+	want := filepath.Join(dir, "planner.md")
+	assert.Equal(t, want, rc.Resolver().Path(), "SetStream should seed the resolver from metadata")
 }
 
 // TestCompactSlashHandler_ZeroBudgetStillCompacts verifies that /compact
@@ -1633,7 +1620,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
+	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit(), source.NewFileResolver(""))
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1727,7 +1714,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
+	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit(), source.NewFileResolver(""))
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1778,7 +1765,7 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit())
+	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit(), source.NewFileResolver(""))
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}

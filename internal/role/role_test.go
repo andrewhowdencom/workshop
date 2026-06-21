@@ -302,31 +302,76 @@ func TestListRoleDefinitions_FileSandboxError(t *testing.T) {
 	}
 }
 
-func TestRenderHandoff(t *testing.T) {
+func TestExtractBody(t *testing.T) {
 	tests := []struct {
-		name      string
-		prev      string
-		current   string
-		wantSub   string // substring the result MUST contain; "" if wantEmpty
-		wantEmpty bool
+		name            string
+		input           string
+		wantBody        string
+		wantFrontmatter string
 	}{
-		{"initialised from empty", "", "planner", "[Role initialised: planner.", false},
-		{"handoff between two roles", "ideation", "planner", "[Role handoff] ideation → planner.", false},
-		{"no-op when same role", "planner", "planner", "", true},
-		{"defensive on empty current", "planner", "", "[Role error: cleared.", false},
+		{
+			name:            "full frontmatter and body",
+			input:           "---\ndescription: foo\n---\nbody content\n",
+			wantBody:        "body content",
+			wantFrontmatter: "description: foo",
+		},
+		{
+			name:            "no leading delimiter",
+			input:           "no frontmatter here\n",
+			wantBody:        "no frontmatter here",
+			wantFrontmatter: "",
+		},
+		{
+			name:            "unclosed frontmatter treated as body",
+			input:           "---\ndescription: foo\nmore content\n",
+			wantBody:        "--- description: foo more content",
+			wantFrontmatter: "",
+		},
+		{
+			name:            "empty body after delimiter",
+			input:           "---\ndescription: foo\n---\n",
+			wantBody:        "",
+			wantFrontmatter: "description: foo",
+		},
+		{
+			name:            "blank line between frontmatter and body",
+			input:           "---\nkey: val\n---\n\nactual body\n",
+			wantBody:        "actual body",
+			wantFrontmatter: "key: val",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := RenderHandoff(tt.prev, tt.current)
-			if tt.wantEmpty {
-				if got != "" {
-					t.Errorf("got %q, want empty", got)
-				}
-				return
+			body, frontmatter := ExtractBody(tt.input)
+			if body != tt.wantBody {
+				t.Errorf("body = %q, want %q", body, tt.wantBody)
 			}
-			if !strings.Contains(got, tt.wantSub) {
-				t.Errorf("got %q, want substring %q", got, tt.wantSub)
+			if frontmatter != tt.wantFrontmatter {
+				t.Errorf("frontmatter = %q, want %q", frontmatter, tt.wantFrontmatter)
 			}
 		})
+	}
+}
+
+func TestLoadBody(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reviewer.md")
+	if err := os.WriteFile(path, []byte("---\nname: reviewer\n---\nYou are a reviewer.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadBody(path, nil)
+	if err != nil {
+		t.Fatalf("LoadBody error: %v", err)
+	}
+	if got != "You are a reviewer." {
+		t.Errorf("LoadBody = %q, want %q", got, "You are a reviewer.")
+	}
+}
+
+func TestLoadBody_MissingFile(t *testing.T) {
+	_, err := LoadBody(filepath.Join(t.TempDir(), "missing.md"), nil)
+	if err == nil {
+		t.Fatal("expected error for missing file")
 	}
 }
