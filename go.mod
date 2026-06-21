@@ -4,20 +4,20 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.12.1
+	github.com/andrewhowdencom/ore v0.12.2
 	github.com/andrewhowdencom/ore/x/analytics v0.2.2
 	github.com/andrewhowdencom/ore/x/compaction v0.4.4
-	github.com/andrewhowdencom/ore/x/conduit/http v0.7.3
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.3
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.2
+	github.com/andrewhowdencom/ore/x/conduit/http v0.7.5
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.4
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.3
 	github.com/andrewhowdencom/ore/x/provider/openai v0.6.2
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.2
 	github.com/andrewhowdencom/ore/x/tool v0.5.1
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.6
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.1
-	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.0
+	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.1
 	github.com/andrewhowdencom/ore/x/tool/skills v0.5.0
-	github.com/andrewhowdencom/ore/x/usage v0.2.0
+	github.com/andrewhowdencom/ore/x/usage v0.2.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
@@ -66,7 +66,7 @@ require (
 	github.com/charmbracelet/ultraviolet v0.0.0-20260615092913-2399af76d5b1 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260615092313-b57e5e6d29bb // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260621010513-945fab64fd3e // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
@@ -126,7 +126,7 @@ replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
 
 replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
 
-replace github.com/andrewhowdencom/ore => github.com/andrewhowdencom/ore v0.12.2-0.20260620152915-35d39c213776
+replace github.com/andrewhowdencom/ore => ../ore
 
 replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
 
