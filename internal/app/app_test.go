@@ -2937,7 +2937,7 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 
 	// Header + separator + at least one data row + totals row.
 	assert.Contains(t, res.Notice.Content, "| Kind", "must include the header row")
-	assert.Contains(t, res.Notice.Content, "| ---", "must include the separator row")
+	assert.Contains(t, res.Notice.Content, "|---", "must include the separator row")
 	assert.Contains(t, res.Notice.Content, "**total**", "must include the bolded totals row")
 }
 
