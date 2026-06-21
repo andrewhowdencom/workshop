@@ -25,6 +25,9 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
+
+	"github.com/andrewhowdencom/workshop/internal/role"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -402,14 +405,14 @@ func TestRoleSlashHandler(t *testing.T) {
 
 	// Invalid role returns an error (preserves the long-standing contract
 	// that switching to a missing role is a hard failure) and does not
-	// mutate the state.
+	// mutate the state. No new turn is appended on failure.
 	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent role")
 	}
 	assert.Contains(t, err.Error(), "nonexistent", "error should mention the unknown role name")
-	if got := len(stream.Turns()); got != 1 {
-		t.Errorf("invalid role should not append a turn: len(turns) = %d, want 1", got)
+	if got := len(stream.Turns()); got != 0 {
+		t.Errorf("invalid role should not append a turn: len(turns) = %d, want 0", got)
 	}
 }
 
@@ -1335,12 +1338,6 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 }
 
 func TestSystemPrompt_WithCWD(t *testing.T) {
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := &config{
 		workingDir: "/test/project",
 		conduit:    "TUI",
@@ -1354,8 +1351,21 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	rdir := t.TempDir()
-	currentPrompt := makeCurrentPrompt(rdir, thr)
+	// No role is set in this test; the closure mirrors the production
+	// resolver-based dispatch in makeSystemPromptTransform and falls
+	// back to defaultPrompt when the resolver path is empty.
+	resolver := source.NewFileResolver("")
+	currentPrompt := func() string {
+		path := resolver.Path()
+		if path == "" {
+			return defaultPrompt
+		}
+		body, err := role.LoadBody(path, nil)
+		if err != nil {
+			return defaultPrompt
+		}
+		return body
+	}
 
 	sp, err := systemprompt.New(
 		systemprompt.WithContentFunc(currentPrompt),
@@ -1396,12 +1406,6 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 }
 
 func TestSystemPrompt_WithoutCWD(t *testing.T) {
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := &config{
 		workingDir: "",
 		providers: map[string]ProviderConfig{
@@ -1414,8 +1418,21 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	rdir := t.TempDir()
-	currentPrompt := makeCurrentPrompt(rdir, thr)
+	// No role is set in this test; the closure mirrors the production
+	// resolver-based dispatch in makeSystemPromptTransform and falls
+	// back to defaultPrompt when the resolver path is empty.
+	resolver := source.NewFileResolver("")
+	currentPrompt := func() string {
+		path := resolver.Path()
+		if path == "" {
+			return defaultPrompt
+		}
+		body, err := role.LoadBody(path, nil)
+		if err != nil {
+			return defaultPrompt
+		}
+		return body
+	}
 
 	sp, err := systemprompt.New(
 		systemprompt.WithContentFunc(currentPrompt),
@@ -1452,12 +1469,6 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := &config{
 		workingDir: dir,
 		conduit:    "TUI",
@@ -1471,8 +1482,21 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	rdir := t.TempDir()
-	currentPrompt := makeCurrentPrompt(rdir, thr)
+	// No role is set in this test; the closure mirrors the production
+	// resolver-based dispatch in makeSystemPromptTransform and falls
+	// back to defaultPrompt when the resolver path is empty.
+	resolver := source.NewFileResolver("")
+	currentPrompt := func() string {
+		path := resolver.Path()
+		if path == "" {
+			return defaultPrompt
+		}
+		body, err := role.LoadBody(path, nil)
+		if err != nil {
+			return defaultPrompt
+		}
+		return body
+	}
 
 	sp, err := systemprompt.New(
 		systemprompt.WithContentFunc(currentPrompt),
@@ -1529,12 +1553,6 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	cfg := &config{
 		workingDir: child,
 		conduit:    "TUI",
@@ -1548,8 +1566,21 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	rdir := t.TempDir()
-	currentPrompt := makeCurrentPrompt(rdir, thr)
+	// No role is set in this test; the closure mirrors the production
+	// resolver-based dispatch in makeSystemPromptTransform and falls
+	// back to defaultPrompt when the resolver path is empty.
+	resolver := source.NewFileResolver("")
+	currentPrompt := func() string {
+		path := resolver.Path()
+		if path == "" {
+			return defaultPrompt
+		}
+		body, err := role.LoadBody(path, nil)
+		if err != nil {
+			return defaultPrompt
+		}
+		return body
+	}
 
 	sp, err := systemprompt.New(
 		systemprompt.WithContentFunc(currentPrompt),

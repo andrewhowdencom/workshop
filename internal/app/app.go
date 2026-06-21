@@ -25,7 +25,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
@@ -589,13 +588,6 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 			Severity: loop.SeverityInfo,
 		},
 	}, nil
-}
-
-// SetStream updates the shared stream reference.
-func (c *roleCommand) SetStream(s *session.Stream) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stream = s
 }
 
 // compactCommand handles the /compact slash command for forcing

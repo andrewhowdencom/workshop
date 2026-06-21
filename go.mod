@@ -126,7 +126,7 @@ replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
 
 replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
 
-replace github.com/andrewhowdencom/ore => ../ore
+replace github.com/andrewhowdencom/ore => github.com/andrewhowdencom/ore v0.12.2-0.20260621130127-58238e92dec0
 
 replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
 

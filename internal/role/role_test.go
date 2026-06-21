@@ -324,7 +324,7 @@ func TestExtractBody(t *testing.T) {
 		{
 			name:            "unclosed frontmatter treated as body",
 			input:           "---\ndescription: foo\nmore content\n",
-			wantBody:        "--- description: foo more content",
+			wantBody:        "---\ndescription: foo\nmore content",
 			wantFrontmatter: "",
 		},
 		{
