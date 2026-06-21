@@ -228,19 +228,25 @@ func WithMeter(meter metric.Meter) Option {
 
 // statusZoneMapping assigns each status-bar key to a semantic zone.
 // The "lifecycle" zone carries the active turn's counters (phase, title,
-// and the four token counters sent / received / total / thinking);
-// "context" carries thread-level metadata; unmapped keys fall into
-// the "default" zone (lowest priority, only rendered if the higher-
-// priority zones fit within the 3-line status budget). The thinking
-// token is grouped with sent / received / total so the framework's
-// compactTokenSegments can fold it into the same ↑ / ↓ / Σ / Ψ
-// cluster instead of leaving it as an orphan "tokens" segment in
-// the default zone.
+// and the six token counters sent / cache_read / cache_write / received
+// / total / thinking); "context" carries thread-level metadata; unmapped
+// keys fall into the "default" zone (lowest priority, only rendered if
+// the higher-priority zones fit within the 3-line status budget). The
+// token counters are grouped so the framework's compactTokenSegments
+// can fold them into a single ↑ / ↻ / ⊕ / ↓ / Σ / Ψ cluster instead
+// of leaving them as orphan "tokens" segments in the default zone.
+//
+// cache_read and cache_write are emitted by x/usage/handler.go from
+// artifact.Usage.CacheReadTokens and CacheWriteTokens respectively;
+// they are absent when the upstream Usage carries zero values, which
+// is the case for providers that do not report prompt caching. When
+// absent, the cluster collapses back to the four-segment pre-cache
+// layout with no behavioural change.
 //
 // Keys listed here must match the keys emitted by the upstream
-// handler: x/usage/handler.go emits "sent", "received", "total",
-// and "thinking"; the workshop app emits the others via slash
-// commands and Stream.SetMetadata in defaultMeta.
+// handler: x/usage/handler.go emits "sent", "cache_read", "cache_write",
+// "received", "total", and "thinking"; the workshop app emits the
+// others via slash commands and Stream.SetMetadata in defaultMeta.
 var statusZoneMapping = map[string]string{
 	"phase":                   "lifecycle",
 	"title":                   "lifecycle",
@@ -252,6 +258,8 @@ var statusZoneMapping = map[string]string{
 	"tui.pid":                 "context",
 	"model":                   "context",
 	"sent":                    "lifecycle",
+	"cache_read":              "lifecycle",
+	"cache_write":             "lifecycle",
 	"received":                "lifecycle",
 	"total":                   "lifecycle",
 	"thinking":                "lifecycle",
