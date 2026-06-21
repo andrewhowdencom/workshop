@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
@@ -603,8 +604,7 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 type compactCommand struct {
 	mu       sync.Mutex
 	stream   *session.Stream
-	prov     provider.Provider
-	spec     models.Spec
+	agent    *agent.Agent
 	notifier *compactionNotifier
 }
 
@@ -623,7 +623,7 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	if len(turns) == 0 {
 		return slash.Result{}, fmt.Errorf("no turns to compact")
 	}
-	turn, err := compaction.Summarize(ctx, c.prov, c.spec, turns)
+	turn, err := compaction.Summarize(ctx, c.agent, turns)
 	if err != nil {
 		// Truncation: the model hit its output cap mid-summary. Leave
 		// the buffer unchanged and surface the failure to the user.
@@ -767,15 +767,25 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 	// Build the compact command handler. Compaction is explicit-only
 	// (the /compact slash command); there is no automatic trigger.
-	// The handler is always wired with a provider and a spec, so
-	// /compact is always reachable when this manager runs. When
-	// MaxTokens is <= 0, MaxOutputTokens is 0, which the
-	// ore/compaction package treats as "use framework default" (8192).
-	ccProv := compactionProv
+	// The handler is always wired with an agent, so /compact is
+	// always reachable when this manager runs. When MaxTokens is
+	// <= 0, MaxOutputTokens is 0, which the ore/compaction package
+	// treats as "use framework default" (8192).
 	ccSpec := models.Spec{
 		Name:            cfg.providers[compactionName].Model,
 		MaxOutputTokens: int64(cfg.compaction.MaxTokens),
 	}
+
+	// The compaction agent carries the compactor's provider + spec +
+	// a SingleShot cognitive pattern. compaction.Summarize wires it
+	// up to drive one inference turn; the agent's lifecycle is owned
+	// by this manager and shared across /compact invocations.
+	ccAgent := agent.New(
+		"compactor",
+		agent.WithProvider(compactionProv),
+		agent.WithSpec(ccSpec),
+		agent.WithPattern(&cognitive.SingleShot{}),
+	)
 
 	// Build the default model spec carried by every loop invocation.
 	// Model identity, sampling params, and output budget live on the
@@ -788,7 +798,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	rc := &roleCommand{rdir: role.Dir()}
 
 	// Create compact command handler.
-	cc := &compactCommand{prov: ccProv, spec: ccSpec, notifier: cfg.compactionNotifier}
+	cc := &compactCommand{agent: ccAgent, notifier: cfg.compactionNotifier}
 
 	// Create thinking-level command handler.
 	tc := &thinkingCommand{}

@@ -4,9 +4,9 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.12.2
+	github.com/andrewhowdencom/ore v0.12.3
 	github.com/andrewhowdencom/ore/x/analytics v0.2.2
-	github.com/andrewhowdencom/ore/x/compaction v0.4.4
+	github.com/andrewhowdencom/ore/x/compaction v0.4.5
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.5
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.4
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.3
@@ -33,7 +33,7 @@ require (
 )
 
 require (
-	github.com/andrewhowdencom/ore/x/provider/retry v0.0.1 // indirect
+	github.com/andrewhowdencom/ore/x/provider/retry v0.0.2 // indirect
 	github.com/andrewhowdencom/ore/x/wire/anthropic v0.5.0 // indirect
 	github.com/andrewhowdencom/ore/x/wire/openai v0.5.0 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.51.0 // indirect
@@ -126,7 +126,7 @@ replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
 
 replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
 
-replace github.com/andrewhowdencom/ore => github.com/andrewhowdencom/ore v0.12.2-0.20260621130127-58238e92dec0
+replace github.com/andrewhowdencom/ore => ../ore
 
 replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
 

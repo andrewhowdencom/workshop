@@ -12,7 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/artifact"
+	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
@@ -619,8 +621,12 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	// MaxOutputTokens: 0 mirrors compaction.max-tokens: 0. The handler
 	// must not error on this and must still produce a summary turn.
 	cc := &compactCommand{
-		prov: prov,
-		spec: models.Spec{Name: "test-model", MaxOutputTokens: 0},
+		agent: agent.New(
+			"test-compactor",
+			agent.WithProvider(prov),
+			agent.WithSpec(models.Spec{Name: "test-model", MaxOutputTokens: 0}),
+			agent.WithPattern(&cognitive.SingleShot{}),
+		),
 	}
 	cc.SetStream(stream)
 
@@ -672,8 +678,12 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	// turns remain in the buffer unchanged; the compaction transform
 	// projects the LLM-facing view through the new marker.
 	cc := &compactCommand{
-		prov: prov,
-		spec: models.Spec{Name: "test-model"},
+		agent: agent.New(
+			"test-compactor",
+			agent.WithProvider(prov),
+			agent.WithSpec(models.Spec{Name: "test-model"}),
+			agent.WithPattern(&cognitive.SingleShot{}),
+		),
 	}
 	cc.SetStream(stream)
 
@@ -2628,8 +2638,12 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	})
 
 	cc := &compactCommand{
-		prov:     prov,
-		spec:     models.Spec{Name: "test-model"},
+		agent: agent.New(
+			"test-compactor",
+			agent.WithProvider(prov),
+			agent.WithSpec(models.Spec{Name: "test-model"}),
+			agent.WithPattern(&cognitive.SingleShot{}),
+		),
 		notifier: notifier,
 	}
 	cc.SetStream(stream)
