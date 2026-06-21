@@ -277,7 +277,7 @@ providers:
 # here to send compaction to a different named entry.
 compaction:
   provider: haiku
-  max-tokens: 100000       # 0 = disabled; trigger compaction when tokens exceed this
+  max-tokens: 100000       # per-invocation output budget; 0 = use framework default (8192)
 
 store:
   dir: ""              # empty = use $XDG_DATA_HOME/workshop/threads
@@ -296,16 +296,20 @@ The previous `ORE_*` and `STORE_DIR` environment variables are no longer support
 
 ## Compaction
 
-When conversation history grows beyond the provider's context window, workshop
-can automatically compact older turns into a single summary turn before each
-inference. This keeps recent context intact while retaining key facts from
-earlier in the conversation.
+`/compact` is an explicit slash command (see [Slash commands](#slash-commands)) that
+forces an immediate LLM-summarization of the active thread. The summarization
+synthesises a single system turn that captures the gist of the conversation up to
+that point, and the original turns remain in the buffer. Compaction is the
+*only* way to shrink the conversation history — there is no automatic
+pre-turn trigger in ore v0.12.
 
-Compaction is triggered by token usage reported by the provider
-(`compaction.max-tokens`). When triggered, turns that exceed the token budget
-are summarized via an LLM provider, and the result is injected as a synthetic
-system turn. The newest turns that fit within the budget are kept verbatim.
-Set `compaction.max-tokens: 0` to disable.
+The summarization call is sent to `compaction.provider` (a name in the
+`providers:` map) when set, otherwise to the default inference provider.
+`compaction.max-tokens` is the per-invocation output budget forwarded to
+`compaction.Summarize` via `models.Spec.MaxOutputTokens`. A value of `0`
+means "use the ore/compaction framework default" (8192). `/compact` is
+always available when a provider is configured; if you don't want to compact,
+don't run the command.
 
 By default, compaction reuses the default (inference) provider. To send
 compaction to a different model — typically a cheaper or faster one — set
@@ -329,8 +333,8 @@ compaction:
 
 You can also force compaction at any time by typing `/compact` in the TUI or
 stdio interface. This immediately compacts the conversation history regardless
-of the current token count. If compaction is disabled (`compaction.max-tokens: 0`),
-the command will return an error.
+of the current token count. The per-call output budget is configurable via
+`compaction.max-tokens` (see [Compaction](#compaction)).
 
 ### Slash commands
 
@@ -400,7 +404,7 @@ cobra flags, because the names are dynamic.
 | Flag | Environment Variable | Default | Description |
 |---|---|---|---|
 | `--provider` | — | — | Name of the default (inference) provider. Must be a key in the `providers:` map (required). |
-| `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Trigger compaction when total tokens exceed this threshold (0 = disabled) |
+| `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Per-invocation output budget for /compact (0 = use framework default, 8192) |
 | `--store.dir` | `WORKSHOP_STORE_DIR` | `$XDG_DATA_HOME/workshop/threads` | Directory for persistent JSON thread storage |
 | `--format` | — | `text` | Export format (text, json, html) (thread export command only) |
 | `--output` | — | — | Export file path (default: stdout) (thread export command only) |
@@ -413,7 +417,7 @@ cobra flags, because the names are dynamic.
 | `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
 | `--pprof` | `WORKSHOP_PPROF` | `false` | Enable the pprof debug server |
 | `--pprof.addr` | `WORKSHOP_PPROF_ADDR` | `localhost:0` | TCP address for the pprof server |
-| `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Trigger compaction when total tokens exceed this threshold (0 = disabled) |
+| `--compaction.max-tokens` | `WORKSHOP_COMPACTION_MAX_TOKENS` | `100000` | Per-invocation output budget for /compact (0 = use framework default, 8192) |
 | `--telemetry.traces.endpoint` | `WORKSHOP_TELEMETRY_TRACES_ENDPOINT` | — | OpenTelemetry OTLP/HTTP endpoint URL for traces (e.g. `http://localhost:4318`); empty = disabled |
 | `--telemetry.metrics.endpoint` | `WORKSHOP_TELEMETRY_METRICS_ENDPOINT` | — | OpenTelemetry OTLP/HTTP endpoint URL for metrics (e.g. `http://localhost:4318`); empty = disabled |
 
