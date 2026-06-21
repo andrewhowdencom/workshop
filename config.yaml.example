@@ -48,9 +48,10 @@ providers:
 # slash command); there is no automatic pre-turn trigger. Send the
 # summarization call to a different (cheaper) model than the inference
 # provider by setting `provider:`. Omit `provider:` to reuse the default.
-# `max-tokens:` is now the per-invocation output budget forwarded to
-# compaction.Summarize via models.Spec.MaxOutputTokens (the framework
-# default is 8192). Set `max-tokens: 0` to disable /compact entirely.
+# `max-tokens:` is the per-invocation output budget forwarded to
+# compaction.Summarize via models.Spec.MaxOutputTokens; 0 means
+# "use the ore/compaction framework default" (8192). /compact is
+# always available when a provider is configured.
 compaction:
   provider: haiku
   max-tokens: 8192

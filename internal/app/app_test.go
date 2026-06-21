@@ -598,9 +598,15 @@ func TestRoleCommand_FirstSetUsesInitialisedBranch(t *testing.T) {
 	}
 }
 
-func TestCompactSlashHandler_Disabled(t *testing.T) {
+// TestCompactSlashHandler_ZeroBudgetStillCompacts verifies that /compact
+// is reachable when compaction.max-tokens is 0. Per the explicit-only
+// compaction contract, MaxTokens is a pure per-call output budget; a 0
+// value means "use the ore/compaction framework default" (8192), not
+// "disable /compact". The handler must succeed and the stream must gain
+// a summary turn.
+func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	store := session.NewMemoryStore()
-	prov := &testSlashProvider{}
+	prov := &testSummarizeProvider{}
 	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
@@ -612,17 +618,33 @@ func TestCompactSlashHandler_Disabled(t *testing.T) {
 		t.Fatalf("create stream: %v", err)
 	}
 
-	// Disabled compaction: prov == nil (handler returns
-	// "compaction is not enabled" before consulting the stream).
-	cc := &compactCommand{}
+	// Pre-populate the stream with 5 user turns.
+	for i := 0; i < 5; i++ {
+		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
+		if err != nil {
+			t.Fatalf("process event %d: %v", i, err)
+		}
+	}
+
+	// MaxOutputTokens: 0 mirrors compaction.max-tokens: 0. The handler
+	// must not error on this and must still produce a summary turn.
+	cc := &compactCommand{
+		prov: prov,
+		spec: models.Spec{Name: "test-model", MaxOutputTokens: 0},
+	}
 	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
-	if err == nil {
-		t.Fatal("expected error when compaction is disabled")
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "compaction is not enabled") {
-		t.Errorf("unexpected error message: %q", err.Error())
+
+	got := stream.Turns()
+	if len(got) != 6 {
+		t.Fatalf("expected 6 turns (5 original + 1 compaction), got %d", len(got))
+	}
+	if got[5].Role != state.RoleSystem {
+		t.Errorf("compaction turn role = %v, want RoleSystem", got[5].Role)
 	}
 }
 
@@ -2848,11 +2870,11 @@ func TestBuildManager_CompactionProvider_UndefinedErrors(t *testing.T) {
 	}
 }
 
-// TestBuildManager_CompactionDisabled verifies the existing contract:
-// when compaction.max-tokens is 0, /compact is disabled (returns
-// "compaction is not enabled"), regardless of whether
-// compaction.provider is set. The two are independent axes.
-func TestBuildManager_CompactionDisabled(t *testing.T) {
+// TestBuildManager_CompactionZeroBudget verifies that a config with
+// compaction.max-tokens = 0 builds cleanly. /compact is always
+// available; the field is a pure per-call output budget (0 = use
+// framework default 8192 in ore/compaction), not a kill switch.
+func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 	cfg := &config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
@@ -2860,7 +2882,7 @@ func TestBuildManager_CompactionDisabled(t *testing.T) {
 		},
 		defaultProviderName: "haiku",
 		compaction: CompactionConfig{
-			// Provider set, but MaxTokens is 0 (disabled).
+			// Provider set; MaxTokens is 0 (use framework default).
 			Provider:  "haiku",
 			MaxTokens: 0,
 		},

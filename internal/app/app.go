@@ -101,11 +101,11 @@ type CompactionConfig struct {
 	Provider string
 	// MaxTokens is the per-invocation output-token budget forwarded to
 	// compaction.Summarize via models.Spec.MaxOutputTokens. When <= 0
-	// the /compact command is disabled (returns "compaction is not
-	// enabled"); the framework default of 8192 otherwise applies.
-	// In the previous API this field was a trigger threshold
-	// (auto-compact at N tokens); that semantic is gone with the
-	// move to explicit-only compaction.
+	// the ore/compaction framework's default (8192) applies. /compact
+	// is always available when a provider is configured; the field is
+	// a pure budget, never a kill switch. In the previous API this
+	// field was a trigger threshold (auto-compact at N tokens); that
+	// semantic is gone with the move to explicit-only compaction.
 	MaxTokens int
 }
 
@@ -603,14 +603,13 @@ type compactCommand struct {
 }
 
 // Handler forces an immediate compaction of the active thread's state.
-// If compaction is disabled, it returns an error. The event is consumed
-// (nil, nil) so no LLM inference is triggered.
+// /compact is always available when a provider is configured; buildManager
+// always wires the handler with one, so the kill-switch path that used to
+// return "compaction is not enabled" for MaxTokens <= 0 is gone. The event
+// is consumed (nil, nil) so no LLM inference is triggered.
 func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.prov == nil {
-		return slash.Result{}, fmt.Errorf("compaction is not enabled")
-	}
 	if c.stream == nil {
 		return slash.Result{}, fmt.Errorf("no active stream")
 	}
@@ -762,18 +761,14 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 	// Build the compact command handler. Compaction is explicit-only
 	// (the /compact slash command); there is no automatic trigger.
-	// When CompactionConfig.MaxTokens <= 0 the handler is wired with a
-	// nil provider and /compact reports "compaction is not enabled".
-	// MaxOutputTokens carries through to compaction.Summarize; 0 means
-	// "use framework default" (8192 in the ore/compaction package).
-	var ccProv provider.Provider
-	var ccSpec models.Spec
-	if cfg.compaction.MaxTokens > 0 {
-		ccProv = compactionProv
-		ccSpec = models.Spec{
-			Name:            cfg.providers[compactionName].Model,
-			MaxOutputTokens: int64(cfg.compaction.MaxTokens),
-		}
+	// The handler is always wired with a provider and a spec, so
+	// /compact is always reachable when this manager runs. When
+	// MaxTokens is <= 0, MaxOutputTokens is 0, which the
+	// ore/compaction package treats as "use framework default" (8192).
+	ccProv := compactionProv
+	ccSpec := models.Spec{
+		Name:            cfg.providers[compactionName].Model,
+		MaxOutputTokens: int64(cfg.compaction.MaxTokens),
 	}
 
 	// Build the default model spec carried by every loop invocation.
