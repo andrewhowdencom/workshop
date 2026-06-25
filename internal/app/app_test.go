@@ -20,6 +20,7 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/state"
+	"github.com/andrewhowdencom/ore/x/compaction"
 	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
@@ -2523,32 +2524,38 @@ func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 func TestCompactionNotifier(t *testing.T) {
 	t.Run("NotifyWithoutReloader", func(t *testing.T) {
 		n := &compactionNotifier{}
-		n.Notify([]state.Turn{}) // should not panic
+		n.Notify([]state.Turn{}, compaction.BoundaryInfo{}) // should not panic
 	})
 
 	t.Run("NotifyWithReloader", func(t *testing.T) {
 		n := &compactionNotifier{}
 		var got []state.Turn
-		n.SetReloader(func(turns []state.Turn) {
+		var gotBoundary compaction.BoundaryInfo
+		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 			got = turns
+			gotBoundary = boundary
 		})
 		want := []state.Turn{{Role: state.RoleUser}}
-		n.Notify(want)
+		wantBoundary := compaction.BoundaryInfo{Model: "test-model"}
+		n.Notify(want, wantBoundary)
 		if len(got) != 1 || got[0].Role != state.RoleUser {
 			t.Errorf("got %v, want %v", got, want)
+		}
+		if gotBoundary != wantBoundary {
+			t.Errorf("got boundary %+v, want %+v", gotBoundary, wantBoundary)
 		}
 	})
 
 	t.Run("SetReloaderOverwrites", func(t *testing.T) {
 		n := &compactionNotifier{}
 		var firstCalled, secondCalled bool
-		n.SetReloader(func(turns []state.Turn) {
+		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 			firstCalled = true
 		})
-		n.SetReloader(func(turns []state.Turn) {
+		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 			secondCalled = true
 		})
-		n.Notify(nil)
+		n.Notify(nil, compaction.BoundaryInfo{})
 		if firstCalled {
 			t.Error("first reloader was called, expected overwrite")
 		}
@@ -2560,10 +2567,10 @@ func TestCompactionNotifier(t *testing.T) {
 	t.Run("NotifyNilTurns", func(t *testing.T) {
 		n := &compactionNotifier{}
 		var got []state.Turn
-		n.SetReloader(func(turns []state.Turn) {
+		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 			got = turns
 		})
-		n.Notify(nil)
+		n.Notify(nil, compaction.BoundaryInfo{})
 		if got != nil {
 			t.Errorf("got %v, want nil", got)
 		}
@@ -2572,7 +2579,7 @@ func TestCompactionNotifier(t *testing.T) {
 	t.Run("ThreadSafety", func(t *testing.T) {
 		n := &compactionNotifier{}
 		var count int64
-		n.SetReloader(func(turns []state.Turn) {
+		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 			atomic.AddInt64(&count, 1)
 		})
 
@@ -2581,14 +2588,14 @@ func TestCompactionNotifier(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				n.Notify([]state.Turn{})
+				n.Notify([]state.Turn{}, compaction.BoundaryInfo{})
 			}()
 		}
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
-				n.SetReloader(func(turns []state.Turn) {
+				n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 					atomic.AddInt64(&count, 1)
 				})
 			}(i)
@@ -2630,11 +2637,14 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 
 	// In ore v0.12 compaction is explicit-only; /compact calls
 	// compaction.Summarize and appends the result. The notifier
-	// receives the post-append turn slice (5 original + 1 compaction).
+	// receives the post-append turn slice (5 original + 1 compaction)
+	// and the boundary info for the just-appended summary turn.
 	var notified []state.Turn
+	var notifiedBoundary compaction.BoundaryInfo
 	notifier := &compactionNotifier{}
-	notifier.SetReloader(func(turns []state.Turn) {
+	notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 		notified = turns
+		notifiedBoundary = boundary
 	})
 
 	cc := &compactCommand{
@@ -2659,12 +2669,26 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	if notified[5].Role != state.RoleSystem {
 		t.Errorf("last notified turn role = %v, want RoleSystem", notified[5].Role)
 	}
+	// The boundary index should point at the compaction turn (the last one).
+	if notifiedBoundary.CompactedThrough != 5 {
+		t.Errorf("notified boundary index = %d, want 5", notifiedBoundary.CompactedThrough)
+	}
+
+	// The state.Meta boundary keys must be written for downstream
+	// Transform / projection to honor the boundary on the next turn.
+	st := stream.State()
+	if got, _ := st.Meta().Get(compaction.MetaKeyBoundaryIndex); got != "5" {
+		t.Errorf("state.Meta[%q] = %q, want %q", compaction.MetaKeyBoundaryIndex, got, "5")
+	}
+	if _, ok := st.Meta().Get(compaction.MetaKeyBoundaryInfo); !ok {
+		t.Errorf("state.Meta[%q] is unset, want it set", compaction.MetaKeyBoundaryInfo)
+	}
 }
 
 func TestBuildManager_CompactionNotifier(t *testing.T) {
 	var notified []state.Turn
 	notifier := &compactionNotifier{}
-	notifier.SetReloader(func(turns []state.Turn) {
+	notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
 		notified = turns
 	})
 
@@ -2692,7 +2716,7 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 
 	// Verify that the notifier is still functional after buildManager.
 	testTurns := []state.Turn{{Role: state.RoleUser}}
-	notifier.Notify(testTurns)
+	notifier.Notify(testTurns, compaction.BoundaryInfo{})
 	if len(notified) != 1 || notified[0].Role != state.RoleUser {
 		t.Errorf("notifier did not receive test turns: got %v", notified)
 	}

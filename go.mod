@@ -4,12 +4,12 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.12.3
+	github.com/andrewhowdencom/ore v0.12.4
 	github.com/andrewhowdencom/ore/x/analytics v0.2.2
-	github.com/andrewhowdencom/ore/x/compaction v0.4.5
+	github.com/andrewhowdencom/ore/x/compaction v0.4.6
 	github.com/andrewhowdencom/ore/x/conduit/http v0.7.5
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.4
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.3
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.4
 	github.com/andrewhowdencom/ore/x/provider/openai v0.6.2
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.2
 	github.com/andrewhowdencom/ore/x/tool v0.5.1
@@ -36,13 +36,13 @@ require (
 	github.com/andrewhowdencom/ore/x/provider/retry v0.0.2 // indirect
 	github.com/andrewhowdencom/ore/x/wire/anthropic v0.5.0 // indirect
 	github.com/andrewhowdencom/ore/x/wire/openai v0.5.0 // indirect
-	github.com/anthropics/anthropic-sdk-go v1.51.0 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.52.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.2.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/standard-webhooks/standard-webhooks/libraries v0.0.1 // indirect
-	go.yaml.in/yaml/v4 v4.0.0-rc.5 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.6 // indirect
 )
 
 require (
@@ -63,10 +63,10 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260615092913-2399af76d5b1 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260622092850-f39628c8a989 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260621010513-945fab64fd3e // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260622092256-25656177ba8e // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
@@ -90,7 +90,7 @@ require (
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/openai/openai-go v1.12.0 // indirect
-	github.com/pelletier/go-toml/v2 v2.4.0 // indirect
+	github.com/pelletier/go-toml/v2 v2.4.2 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
@@ -114,8 +114,8 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260618152121-87f3d3e198d3 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260618152121-87f3d3e198d3 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260622175928-b703f567277d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260622175928-b703f567277d // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
