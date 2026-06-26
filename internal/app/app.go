@@ -839,8 +839,15 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		tc.SetStream(stream)
 		ac.SetStream(stream)
 
-		// Set up progressive skill discovery from repo and home directories.
+		// Set up progressive skill discovery. Built-in skills (the
+		// framework-shipped registry, e.g. `writing-skills`) are
+		// authoritative: passing skills.BuiltInSkills first lets the
+		// framework's defaults win on name collision, matching the
+		// composition pattern in x/tool/skills/doc.go. Repo-local
+		// (.agents/skills) and user-global (~/.agents/skills) discoverers
+		// follow so any unique skills they expose are added to the catalog.
 		var discoverers []skills.Discoverer
+		discoverers = append(discoverers, skills.BuiltInSkills)
 		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills"))
 		if homeDir, err := os.UserHomeDir(); err == nil {
 			discoverers = append(discoverers, skills.NewFSDiscoverer(filepath.Join(homeDir, ".agents", "skills")))

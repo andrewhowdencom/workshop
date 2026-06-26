@@ -2086,6 +2086,49 @@ func TestSkillsFragment_RealFSDiscoverer(t *testing.T) {
 	}
 }
 
+// TestSkillsFragment_ExposesBuiltinSkills verifies that the workshop wires
+// skills.BuiltInSkills into the toolkit, so framework-shipped skills (e.g.
+// `writing-skills` from ore#506) are surfaced in the system prompt without
+// the user having to install them locally. Built-in skills are passed first
+// per the composition guidance in x/tool/skills/doc.go.
+func TestSkillsFragment_ExposesBuiltinSkills(t *testing.T) {
+	// Sanity: the framework must ship at least the writing-skills skill.
+	if sk, ok := skills.BuiltIn("writing-skills"); !ok {
+		t.Fatal("framework BuiltInSkills must contain writing-skills (see ore#506)")
+	} else if sk.Content == "" {
+		t.Fatal("writing-skills content is empty")
+	}
+
+	tk := skills.NewToolkit(skills.BuiltInSkills)
+
+	fragment := tk.SystemPromptFragment()(context.Background())
+	if fragment == "" {
+		t.Fatal("expected non-empty fragment when BuiltInSkills is wired in")
+	}
+	if !strings.Contains(fragment, "writing-skills") {
+		t.Errorf("fragment does not list writing-skills: %q", fragment)
+	}
+	if !strings.Contains(fragment, "call read_skill") {
+		t.Errorf("fragment does not contain read_skill directive: %q", fragment)
+	}
+}
+
+// TestSkillsFragment_BuiltinReadReturnsContent verifies that the
+// framework-shipped writing-skills skill can be resolved to its full
+// SKILL.md content via the StaticSource registered as BuiltInSkills. This
+// catches a missing replace directive on x/tool/skills (which would
+// otherwise route the toolkit to a stale published module without
+// BuiltInSkills).
+func TestSkillsFragment_BuiltinReadReturnsContent(t *testing.T) {
+	body, err := skills.BuiltInSkills.Read(context.Background(), "writing-skills")
+	if err != nil {
+		t.Fatalf("BuiltInSkills.Read(writing-skills) error: %v", err)
+	}
+	if !strings.Contains(body, "writing-skills") {
+		t.Errorf("expected writing-skills content to mention the skill by name; got %q", body)
+	}
+}
+
 // --- Workshop Sandbox Tests ---
 
 func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {

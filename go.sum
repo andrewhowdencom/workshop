@@ -28,8 +28,6 @@ github.com/andrewhowdencom/ore/x/tool/bash v0.3.6 h1:MucfZacbYp6Nrz+XBR0MikNiXmV
 github.com/andrewhowdencom/ore/x/tool/bash v0.3.6/go.mod h1:pCBe+SaewQq0i2/vaFqWv/7eU0qoRadUqgDlEgOqr9w=
 github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.1 h1:q8r//drAlkuUvRc9SZkSv6qi4BC+0R2SDpo9+XjemrI=
 github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.1/go.mod h1:hpFq5ggjbiMl7Kny4OdoYHBBmAqxiVDqMRil9XbwLlM=
-github.com/andrewhowdencom/ore/x/tool/skills v0.5.0 h1:u33okkZR78Gmx45mV/G5B0dUa5zH4X1xV5tz6znvO9E=
-github.com/andrewhowdencom/ore/x/tool/skills v0.5.0/go.mod h1:lOS9WBiD3P2XYygwJGkCb8qli17XLUAs7iHsI9rH08A=
 github.com/andrewhowdencom/ore/x/tool/truncate v0.1.0 h1:cumvWGc/PizBaMBq/hK4LTWSSwgPsgh/x4V4dO6d868=
 github.com/andrewhowdencom/ore/x/tool/truncate v0.1.0/go.mod h1:WLP3YCbkBk26ZY4K0GFQ5HNXglM1t05uYIr0IRQGrNQ=
 github.com/andrewhowdencom/ore/x/verifier v0.1.1 h1:RkRd3gFkX/Pd1pJuXmNpO23ZHVorgaqXEnKQuHzTN0M=
