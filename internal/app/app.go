@@ -110,25 +110,30 @@ type CompactionConfig struct {
 }
 
 // compactionNotifier is a thread-safe callback bridge that forwards compacted
-// turns to a registered reloader (e.g. the TUI conduit's ReloadHistory).
+// turns (and the boundary info for the new collapse marker) to a registered
+// reloader (e.g. the TUI conduit's ReloadHistory). The boundary is the
+// BoundaryInfo returned by compaction.Summarize for the just-appended summary
+// turn; pass the zero value when no compaction has occurred (the TUI renders
+// no collapse marker in that case).
 type compactionNotifier struct {
 	mu       sync.Mutex
-	reloader func(turns []state.Turn)
+	reloader func(turns []state.Turn, boundary compaction.BoundaryInfo)
 }
 
 // SetReloader registers the callback that receives compacted turns.
-func (n *compactionNotifier) SetReloader(fn func(turns []state.Turn)) {
+func (n *compactionNotifier) SetReloader(fn func(turns []state.Turn, boundary compaction.BoundaryInfo)) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.reloader = fn
 }
 
-// Notify forwards the compacted turns to the registered reloader if any.
-func (n *compactionNotifier) Notify(turns []state.Turn) {
+// Notify forwards the compacted turns (and boundary) to the registered reloader
+// if any.
+func (n *compactionNotifier) Notify(turns []state.Turn, boundary compaction.BoundaryInfo) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.reloader != nil {
-		n.reloader(turns)
+		n.reloader(turns, boundary)
 	}
 }
 
@@ -290,8 +295,8 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 
 	// Wire the notifier to reload the TUI history when compaction occurs.
 	if tuiImpl, ok := tuiConduit.(*tui.TUI); ok {
-		notifier.SetReloader(func(turns []state.Turn) {
-			_ = tuiImpl.ReloadHistory(turns) // Best-effort: ignore reload errors to avoid disrupting compaction.
+		notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+			_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
 		})
 	}
 
@@ -623,7 +628,7 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	if len(turns) == 0 {
 		return slash.Result{}, fmt.Errorf("no turns to compact")
 	}
-	turn, err := compaction.Summarize(ctx, c.agent, turns)
+	turn, info, err := compaction.Summarize(ctx, c.agent, turns)
 	if err != nil {
 		// Truncation: the model hit its output cap mid-summary. Leave
 		// the buffer unchanged and surface the failure to the user.
@@ -640,8 +645,21 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	if err := c.stream.AppendTurn(ctx, turn.Role, turn.Artifacts...); err != nil {
 		return slash.Result{}, fmt.Errorf("append compaction turn: %w", err)
 	}
+	// Record the boundary on state.Meta so the next Transform call
+	// projects the buffer from the compaction turn onward. The boundary
+	// index is the position of the just-appended summary turn. MarkBoundary
+	// takes a pre-encoded JSON string for the boundary info to keep the
+	// session package free of any x/compaction dependency.
+	boundaryIdx := len(c.stream.Turns()) - 1
+	encoded, err := compaction.EncodeBoundaryInfo(info)
+	if err != nil {
+		return slash.Result{}, fmt.Errorf("encode boundary info: %w", err)
+	}
+	if err := c.stream.MarkBoundary(boundaryIdx, encoded); err != nil {
+		return slash.Result{}, fmt.Errorf("mark boundary: %w", err)
+	}
 	if c.notifier != nil {
-		c.notifier.Notify(c.stream.Turns())
+		c.notifier.Notify(c.stream.Turns(), info)
 	}
 	if err := c.stream.Save(); err != nil {
 		return slash.Result{}, fmt.Errorf("save thread: %w", err)
