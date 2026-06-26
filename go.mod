@@ -122,6 +122,8 @@ require (
 
 replace github.com/andrewhowdencom/ore/x/tool/set_title => ../ore/x/tool/set_title
 
+replace github.com/andrewhowdencom/ore/x/tool/skills => ../ore/x/tool/skills
+
 replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
 
 replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
