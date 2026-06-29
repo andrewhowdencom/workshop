@@ -18,7 +18,7 @@ import (
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
-	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/ore/junk"
 	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/x/compaction"
 	slash "github.com/andrewhowdencom/ore/x/slash"
@@ -356,9 +356,9 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	prov := &testSlashProvider{}
-	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
@@ -422,11 +422,11 @@ func TestRoleSlashHandler(t *testing.T) {
 // newRoleCommandStream creates a session stream suitable for the
 // role-command tests below. The test provider is a no-op; the role
 // handler does not invoke the LLM.
-func newRoleCommandStream(t *testing.T) *session.Stream {
+func newRoleCommandStream(t *testing.T) *junk.Stream {
 	t.Helper()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	prov := &testSlashProvider{}
-	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
@@ -523,7 +523,7 @@ func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
 // files on disk (ideation and planner) for the role-switching tests
 // below. The stream has no role set; callers set it explicitly when
 // they need a non-empty starting role.
-func newRoleCommandStreamWithRoles(t *testing.T) (*session.Stream, string) {
+func newRoleCommandStreamWithRoles(t *testing.T) (*junk.Stream, string) {
 	t.Helper()
 	dir := t.TempDir()
 	for _, name := range []string{"ideation", "planner"} {
@@ -598,9 +598,9 @@ func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
 // "disable /compact". The handler must succeed and the stream must gain
 // a summary turn.
 func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	prov := &testSummarizeProvider{}
-	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
@@ -613,7 +613,7 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 
 	// Pre-populate the stream with 5 user turns.
 	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
+		err = stream.Process(context.Background(), junk.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
 		if err != nil {
 			t.Fatalf("process event %d: %v", i, err)
 		}
@@ -646,9 +646,9 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 }
 
 func TestCompactSlashHandler_Enabled(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	prov := &testSummarizeProvider{}
-	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
@@ -661,7 +661,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 
 	// Pre-populate the stream with 5 user turns.
 	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
+		err = stream.Process(context.Background(), junk.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
 		if err != nil {
 			t.Fatalf("process event %d: %v", i, err)
 		}
@@ -1158,7 +1158,7 @@ func TestCoAuthoredByTrailer(t *testing.T) {
 }
 
 func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1171,7 +1171,7 @@ func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
 }
 
 func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1187,7 +1187,7 @@ func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
 }
 
 func TestMakeGitCommitHandler_MissingTitle(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1222,7 +1222,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1322,7 +1322,7 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1643,7 +1643,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1737,7 +1737,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1789,7 +1789,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 	dir := t.TempDir() // empty directory, no AGENTS.md or CLAUDE.md
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -1848,7 +1848,7 @@ func (m *mockSkillDiscoverer) Discover(ctx context.Context) ([]skills.SkillMeta,
 	return m.meta, nil
 }
 
-func (m *mockSkillDiscoverer) Read(ctx context.Context, name string) (string, error) {
+func (m *mockSkillDiscoverer) Read(ctx context.Context, name string, path string) (string, error) {
 	return m.read[name], nil
 }
 
@@ -1956,7 +1956,7 @@ func (m *mockSkillDiscovererError) Discover(ctx context.Context) ([]skills.Skill
 	return nil, fmt.Errorf("simulated discoverer error")
 }
 
-func (m *mockSkillDiscovererError) Read(ctx context.Context, name string) (string, error) {
+func (m *mockSkillDiscovererError) Read(ctx context.Context, name string, path string) (string, error) {
 	return "", fmt.Errorf("simulated read error")
 }
 
@@ -2120,7 +2120,7 @@ func TestSkillsFragment_ExposesBuiltinSkills(t *testing.T) {
 // otherwise route the toolkit to a stale published module without
 // BuiltInSkills).
 func TestSkillsFragment_BuiltinReadReturnsContent(t *testing.T) {
-	body, err := skills.BuiltInSkills.Read(context.Background(), "writing-skills")
+	body, err := skills.BuiltInSkills.Read(context.Background(), "writing-skills", "")
 	if err != nil {
 		t.Fatalf("BuiltInSkills.Read(writing-skills) error: %v", err)
 	}
@@ -2133,7 +2133,7 @@ func TestSkillsFragment_BuiltinReadReturnsContent(t *testing.T) {
 
 func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2153,7 +2153,7 @@ func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
 
 func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
 	worktree := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2172,7 +2172,7 @@ func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
 }
 
 func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2191,7 +2191,7 @@ func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
 
 func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2206,7 +2206,7 @@ func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
 }
 
 func TestWorkshopSandbox_WorkingDirectory_WithoutWorktree(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2225,7 +2225,7 @@ func TestReadFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2254,7 +2254,7 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 	}
 
 	worktree := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2278,7 +2278,7 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 
 func TestWriteFile_ResolvesRelativePathInWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2309,7 +2309,7 @@ func TestEditFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2344,7 +2344,7 @@ func TestListDirectory_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2372,7 +2372,7 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2399,7 +2399,7 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 
 func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
 	worktree := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2424,7 +2424,7 @@ func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
 func TestBash_ExplicitWorkingDirectoryRespected(t *testing.T) {
 	worktree := t.TempDir()
 	explicitDir := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2486,7 +2486,7 @@ func TestGitCommitHandler_WorktreeAware(t *testing.T) {
 		t.Fatalf("git add in worktree: %v", err)
 	}
 
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2515,7 +2515,7 @@ func TestGitCommitHandler_WorktreeAware(t *testing.T) {
 }
 
 func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2534,7 +2534,7 @@ func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
 
 func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	worktree := t.TempDir()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	thr, err := store.Create()
 	if err != nil {
 		t.Fatal(err)
@@ -2652,9 +2652,9 @@ func TestCompactionNotifier(t *testing.T) {
 }
 
 func TestCompactSlashHandler_Notifies(t *testing.T) {
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	prov := &testSummarizeProvider{}
-	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
@@ -2667,7 +2667,7 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 
 	// Pre-populate the stream with 5 user turns.
 	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), session.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
+		err = stream.Process(context.Background(), junk.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
 		if err != nil {
 			t.Fatalf("process event %d: %v", i, err)
 		}
@@ -2768,11 +2768,11 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 // newThinkingCommandStream creates a fresh in-memory session manager
 // and stream for the thinking-command tests. The provider is a
 // no-op; only the slash handler is exercised.
-func newThinkingCommandStream(t *testing.T) *session.Stream {
+func newThinkingCommandStream(t *testing.T) *junk.Stream {
 	t.Helper()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	prov := &testSlashProvider{}
-	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
@@ -2998,11 +2998,11 @@ func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 // newAnalyticsCommandStream creates a fresh in-memory session manager
 // and stream for the analytics-command tests. The provider is a no-op;
 // only the slash handler is exercised.
-func newAnalyticsCommandStream(t *testing.T) *session.Stream {
+func newAnalyticsCommandStream(t *testing.T) *junk.Stream {
 	t.Helper()
-	store := session.NewMemoryStore()
+	store := junk.NewMemoryStore()
 	prov := &testSlashProvider{}
-	mgr := session.NewManager(store, prov, func(stream *session.Stream) ([]loop.Option, error) {
+	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
 	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
 		return st, nil
@@ -3043,10 +3043,10 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	stream := newAnalyticsCommandStream(t)
 
 	// Seed two turns: one with a single Text artifact, one with two.
-	if err := stream.Process(context.Background(), session.UserMessageEvent{Content: "first"}); err != nil {
+	if err := stream.Process(context.Background(), junk.UserMessageEvent{Content: "first"}); err != nil {
 		t.Fatalf("process first turn: %v", err)
 	}
-	if err := stream.Process(context.Background(), session.UserMessageEvent{Content: "second turn"}); err != nil {
+	if err := stream.Process(context.Background(), junk.UserMessageEvent{Content: "second turn"}); err != nil {
 		t.Fatalf("process second turn: %v", err)
 	}
 

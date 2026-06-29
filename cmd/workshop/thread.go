@@ -1,19 +1,161 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"text/tabwriter"
 	"time"
 
-	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/ore/junk"
 	"github.com/andrewhowdencom/ore/x/analytics"
 	"github.com/andrewhowdencom/ore/x/export"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+// Pagination parameters for `thread list`. Inlined here because the
+// `ore/junk` package split `DefaultPageSize`/`MaxPageSize`/`Paginate` out
+// when `session` was renamed to `junk`; the cursor format is small and
+// stdlib-only, so duplicating it is simpler than depending on the
+// private helper inside `x/conduit/http`.
+const (
+	defaultPageSize = 20
+	maxPageSize     = 100
+)
+
+// errInvalidCursor is the sentinel returned by paginateThreads when the
+// opaque cursor cannot be decoded. The CLI reports it as "invalid
+// --cursor".
+var errInvalidCursor = errors.New("invalid pagination cursor")
+
+// threadCursor is the opaque pagination cursor. Version allows the
+// encoding to evolve without breaking already-stored cursors. The cursor
+// identifies the LAST item of the previous page; subsequent pages return
+// items that sort strictly after this position in (updated_at desc,
+// id asc) order.
+type threadCursor struct {
+	Version   int       `json:"v"`
+	UpdatedAt time.Time `json:"u"`
+	ID        string    `json:"i"`
+}
+
+const threadCursorVersion = 1
+
+// encode returns the opaque base64-encoded JSON form of the cursor.
+func (c threadCursor) encode() (string, error) {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return "", fmt.Errorf("marshal cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(data), nil
+}
+
+// decodeThreadCursor parses a base64-encoded JSON cursor. Returns an
+// error wrapping errInvalidCursor for any parse failure, unknown
+// version, or empty input.
+func decodeThreadCursor(s string) (threadCursor, error) {
+	if s == "" {
+		return threadCursor{}, fmt.Errorf("%w: empty cursor", errInvalidCursor)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return threadCursor{}, fmt.Errorf("%w: %v", errInvalidCursor, err)
+	}
+	var c threadCursor
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return threadCursor{}, fmt.Errorf("%w: %v", errInvalidCursor, err)
+	}
+	if c.Version != threadCursorVersion {
+		return threadCursor{}, fmt.Errorf("%w: unsupported version %d", errInvalidCursor, c.Version)
+	}
+	return c, nil
+}
+
+// paginateThreads sorts threads by (updated_at desc, id asc) and returns
+// a single page of at most limit items, starting strictly after the
+// position identified by cursor. An empty cursor means "start from the
+// beginning". Returns errInvalidCursor when the cursor cannot be
+// decoded. The input slice is sorted in place; the returned page is a
+// sub-slice of the input.
+func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*junk.Thread, nextCursor string, err error) {
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > maxPageSize {
+		limit = maxPageSize
+	}
+
+	slices.SortFunc(threads, compareThreads)
+
+	start := 0
+	if cursor != "" {
+		c, err := decodeThreadCursor(cursor)
+		if err != nil {
+			return nil, "", err
+		}
+		start = len(threads) // default: no items after cursor
+		for i, t := range threads {
+			if threadIsAfterCursor(t, c) {
+				start = i
+				break
+			}
+		}
+	}
+
+	end := start + limit
+	if end > len(threads) {
+		end = len(threads)
+	}
+
+	page = threads[start:end]
+
+	if end < len(threads) {
+		last := threads[end-1]
+		next, encErr := (threadCursor{
+			Version:   threadCursorVersion,
+			UpdatedAt: last.UpdatedAt,
+			ID:        last.ID,
+		}).encode()
+		if encErr != nil {
+			return nil, "", encErr
+		}
+		nextCursor = next
+	}
+
+	return page, nextCursor, nil
+}
+
+// compareThreads orders threads by (updated_at desc, id asc). The id
+// tiebreaker is required for deterministic pagination across threads
+// that share a timestamp.
+func compareThreads(a, b *junk.Thread) int {
+	if a.UpdatedAt.Equal(b.UpdatedAt) {
+		return strings.Compare(a.ID, b.ID)
+	}
+	if a.UpdatedAt.After(b.UpdatedAt) {
+		return -1 // a comes first (later updated_at)
+	}
+	return 1
+}
+
+// threadIsAfterCursor reports whether t sorts strictly after the cursor
+// position in (updated_at desc, id asc) order. Items equal to the cursor
+// are NOT considered "after"; the cursor is exclusive.
+func threadIsAfterCursor(t *junk.Thread, c threadCursor) bool {
+	if t.UpdatedAt.Before(c.UpdatedAt) {
+		return true
+	}
+	if t.UpdatedAt.Equal(c.UpdatedAt) && t.ID > c.ID {
+		return true
+	}
+	return false
+}
 
 var threadCmd = &cobra.Command{
 	Use:   "thread",
@@ -43,8 +185,8 @@ var threadAnalyticsCmd = &cobra.Command{
 func init() {
 	// thread list: paginated, sorted by recency. The default sort
 	// order is implicit; no lookback filter.
-	threadListCmd.Flags().Int("limit", session.DefaultPageSize,
-		fmt.Sprintf("Page size (default %d, max %d, clamped)", session.DefaultPageSize, session.MaxPageSize))
+	threadListCmd.Flags().Int("limit", defaultPageSize,
+		fmt.Sprintf("Page size (default %d, max %d, clamped)", defaultPageSize, maxPageSize))
 	threadListCmd.Flags().String("cursor", "",
 		"Opaque pagination cursor returned by a previous invocation")
 	threadListCmd.Flags().Bool("all", false,
@@ -91,7 +233,7 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read --all: %w", err)
 	}
 
-	store, err := session.NewJSONStore(storeDir)
+	store, err := junk.NewJSONStore(storeDir)
 	if err != nil {
 		return fmt.Errorf("create JSON store: %w", err)
 	}
@@ -106,16 +248,16 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 // after the table so the user can continue.
 //
 // The function is the seam used by tests; runThreadList is the cobra
-// entry point. limit is the page size (clamped by session.Paginate);
+// entry point. limit is the page size (clamped by paginateThreads);
 // cursor is the opaque pagination cursor from a previous call (empty
 // for the first page); all walks the cursor to exhaustion and
 // suppresses the hint. The store is read once into a slice; the
 // helper sorts in place and returns sub-slices, so memory cost is
 // O(N) full-thread reads on the first call and O(limit) per
-// subsequent page in --all mode (because Paginate is re-called on
-// the same underlying slice, which the caller is responsible for
+// subsequent page in --all mode (because paginateThreads is re-called
+// on the same underlying slice, which the caller is responsible for
 // keeping populated).
-func runThreadListWithStore(limit int, cursor string, all bool, store session.Store, w io.Writer) error {
+func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store, w io.Writer) error {
 	threads, err := store.List()
 	if err != nil {
 		return fmt.Errorf("list threads: %w", err)
@@ -126,9 +268,9 @@ func runThreadListWithStore(limit int, cursor string, all bool, store session.St
 
 	current := cursor
 	for {
-		page, next, err := session.Paginate(threads, limit, current)
+		page, next, err := paginateThreads(threads, limit, current)
 		if err != nil {
-			if errors.Is(err, session.ErrInvalidCursor) {
+			if errors.Is(err, errInvalidCursor) {
 				return fmt.Errorf("invalid --cursor: %w", err)
 			}
 			return fmt.Errorf("paginate threads: %w", err)
@@ -167,7 +309,7 @@ func runThreadExport(cmd *cobra.Command, args []string) error {
 		storeDir = defaultStoreDir()
 	}
 
-	store, err := session.NewJSONStore(storeDir)
+	store, err := junk.NewJSONStore(storeDir)
 	if err != nil {
 		return fmt.Errorf("create JSON store: %w", err)
 	}
@@ -188,9 +330,9 @@ func runThreadExport(cmd *cobra.Command, args []string) error {
 	return runThreadExportWithStore(store, args[0], format, w)
 }
 
-func runThreadExportWithStore(store session.Store, id, format string, w io.Writer) error {
+func runThreadExportWithStore(store junk.Store, id, format string, w io.Writer) error {
 	thread, err := store.Get(id)
-	if errors.Is(err, session.ErrThreadNotFound) {
+	if errors.Is(err, junk.ErrThreadNotFound) {
 		return fmt.Errorf("thread not found: %s", id)
 	} else if err != nil {
 		return fmt.Errorf("get thread: %w", err)
@@ -214,7 +356,7 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 		storeDir = defaultStoreDir()
 	}
 
-	store, err := session.NewJSONStore(storeDir)
+	store, err := junk.NewJSONStore(storeDir)
 	if err != nil {
 		return fmt.Errorf("create JSON store: %w", err)
 	}
@@ -250,11 +392,11 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 //
 // This function is read-only by construction: it never calls store.Save
 // or store.Create, and only reads from the store via List / Get.
-func runThreadAnalyticsWithStore(days int, id string, store session.Store, w io.Writer) error {
+func runThreadAnalyticsWithStore(days int, id string, store junk.Store, w io.Writer) error {
 	var stats []analytics.Stats
 	if id != "" {
 		thread, err := store.Get(id)
-		if errors.Is(err, session.ErrThreadNotFound) {
+		if errors.Is(err, junk.ErrThreadNotFound) {
 			return fmt.Errorf("thread not found: %s", id)
 		} else if err != nil {
 			return fmt.Errorf("get thread: %w", err)
@@ -283,27 +425,27 @@ func runThreadAnalyticsWithStore(days int, id string, store session.Store, w io.
 	return nil
 }
 
-// storeFilter wraps a session.Store so that List() returns only threads
+// storeFilter wraps a junk.Store so that List() returns only threads
 // whose UpdatedAt is at-or-after the configured cutoff. It exists to let
 // runThreadAnalyticsWithStore apply a --days lookback before delegating
 // to analytics.AnalyzeStore, which only accepts a Store.
 //
-// The embedded session.Store auto-forwards all other methods unchanged;
+// The embedded junk.Store auto-forwards all other methods unchanged;
 // only List is overridden. This is intentional — the analytics path is
 // read-only, but the analyzer still requires a value of type
-// session.Store, so the wrapper must satisfy the full interface.
+// junk.Store, so the wrapper must satisfy the full interface.
 type storeFilter struct {
-	session.Store
+	junk.Store
 	cutoff time.Time
 }
 
-func (s *storeFilter) List() ([]*session.Thread, error) {
+func (s *storeFilter) List() ([]*junk.Thread, error) {
 	threads, err := s.Store.List()
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := make([]*session.Thread, 0, len(threads))
+	filtered := make([]*junk.Thread, 0, len(threads))
 	for _, thr := range threads {
 		if thr.UpdatedAt.After(s.cutoff) {
 			filtered = append(filtered, thr)
