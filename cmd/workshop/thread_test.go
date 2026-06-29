@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/andrewhowdencom/ore/artifact"
-	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/ore/junk"
 	"github.com/andrewhowdencom/ore/state"
 	"github.com/spf13/viper"
 )
@@ -21,7 +21,7 @@ import (
 // error when store.dir is empty, but that depended on the default
 // XDG data directory being clean. On machines with prior workshop
 // sessions, that directory can contain thread files that the JSON
-// store cannot parse, and the resulting panic (in session's
+// store cannot parse, and the resulting panic (in junk's
 // unmarshalTurns, not in workshop code) propagates out of List() and
 // fails the test for an environmental reason.
 //
@@ -35,7 +35,7 @@ import (
 func TestThreadList_WithStore(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestThreadList_WithStore(t *testing.T) {
 func TestThreadList_Pagination_DefaultSort(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestThreadList_Pagination_DefaultSort(t *testing.T) {
 // remaining threads reported via the --next hint line.
 func TestThreadList_Pagination_LimitHonored(t *testing.T) {
 	tmpDir := t.TempDir()
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestThreadList_Pagination_LimitHonored(t *testing.T) {
 // line.
 func TestThreadList_Pagination_AllWalksAllPages(t *testing.T) {
 	tmpDir := t.TempDir()
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestThreadList_Pagination_AllWalksAllPages(t *testing.T) {
 // the listing from the next page.
 func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
 // unparseable cursor produces an error mentioning "cursor".
 func TestThreadList_Pagination_InvalidCursor(t *testing.T) {
 	tmpDir := t.TempDir()
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestThreadList_Pagination_InvalidCursor(t *testing.T) {
 // both threads (and no hint line, since both fit on one page).
 func TestThreadList_Pagination_LimitClamping(t *testing.T) {
 	tmpDir := t.TempDir()
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestThreadList_RemovedDaysFlag(t *testing.T) {
 func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -456,7 +456,7 @@ func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
 	}
 
 	// Old thread (60 days ago) with a 5-byte text artifact. The shape
-	// must match session/serialize.go (a {kind, data} envelope
+	// must match junk/serialize.go (a {kind, data} envelope
 	// around the artifact body), otherwise JSONStore silently skips
 	// the file.
 	oldID := "00000000000000000000000000000001"
@@ -519,7 +519,7 @@ func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
 func TestThreadExport_Success(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestThreadExport_Success(t *testing.T) {
 func TestThreadExport_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -584,7 +584,7 @@ func TestThreadExport_NotFound(t *testing.T) {
 func TestThreadExport_FileOutput(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -625,7 +625,7 @@ func TestThreadExport_FileOutput(t *testing.T) {
 func TestThreadExport_UnsupportedFormat(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -671,7 +671,7 @@ func TestThreadExport_FileCreationError(t *testing.T) {
 
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -713,7 +713,7 @@ func TestThreadExport_FileCreationError(t *testing.T) {
 func TestThreadExport_Stdout(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestThreadExport_Stdout(t *testing.T) {
 func TestThreadExport_FileOutput_Formats(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -826,7 +826,7 @@ func TestThreadExport_FileOutput_Formats(t *testing.T) {
 func TestThreadAnalytics_StoreWide(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -898,7 +898,7 @@ func TestThreadAnalytics_StoreWide(t *testing.T) {
 func TestThreadAnalytics_DaysFilter(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -915,8 +915,8 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 
 	// Old thread written as raw JSON with a 60-day-old timestamp.
 	// The format must match the on-disk envelope shape produced by
-	// session/serialize.go (a {kind, data} wrapper around the artifact
-	// body); otherwise session.JSONStore silently skips the file.
+	// junk/serialize.go (a {kind, data} wrapper around the artifact
+	// body); otherwise junk.JSONStore silently skips the file.
 	oldID := "00000000000000000000000000000001"
 	oldTime := time.Now().AddDate(0, 0, -60).Format(time.RFC3339)
 	oldJSON := fmt.Sprintf(
@@ -929,7 +929,7 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 	}
 
 	// Reload the store so it picks up the manually written file.
-	store, err = session.NewJSONStore(tmpDir)
+	store, err = junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("reload store: %v", err)
 	}
@@ -964,7 +964,7 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 func TestThreadAnalytics_ThreadID(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
@@ -1028,7 +1028,7 @@ func TestThreadAnalytics_ThreadID(t *testing.T) {
 func TestThreadAnalytics_ThreadNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := session.NewJSONStore(tmpDir)
+	store, err := junk.NewJSONStore(tmpDir)
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}

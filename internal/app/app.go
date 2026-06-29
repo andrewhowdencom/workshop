@@ -30,7 +30,7 @@ import (
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
-	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/ore/junk"
 	"github.com/andrewhowdencom/ore/state"
 	"github.com/andrewhowdencom/ore/tool"
 
@@ -375,7 +375,7 @@ type metadataStore interface {
 type roleCommand struct {
 	mu       sync.Mutex
 	rdir     string
-	stream   *session.Stream
+	stream   *junk.Stream
 	resolver *source.FileResolver
 }
 
@@ -384,7 +384,7 @@ type roleCommand struct {
 // stream's current role metadata, if any. Existing streams preserve
 // their previously-set role; new streams start with no role until
 // one is selected via /role.
-func (c *roleCommand) SetStream(stream *session.Stream) {
+func (c *roleCommand) SetStream(stream *junk.Stream) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stream = stream
@@ -511,12 +511,12 @@ func (c *roleCommand) formatRoleList() string {
 // time; buildInvokeOptions reads the same key at request time.
 type thinkingCommand struct {
 	mu     sync.Mutex
-	stream *session.Stream
+	stream *junk.Stream
 }
 
 // SetStream updates the shared stream reference. Called by the
 // stepFactory on every stream open.
-func (c *thinkingCommand) SetStream(s *session.Stream) {
+func (c *thinkingCommand) SetStream(s *junk.Stream) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stream = s
@@ -608,7 +608,7 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 // told why.
 type compactCommand struct {
 	mu       sync.Mutex
-	stream   *session.Stream
+	stream   *junk.Stream
 	agent    *agent.Agent
 	notifier *compactionNotifier
 }
@@ -668,7 +668,7 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 }
 
 // SetStream updates the shared stream reference.
-func (c *compactCommand) SetStream(s *session.Stream) {
+func (c *compactCommand) SetStream(s *junk.Stream) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stream = s
@@ -682,7 +682,7 @@ func (c *compactCommand) SetStream(s *session.Stream) {
 // budget calling it.
 type analyticsCommand struct {
 	mu     sync.Mutex
-	stream *session.Stream
+	stream *junk.Stream
 }
 
 // Handler analyzes the current thread's turns and renders the result
@@ -713,7 +713,7 @@ func (c *analyticsCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slas
 
 // SetStream updates the shared stream reference. Called by the
 // stepFactory on every stream open.
-func (c *analyticsCommand) SetStream(s *session.Stream) {
+func (c *analyticsCommand) SetStream(s *junk.Stream) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.stream = s
@@ -747,7 +747,7 @@ func (s *workshopSandbox) WorkingDirectory() string {
 }
 
 // buildManager creates the shared session manager from configuration.
-func buildManager(cfg *config) (*session.Manager, error) {
+func buildManager(cfg *config) (*junk.Manager, error) {
 	// Resolve tracer (noop fallback for tests that don't use WithTracer).
 	tracer := cfg.tracer
 	if tracer == nil {
@@ -760,7 +760,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	if storeDir == "" {
 		storeDir = filepath.Join(xdg.DataHome, "workshop", "threads")
 	}
-	store, err := session.NewJSONStore(storeDir)
+	store, err := junk.NewJSONStore(storeDir)
 	if err != nil {
 		return nil, fmt.Errorf("create JSON store: %w", err)
 	}
@@ -833,7 +833,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
 
 	// Step factory: inject system prompt and guardrails as transforms.
-	stepFactory := func(stream *session.Stream) ([]loop.Option, error) {
+	stepFactory := func(stream *junk.Stream) ([]loop.Option, error) {
 		rc.SetStream(stream)
 		cc.SetStream(stream)
 		tc.SetStream(stream)
@@ -895,7 +895,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 
 		// Workspace and git tools.
 		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(stream))
-		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this session.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(stream))
+		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this junk.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(stream))
 		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(stream, cfg.defaultProviderConfig()))
 
 		// Title management.
@@ -932,7 +932,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 		branch = "(not in git repo)"
 	}
 
-	defaultMeta := func(stream *session.Stream) map[string]string {
+	defaultMeta := func(stream *junk.Stream) map[string]string {
 		defaults := map[string]string{
 			"thread_id":  stream.ID(),
 			"cwd":        shortCwd,
@@ -962,7 +962,7 @@ func buildManager(cfg *config) (*session.Manager, error) {
 	}
 
 	// Create session manager.
-	return session.NewManager(store, prov, stepFactory, processor, session.WithDefaultMetadata(defaultMeta), session.WithInterceptor(slashReg)), nil
+	return junk.NewManager(store, prov, stepFactory, processor, junk.WithDefaultMetadata(defaultMeta), junk.WithInterceptor(slashReg)), nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
