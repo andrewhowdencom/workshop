@@ -19,8 +19,9 @@ import (
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/junk"
-	"github.com/andrewhowdencom/ore/state"
+	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/x/compaction"
+	"github.com/andrewhowdencom/ore/x/provider/retry"
 	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
@@ -120,6 +121,27 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 	if prov == nil {
 		t.Fatal("expected non-nil provider for valid anthropic+openrouter config")
 	}
+}
+
+// TestNewProvider_WrapsWithRetry locks in the retry-decoration contract:
+// newProvider must always wrap the inner provider with *retry.Provider so
+// transient 5xx/429 errors are retried. If a future refactor drops the
+// wrap, this test fails.
+func TestNewProvider_WrapsWithRetry(t *testing.T) {
+	t.Run("openai", func(t *testing.T) {
+		pc := ProviderConfig{Kind: "openai", APIKey: "sk-test", Model: "gpt-4o"}
+		prov, err := newProvider("openai", &pc, nil)
+		require.NoError(t, err)
+		_, ok := prov.(*retry.Provider)
+		assert.True(t, ok, "openai provider should be wrapped with *retry.Provider, got %T", prov)
+	})
+	t.Run("anthropic", func(t *testing.T) {
+		pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
+		prov, err := newProvider("anthropic", &pc, nil)
+		require.NoError(t, err)
+		_, ok := prov.(*retry.Provider)
+		assert.True(t, ok, "anthropic provider should be wrapped with *retry.Provider, got %T", prov)
+	})
 }
 
 // (The three "WarnsOnMaxTokensLeqThinkingBudget" tests were removed

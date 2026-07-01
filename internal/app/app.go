@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/cognitive"
@@ -31,7 +32,7 @@ import (
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/junk"
-	"github.com/andrewhowdencom/ore/state"
+	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/tool"
 
 	"go.opentelemetry.io/otel/metric"
@@ -46,6 +47,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/guardrails"
 	"github.com/andrewhowdencom/ore/x/provider/anthropic"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
+	"github.com/andrewhowdencom/ore/x/provider/retry"
 	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
@@ -1099,6 +1101,23 @@ func resolveThinkingLevel(s string) models.ThinkingLevel {
 	return level
 }
 
+// wrapWithRetry wraps a provider.Provider with the workshop's
+// hardcoded retry policy: 5 attempts, 500ms base delay, 10s cap,
+// default classifier (5xx + 429 + Retry-After). When tracer is
+// non-nil, retry.invoke spans are emitted as parents of the
+// inner provider's spans.
+func wrapWithRetry(p provider.Provider, tracer trace.Tracer) provider.Provider {
+	opts := []retry.Option{
+		retry.WithMaxAttempts(5),
+		retry.WithBaseDelay(500 * time.Millisecond),
+		retry.WithMaxDelay(10 * time.Second),
+	}
+	if tracer != nil {
+		opts = append(opts, retry.WithTracer(tracer))
+	}
+	return retry.New(p, opts...)
+}
+
 // newProvider constructs a provider.Provider from generic ProviderConfig.
 //
 // newProvider takes a pointer to ProviderConfig because the anthropic
@@ -1126,7 +1145,11 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 		if tracer != nil {
 			opts = append(opts, openai.WithTracer(tracer))
 		}
-		return openai.New(opts...)
+		inner, err := openai.New(opts...)
+		if err != nil {
+			return nil, err
+		}
+		return wrapWithRetry(inner, tracer), nil
 	case "anthropic":
 		if pc.APIKey == "" {
 			return nil, fmt.Errorf("missing required provider config: api_key")
@@ -1146,7 +1169,11 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 		if tracer != nil {
 			opts = append(opts, anthropic.WithTracer(tracer))
 		}
-		return anthropic.New(opts...)
+		inner, err := anthropic.New(opts...)
+		if err != nil {
+			return nil, err
+		}
+		return wrapWithRetry(inner, tracer), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
 	}

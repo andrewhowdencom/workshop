@@ -12,7 +12,7 @@ import (
 
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/junk"
-	"github.com/andrewhowdencom/ore/state"
+	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/spf13/viper"
 )
 
