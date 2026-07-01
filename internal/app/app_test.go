@@ -19,7 +19,7 @@ import (
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/junk"
-	"github.com/andrewhowdencom/ore/state"
+	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/x/compaction"
 	slash "github.com/andrewhowdencom/ore/x/slash"
 	"github.com/andrewhowdencom/ore/x/systemprompt"

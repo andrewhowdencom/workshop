@@ -134,6 +134,22 @@ replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
 
 replace github.com/andrewhowdencom/ore/x/llmbytes => ../ore/x/llmbytes
 
+replace github.com/andrewhowdencom/ore/x/verifier => ../ore/x/verifier
+
+replace github.com/andrewhowdencom/ore/x/compaction => ../ore/x/compaction
+
+replace github.com/andrewhowdencom/ore/x/provider/openai => ../ore/x/provider/openai
+
+replace github.com/andrewhowdencom/ore/x/provider/anthropic => ../ore/x/provider/anthropic
+
+replace github.com/andrewhowdencom/ore/x/provider/retry => ../ore/x/provider/retry
+
+replace github.com/andrewhowdencom/ore/x/tool => ../ore/x/tool
+
+replace github.com/andrewhowdencom/ore/x/tool/bash => ../ore/x/tool/bash
+
+replace github.com/andrewhowdencom/ore/x/tool/filesystem => ../ore/x/tool/filesystem
+
 replace github.com/andrewhowdencom/ore/x/wire/anthropic => ../ore/x/wire/anthropic
 
 replace github.com/andrewhowdencom/ore/x/wire/openai => ../ore/x/wire/openai
