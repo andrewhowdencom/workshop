@@ -4,17 +4,17 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v0.13.1
-	github.com/andrewhowdencom/ore/x/analytics v0.2.3
-	github.com/andrewhowdencom/ore/x/compaction v0.4.7
-	github.com/andrewhowdencom/ore/x/conduit/http v0.7.6
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.5
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.5
-	github.com/andrewhowdencom/ore/x/provider/openai v0.6.2
-	github.com/andrewhowdencom/ore/x/telemetry v0.1.2
-	github.com/andrewhowdencom/ore/x/tool v0.5.1
+	github.com/andrewhowdencom/ore v1.1.0
+	github.com/andrewhowdencom/ore/x/analytics v0.2.4
+	github.com/andrewhowdencom/ore/x/compaction v0.5.0
+	github.com/andrewhowdencom/ore/x/conduit/http v0.8.0
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.6
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.6
+	github.com/andrewhowdencom/ore/x/provider/openai v0.6.3
+	github.com/andrewhowdencom/ore/x/telemetry v0.1.3
+	github.com/andrewhowdencom/ore/x/tool v0.6.0
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.6
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.1
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.2
 	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.1
 	github.com/andrewhowdencom/ore/x/tool/skills v0.5.1
 	github.com/andrewhowdencom/ore/x/usage v0.2.1
@@ -33,10 +33,10 @@ require (
 )
 
 require (
-	github.com/andrewhowdencom/ore/x/provider/retry v0.0.2
+	github.com/andrewhowdencom/ore/x/provider/retry v0.0.3
 	github.com/andrewhowdencom/ore/x/wire/anthropic v0.5.0 // indirect
 	github.com/andrewhowdencom/ore/x/wire/openai v0.5.0 // indirect
-	github.com/anthropics/anthropic-sdk-go v1.52.0 // indirect
+	github.com/anthropics/anthropic-sdk-go v1.56.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.2.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
@@ -47,13 +47,13 @@ require (
 
 require (
 	charm.land/bubbles/v2 v2.1.0 // indirect
-	charm.land/bubbletea/v2 v2.0.7 // indirect
-	charm.land/lipgloss/v2 v2.0.4 // indirect
+	charm.land/bubbletea/v2 v2.0.8 // indirect
+	charm.land/lipgloss/v2 v2.0.5 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.5 // indirect
 	github.com/andrewhowdencom/ore/x/llmbytes v0.1.2 // indirect
-	github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.2
-	github.com/andrewhowdencom/ore/x/tool/truncate v0.1.0 // indirect
+	github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.3
+	github.com/andrewhowdencom/ore/x/tool/truncate v0.1.1 // indirect
 	github.com/andrewhowdencom/ore/x/verifier v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -63,10 +63,10 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/glamour v1.0.0 // indirect
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260622092850-f39628c8a989 // indirect
+	github.com/charmbracelet/ultraviolet v0.0.0-20260703014108-f5a850f9c2b7 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
-	github.com/charmbracelet/x/exp/slice v0.0.0-20260622092256-25656177ba8e // indirect
+	github.com/charmbracelet/x/exp/slice v0.0.0-20260629091435-9c70f75e26a4 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
@@ -114,9 +114,9 @@ require (
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260622175928-b703f567277d // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260622175928-b703f567277d // indirect
-	google.golang.org/grpc v1.81.1 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260630182238-925bb5da69e7 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260630182238-925bb5da69e7 // indirect
+	google.golang.org/grpc v1.82.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 

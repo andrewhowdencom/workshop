@@ -659,11 +659,22 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	}
 
 	got := stream.Turns()
-	if len(got) != 6 {
-		t.Fatalf("expected 6 turns (5 original + 1 compaction), got %d", len(got))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 visible turn (the summary), got %d", len(got))
 	}
-	if got[5].Role != state.RoleSystem {
-		t.Errorf("compaction turn role = %v, want RoleSystem", got[5].Role)
+	if got[0].Role != state.RoleSystem {
+		t.Errorf("summary turn role = %v, want RoleSystem", got[0].Role)
+	}
+
+	// The 5 original turns are preserved in the tree behind the
+	// compaction boundary; they no longer participate in the LLM-facing
+	// active path (the summary stops the walk), but they are not lost.
+	thr, ok := stream.State().(*state.Thread)
+	if !ok {
+		t.Fatalf("expected stream.State() to be *state.Thread; got %T", stream.State())
+	}
+	if all := thr.AllTurns(); len(all) != 6 {
+		t.Errorf("tree should retain all 6 turns (5 original + 1 summary); got %d", len(all))
 	}
 }
 
@@ -716,12 +727,22 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	}
 
 	got := stream.Turns()
-	if len(got) != 6 {
-		t.Fatalf("expected 6 turns (5 original + 1 compaction), got %d", len(got))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 visible turn (the summary), got %d", len(got))
 	}
-	compactionTurn := got[5]
+	compactionTurn := got[0]
 	if compactionTurn.Role != state.RoleSystem {
 		t.Errorf("compaction turn role = %v, want RoleSystem", compactionTurn.Role)
+	}
+
+	// The 5 original turns remain in the tree behind the boundary;
+	// the active path terminates at the summary.
+	thr, ok := stream.State().(*state.Thread)
+	if !ok {
+		t.Fatalf("expected stream.State() to be *state.Thread; got %T", stream.State())
+	}
+	if all := thr.AllTurns(); len(all) != 6 {
+		t.Errorf("tree should retain all 6 turns (5 original + 1 summary); got %d", len(all))
 	}
 	// Artifacts order: artifact.Compaction metadata first, then artifact.Text.
 	var summary string
@@ -1408,7 +1429,7 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1475,7 +1496,7 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1540,7 +1561,7 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1624,7 +1645,7 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1689,7 +1710,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1783,7 +1804,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1834,7 +1855,7 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1891,7 +1912,7 @@ func TestSystemPrompt_WithSkillsFragment(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1941,7 +1962,7 @@ func TestSystemPrompt_WithoutSkillsFragment(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1993,7 +2014,7 @@ func TestSystemPrompt_WithSkillsFragmentError(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2035,7 +2056,7 @@ func TestSystemPrompt_WithCWDAndSkillsFragment(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := &state.Buffer{}
+	base := state.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2728,25 +2749,33 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	if len(notified) != 6 {
-		t.Fatalf("expected notifier to receive 6 turns (5 original + 1 compaction), got %d", len(notified))
+	if len(notified) != 1 {
+		t.Fatalf("expected notifier to receive 1 visible turn (the summary), got %d", len(notified))
 	}
-	if notified[5].Role != state.RoleSystem {
-		t.Errorf("last notified turn role = %v, want RoleSystem", notified[5].Role)
+	if notified[0].Role != state.RoleSystem {
+		t.Errorf("notified summary role = %v, want RoleSystem", notified[0].Role)
 	}
+
+	// The notifier also observes the full tree; the 5 original
+	// turns are preserved behind the boundary even though they no
+	// longer appear in the active path.
 	// The boundary index should point at the compaction turn (the last one).
 	if notifiedBoundary.CompactedThrough != 5 {
 		t.Errorf("notified boundary index = %d, want 5", notifiedBoundary.CompactedThrough)
 	}
 
-	// The state.Meta boundary keys must be written for downstream
-	// Transform / projection to honor the boundary on the next turn.
-	st := stream.State()
-	if got, _ := st.Meta().Get(compaction.MetaKeyBoundaryIndex); got != "5" {
-		t.Errorf("state.Meta[%q] = %q, want %q", compaction.MetaKeyBoundaryIndex, got, "5")
+	// The boundary info is persisted on the underlying thread metadata
+	// (not the ledger Meta), and the projection is now expressed via a
+	// ControlStop directive on the summary turn rather than an index.
+	if _, ok := stream.GetMetadata(compaction.MetaKeyBoundaryInfo); !ok {
+		t.Errorf("thread Metadata[%q] is unset, want it set", compaction.MetaKeyBoundaryInfo)
 	}
-	if _, ok := st.Meta().Get(compaction.MetaKeyBoundaryInfo); !ok {
-		t.Errorf("state.Meta[%q] is unset, want it set", compaction.MetaKeyBoundaryInfo)
+	// The boundary INDEX key is no longer written by junk.Stream
+	// under the tree-backed ledger — projection is by ControlStop
+	// on the summary turn. Verify the value is NOT set, since that
+	// is the new contract.
+	if got, ok := stream.GetMetadata(compaction.MetaKeyBoundaryIndex); ok {
+		t.Errorf("thread Metadata[%q] = %q, want it unset (tree-backed ledger uses ControlStop)", compaction.MetaKeyBoundaryIndex, got)
 	}
 }
 

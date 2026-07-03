@@ -917,11 +917,17 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 	// The format must match the on-disk envelope shape produced by
 	// junk/serialize.go (a {kind, data} wrapper around the artifact
 	// body); otherwise junk.JSONStore silently skips the file.
+	//
+	// The turn also needs an `id` and the thread needs a matching
+	// `current_tip`: the tree-backed ledger in ore/junk walks from
+	// CurrentTip through ParentID, so a turn with no ID is unreachable
+	// and contributes nothing to analytics.
 	oldID := "00000000000000000000000000000001"
+	oldTurnID := "00000000000000000000000000000002"
 	oldTime := time.Now().AddDate(0, 0, -60).Format(time.RFC3339)
 	oldJSON := fmt.Sprintf(
-		`{"id":"%s","created_at":"%s","updated_at":"%s","turns":[{"role":"user","artifacts":[{"kind":"text","data":{"kind":"text","content":"stale"}}],"timestamp":"%s"}]}`,
-		oldID, oldTime, oldTime, oldTime,
+		`{"id":"%s","current_tip":"%s","created_at":"%s","updated_at":"%s","turns":[{"id":"%s","parent_id":"","role":"user","artifacts":[{"kind":"text","data":{"kind":"text","content":"stale"}}],"timestamp":"%s"}]}`,
+		oldID, oldTurnID, oldTime, oldTime, oldTurnID, oldTime,
 	)
 	oldPath := filepath.Join(tmpDir, oldID+".json")
 	if err := os.WriteFile(oldPath, []byte(oldJSON), 0o644); err != nil {

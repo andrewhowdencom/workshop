@@ -647,17 +647,17 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	if err := c.stream.AppendTurn(ctx, turn.Role, turn.Artifacts...); err != nil {
 		return slash.Result{}, fmt.Errorf("append compaction turn: %w", err)
 	}
-	// Record the boundary on state.Meta so the next Transform call
-	// projects the buffer from the compaction turn onward. The boundary
-	// index is the position of the just-appended summary turn. MarkBoundary
-	// takes a pre-encoded JSON string for the boundary info to keep the
-	// session package free of any x/compaction dependency.
-	boundaryIdx := len(c.stream.Turns()) - 1
+	// Record the boundary on state.Control so the next Transform call
+	// stops projecting at the compaction turn. MarkBoundary takes the
+	// just-appended summary turn's ID and a pre-encoded JSON string for
+	// the boundary info to keep the session package free of any
+	// x/compaction dependency.
+	boundaryID := c.stream.Turns()[len(c.stream.Turns())-1].ID
 	encoded, err := compaction.EncodeBoundaryInfo(info)
 	if err != nil {
 		return slash.Result{}, fmt.Errorf("encode boundary info: %w", err)
 	}
-	if err := c.stream.MarkBoundary(boundaryIdx, encoded); err != nil {
+	if err := c.stream.MarkBoundary(boundaryID, encoded); err != nil {
 		return slash.Result{}, fmt.Errorf("mark boundary: %w", err)
 	}
 	if c.notifier != nil {
