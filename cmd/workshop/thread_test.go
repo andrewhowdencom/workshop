@@ -16,6 +16,42 @@ import (
 	"github.com/spf13/viper"
 )
 
+// seedThreadAt builds and saves a thread whose last-activity timestamp
+// is exactly lastAt. It is used in place of store.Create() +
+// time.Sleep in tests that need a predictable sort order.
+//
+// The previous implementation relied on the per-thread UpdatedAt
+// field, which was advanced by the store on every Save and so made
+// "later-created threads sort first" trivial to express. That field
+// was removed when ore/junk migrated to a tree-backed ledger
+// (see ../ore/junk/thread.go and ../ore/x/conduit/http/threads.go);
+// the sort key is now derived from the most recent turn's timestamp.
+// A freshly-created thread has no turns and therefore sorts last
+// regardless of when Create was called — so this helper stamps a
+// single user turn with a controlled clock and saves the result.
+func seedThreadAt(t *testing.T, store junk.Store, id string, lastAt time.Time, role string) *junk.Thread {
+	t.Helper()
+
+	thr := &junk.Thread{
+		ID:       id,
+		State:    state.NewThread(state.WithThreadClock(state.ClockFunc(func() time.Time { return lastAt }))),
+		Metadata: map[string]string{},
+	}
+	// A single turn is enough to stamp the thread's last activity;
+	// the listing sort key and the analytics lookback both derive
+	// from the most recent turn's timestamp.
+	thr.State.Append(state.RoleUser, artifact.Text{Content: "x"})
+
+	if role != "" {
+		thr.Metadata["workshop.role"] = role
+	}
+
+	if err := store.Save(thr); err != nil {
+		t.Fatalf("seedThreadAt(%s): save: %v", id, err)
+	}
+	return thr
+}
+
 // TestThreadList_EmptyStoreDir_FallsBackToDefault is intentionally
 // NOT a test. An earlier version asserted the command runs without
 // error when store.dir is empty, but that depended on the default
@@ -40,25 +76,14 @@ func TestThreadList_WithStore(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	thr1, err := store.Create()
-	if err != nil {
-		t.Fatalf("create thread 1: %v", err)
-	}
-	thr1.Metadata["workshop.role"] = "developer"
-	if err := store.Save(thr1); err != nil {
-		t.Fatalf("save thread 1: %v", err)
-	}
-
-	time.Sleep(20 * time.Millisecond)
-
-	thr2, err := store.Create()
-	if err != nil {
-		t.Fatalf("create thread 2: %v", err)
-	}
-	thr2.Metadata["workshop.role"] = "reviewer"
-	if err := store.Save(thr2); err != nil {
-		t.Fatalf("save thread 2: %v", err)
-	}
+	// Two threads with controlled, ascending last-activity
+	// timestamps. The previous implementation relied on
+	// store.Create() advancing UpdatedAt on Save; that field is
+	// gone now, so the timestamps are stamped explicitly via
+	// seedThreadAt.
+	now := time.Now()
+	thr1 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000001", now.Add(-2*time.Minute), "developer")
+	thr2 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000002", now.Add(-1*time.Minute), "reviewer")
 
 	oldStoreDir := viper.GetString("store.dir")
 	viper.Set("store.dir", tmpDir)
@@ -112,10 +137,10 @@ func TestThreadList_WithStore(t *testing.T) {
 }
 
 // TestThreadList_Pagination_DefaultSort covers the default sort
-// order: most recently updated first, with id ascending as the
+// order: most recently active first, with id ascending as the
 // deterministic tiebreaker. Three threads spaced in time are saved
-// in known order; the test verifies the rendered output lists them
-// from most-recent to least-recent.
+// with controlled timestamps; the test verifies the rendered output
+// lists them from most-recent to least-recent.
 func TestThreadList_Pagination_DefaultSort(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -124,34 +149,10 @@ func TestThreadList_Pagination_DefaultSort(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	thr1, err := store.Create()
-	if err != nil {
-		t.Fatalf("create thread 1: %v", err)
-	}
-	thr1.Metadata["workshop.role"] = "a"
-	if err := store.Save(thr1); err != nil {
-		t.Fatalf("save thread 1: %v", err)
-	}
-	time.Sleep(20 * time.Millisecond)
-
-	thr2, err := store.Create()
-	if err != nil {
-		t.Fatalf("create thread 2: %v", err)
-	}
-	thr2.Metadata["workshop.role"] = "b"
-	if err := store.Save(thr2); err != nil {
-		t.Fatalf("save thread 2: %v", err)
-	}
-	time.Sleep(20 * time.Millisecond)
-
-	thr3, err := store.Create()
-	if err != nil {
-		t.Fatalf("create thread 3: %v", err)
-	}
-	thr3.Metadata["workshop.role"] = "c"
-	if err := store.Save(thr3); err != nil {
-		t.Fatalf("save thread 3: %v", err)
-	}
+	now := time.Now()
+	thr1 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000001", now.Add(-30*time.Minute), "a")
+	thr2 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000002", now.Add(-15*time.Minute), "b")
+	thr3 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000003", now, "c")
 
 	var buf bytes.Buffer
 	if err := runThreadListWithStore(20, "", false, store, &buf); err != nil {
@@ -185,18 +186,14 @@ func TestThreadList_Pagination_LimitHonored(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
+	// Each thread gets a strictly-increasing last-activity stamp
+	// so the listing has a deterministic order: most recent first.
+	now := time.Now()
 	ids := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
-		thr, err := store.Create()
-		if err != nil {
-			t.Fatalf("create thread %d: %v", i, err)
-		}
-		thr.Metadata["workshop.role"] = "r"
-		if err := store.Save(thr); err != nil {
-			t.Fatalf("save thread %d: %v", i, err)
-		}
-		ids = append(ids, thr.ID)
-		time.Sleep(2 * time.Millisecond)
+		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
+		seedThreadAt(t, store, id, now.Add(time.Duration(i-4)*time.Minute), "r")
+		ids = append(ids, id)
 	}
 
 	var buf bytes.Buffer
@@ -205,7 +202,7 @@ func TestThreadList_Pagination_LimitHonored(t *testing.T) {
 	}
 
 	output := buf.String()
-	// The two most recent threads should be present.
+	// The two most recent threads (ids[3] and ids[4]) should be present.
 	if !strings.Contains(output, ids[4]) {
 		t.Errorf("output missing most recent ID %s:\n%s", ids[4], output)
 	}
@@ -234,17 +231,12 @@ func TestThreadList_Pagination_AllWalksAllPages(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
+	now := time.Now()
 	want := make(map[string]bool)
 	for i := 0; i < 5; i++ {
-		thr, err := store.Create()
-		if err != nil {
-			t.Fatalf("create thread %d: %v", i, err)
-		}
-		if err := store.Save(thr); err != nil {
-			t.Fatalf("save thread %d: %v", i, err)
-		}
-		want[thr.ID] = true
-		time.Sleep(2 * time.Millisecond)
+		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
+		seedThreadAt(t, store, id, now.Add(time.Duration(i)*time.Minute), "")
+		want[id] = true
 	}
 
 	var buf bytes.Buffer
@@ -273,17 +265,12 @@ func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
+	now := time.Now()
 	ids := make([]string, 0, 4)
 	for i := 0; i < 4; i++ {
-		thr, err := store.Create()
-		if err != nil {
-			t.Fatalf("create thread %d: %v", i, err)
-		}
-		if err := store.Save(thr); err != nil {
-			t.Fatalf("save thread %d: %v", i, err)
-		}
-		ids = append(ids, thr.ID)
-		time.Sleep(2 * time.Millisecond)
+		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
+		seedThreadAt(t, store, id, now.Add(time.Duration(i)*time.Minute), "")
+		ids = append(ids, id)
 	}
 
 	// Page 1.
@@ -351,23 +338,9 @@ func TestThreadList_Pagination_LimitClamping(t *testing.T) {
 		t.Fatalf("create store: %v", err)
 	}
 
-	thr1, err := store.Create()
-	if err != nil {
-		t.Fatalf("create thr1: %v", err)
-	}
-	thr1.Metadata["workshop.role"] = "a"
-	if err := store.Save(thr1); err != nil {
-		t.Fatalf("save thr1: %v", err)
-	}
-	time.Sleep(5 * time.Millisecond)
-	thr2, err := store.Create()
-	if err != nil {
-		t.Fatalf("create thr2: %v", err)
-	}
-	thr2.Metadata["workshop.role"] = "b"
-	if err := store.Save(thr2); err != nil {
-		t.Fatalf("save thr2: %v", err)
-	}
+	now := time.Now()
+	thr1 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000001", now.Add(-1*time.Minute), "a")
+	thr2 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000002", now, "b")
 
 	tests := []struct {
 		name    string

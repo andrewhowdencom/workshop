@@ -37,12 +37,20 @@ var errInvalidCursor = errors.New("invalid pagination cursor")
 // threadCursor is the opaque pagination cursor. Version allows the
 // encoding to evolve without breaking already-stored cursors. The cursor
 // identifies the LAST item of the previous page; subsequent pages return
-// items that sort strictly after this position in (updated_at desc,
+// items that sort strictly after this position in (last activity desc,
 // id asc) order.
+//
+// LastAt is the timestamp of the most recent turn in the previous page's
+// last thread (or the zero time for empty threads). The previous wire
+// format carried UpdatedAt per-thread; that field was removed when
+// ore/junk moved thread state to a tree-backed ledger (see
+// ../ore/junk/thread.go and the http conduit's matching migration in
+// ../ore/x/conduit/http/threads.go). The cursor field name was renamed
+// in lockstep.
 type threadCursor struct {
-	Version   int       `json:"v"`
-	UpdatedAt time.Time `json:"u"`
-	ID        string    `json:"i"`
+	Version int       `json:"v"`
+	LastAt  time.Time `json:"l"`
+	ID      string    `json:"i"`
 }
 
 const threadCursorVersion = 1
@@ -77,12 +85,32 @@ func decodeThreadCursor(s string) (threadCursor, error) {
 	return c, nil
 }
 
-// paginateThreads sorts threads by (updated_at desc, id asc) and returns
-// a single page of at most limit items, starting strictly after the
-// position identified by cursor. An empty cursor means "start from the
-// beginning". Returns errInvalidCursor when the cursor cannot be
-// decoded. The input slice is sorted in place; the returned page is a
-// sub-slice of the input.
+// lastActivity returns the timestamp of the most recent turn in the
+// thread. Empty threads return the zero time. The returned time is the
+// conversation's "last activity" — used as the sort key for the
+// thread listing.
+//
+// Replaces the previous per-thread UpdatedAt field, which was removed
+// from the wire format when ore/junk migrated to a tree-backed ledger
+// (see ../ore/junk/thread.go and ../ore/x/conduit/http/threads.go).
+func lastActivity(t *junk.Thread) time.Time {
+	if t == nil || t.State == nil {
+		return time.Time{}
+	}
+	turns := t.State.AllTurns()
+	if len(turns) == 0 {
+		return time.Time{}
+	}
+	return turns[len(turns)-1].Timestamp
+}
+
+// paginateThreads sorts threads by (last activity desc, id asc) and
+// returns a single page of at most limit items, starting strictly after
+// the position identified by cursor. An empty cursor means "start from
+// the beginning". Empty threads sort last regardless of their ID.
+// Returns errInvalidCursor when the cursor cannot be decoded. The input
+// slice is sorted in place; the returned page is a sub-slice of the
+// input.
 func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*junk.Thread, nextCursor string, err error) {
 	if limit < 1 {
 		limit = 1
@@ -118,9 +146,9 @@ func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*
 	if end < len(threads) {
 		last := threads[end-1]
 		next, encErr := (threadCursor{
-			Version:   threadCursorVersion,
-			UpdatedAt: last.UpdatedAt,
-			ID:        last.ID,
+			Version: threadCursorVersion,
+			LastAt:  lastActivity(last),
+			ID:      last.ID,
 		}).encode()
 		if encErr != nil {
 			return nil, "", encErr
@@ -131,27 +159,44 @@ func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*
 	return page, nextCursor, nil
 }
 
-// compareThreads orders threads by (updated_at desc, id asc). The id
+// compareThreads orders threads by (last activity desc, id asc). The id
 // tiebreaker is required for deterministic pagination across threads
-// that share a timestamp.
+// that share a timestamp. Empty threads (zero last activity) sort last.
 func compareThreads(a, b *junk.Thread) int {
-	if a.UpdatedAt.Equal(b.UpdatedAt) {
+	aAt := lastActivity(a)
+	bAt := lastActivity(b)
+	if aAt.Equal(bAt) {
 		return strings.Compare(a.ID, b.ID)
 	}
-	if a.UpdatedAt.After(b.UpdatedAt) {
-		return -1 // a comes first (later updated_at)
+	if aAt.IsZero() {
+		return 1 // a is empty; b first
+	}
+	if bAt.IsZero() {
+		return -1 // b is empty; a first
+	}
+	if aAt.After(bAt) {
+		return -1 // a comes first (later activity)
 	}
 	return 1
 }
 
 // threadIsAfterCursor reports whether t sorts strictly after the cursor
-// position in (updated_at desc, id asc) order. Items equal to the cursor
-// are NOT considered "after"; the cursor is exclusive.
+// position in (last activity desc, id asc) order. Items equal to the
+// cursor are NOT considered "after"; the cursor is exclusive.
 func threadIsAfterCursor(t *junk.Thread, c threadCursor) bool {
-	if t.UpdatedAt.Before(c.UpdatedAt) {
+	tAt := lastActivity(t)
+	if tAt.IsZero() {
+		// Empty threads never sort after a real cursor.
+		return false
+	}
+	if c.LastAt.IsZero() {
+		// Anything with activity sorts after an empty cursor.
 		return true
 	}
-	if t.UpdatedAt.Equal(c.UpdatedAt) && t.ID > c.ID {
+	if tAt.Before(c.LastAt) {
+		return true
+	}
+	if tAt.Equal(c.LastAt) && t.ID > c.ID {
 		return true
 	}
 	return false
@@ -242,7 +287,7 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 }
 
 // runThreadListWithStore renders a single page of threads (or all
-// pages when all is true) sorted by updated_at desc, id asc. When
+// pages when all is true) sorted by last activity desc, id asc. When
 // the rendered output is the first page of a multi-page result and
 // all is false, a `-- next: --cursor <opaque>` hint line is emitted
 // after the table so the user can continue.
@@ -257,6 +302,13 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 // subsequent page in --all mode (because paginateThreads is re-called
 // on the same underlying slice, which the caller is responsible for
 // keeping populated).
+//
+// The table has three columns: ID, LAST ACTIVITY, ROLE. The "LAST
+// ACTIVITY" column is the timestamp of the most recent turn (see
+// lastActivity). The previous CREATED column was dropped alongside
+// the per-thread CreatedAt field in the same ore/junk wire-format
+// change that removed UpdatedAt; the conversation's temporal data
+// now lives entirely in the turn history.
 func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store, w io.Writer) error {
 	threads, err := store.List()
 	if err != nil {
@@ -264,7 +316,7 @@ func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "ID\tCREATED\tUPDATED\tROLE\n")
+	fmt.Fprintf(tw, "ID\tLAST ACTIVITY\tROLE\n")
 
 	current := cursor
 	for {
@@ -278,9 +330,12 @@ func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store
 
 		for _, thr := range page {
 			role := thr.Metadata["workshop.role"]
-			created := thr.CreatedAt.Format("2006-01-02 15:04")
-			updated := thr.UpdatedAt.Format("2006-01-02 15:04")
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", thr.ID, created, updated, role)
+			at := lastActivity(thr)
+			last := ""
+			if !at.IsZero() {
+				last = at.Format("2006-01-02 15:04")
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", thr.ID, last, role)
 		}
 
 		if all {
@@ -388,7 +443,9 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 // callers attribute context cost to specific tools, not just kinds.
 //
 // If id is non-empty, only that thread is aggregated. If id is empty,
-// threads older than `days` are excluded first (matched on UpdatedAt).
+// threads with no turn activity since `days` ago are excluded first
+// (matched against the thread's last-activity timestamp; see
+// lastActivity).
 //
 // This function is read-only by construction: it never calls store.Save
 // or store.Create, and only reads from the store via List / Get.
@@ -426,9 +483,10 @@ func runThreadAnalyticsWithStore(days int, id string, store junk.Store, w io.Wri
 }
 
 // storeFilter wraps a junk.Store so that List() returns only threads
-// whose UpdatedAt is at-or-after the configured cutoff. It exists to let
-// runThreadAnalyticsWithStore apply a --days lookback before delegating
-// to analytics.AnalyzeStore, which only accepts a Store.
+// whose last-activity timestamp is at-or-after the configured cutoff.
+// It exists to let runThreadAnalyticsWithStore apply a --days lookback
+// before delegating to analytics.AnalyzeStore, which only accepts a
+// Store.
 //
 // The embedded junk.Store auto-forwards all other methods unchanged;
 // only List is overridden. This is intentional — the analytics path is
@@ -447,9 +505,16 @@ func (s *storeFilter) List() ([]*junk.Thread, error) {
 
 	filtered := make([]*junk.Thread, 0, len(threads))
 	for _, thr := range threads {
-		if thr.UpdatedAt.After(s.cutoff) {
-			filtered = append(filtered, thr)
+		at := lastActivity(thr)
+		// Empty threads (no turns) and threads with last activity
+		// before the cutoff are both excluded. A thread whose last
+		// activity equals the cutoff exactly is included so the
+		// boundary is consistent with the >= comparison used
+		// elsewhere in the analytics pipeline.
+		if at.IsZero() || at.Before(s.cutoff) {
+			continue
 		}
+		filtered = append(filtered, thr)
 	}
 	return filtered, nil
 }
