@@ -10,6 +10,14 @@ This project demonstrates how to build a fully fledged agentic application outsi
 - An API key for [OpenAI](https://platform.openai.com/), [Anthropic](https://console.anthropic.com/), or a compatible endpoint (e.g. [OpenRouter](https://openrouter.ai/))
 - [Task](https://taskfile.dev/) (optional, for development tasks)
 
+## Install
+
+```bash
+go install github.com/andrewhowdencom/workshop/cmd/workshop@latest
+```
+
+The binary lands in `$GOBIN` (default `$(go env GOPATH)/bin`). Add that to your `PATH` if it isn't already.
+
 ## Commands
 
 | Command | Description |
@@ -550,15 +558,3 @@ Available tasks:
 ```bash
 task --list
 ```
-
-## Development setup
-
-The `go.mod` in this repository uses temporary `replace` directives pointing to the local `ore` repository:
-
-```go
-replace github.com/andrewhowdencom/ore => ../ore
-replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
-// ... etc
-```
-
-These are needed because `ore` and its sub-modules are not yet published with versioned tags. Once `ore` publishes releases, these `replace` directives can be removed and normal `go get` will work.
