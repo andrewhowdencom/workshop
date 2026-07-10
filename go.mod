@@ -11,7 +11,7 @@ require (
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.7
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.7
 	github.com/andrewhowdencom/ore/x/export v0.1.0
-	github.com/andrewhowdencom/ore/x/provider/openai v0.6.4
+	github.com/andrewhowdencom/ore/x/provider/openai v0.6.5
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.4
 	github.com/andrewhowdencom/ore/x/tool v0.6.0
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.7
@@ -35,8 +35,8 @@ require (
 
 require (
 	github.com/andrewhowdencom/ore/x/provider/retry v0.0.3
-	github.com/andrewhowdencom/ore/x/wire/anthropic v0.5.0 // indirect
-	github.com/andrewhowdencom/ore/x/wire/openai v0.5.0 // indirect
+	github.com/andrewhowdencom/ore/x/wire/anthropic v0.2.1 // indirect
+	github.com/andrewhowdencom/ore/x/wire/openai v0.1.3 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.56.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.2.0 // indirect
@@ -53,7 +53,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
 	github.com/andrewhowdencom/ore/x/conduit v0.1.5 // indirect
 	github.com/andrewhowdencom/ore/x/llmbytes v0.1.2 // indirect
-	github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.4
+	github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.5
 	github.com/andrewhowdencom/ore/x/tool/truncate v0.1.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -119,45 +119,3 @@ require (
 	google.golang.org/grpc v1.82.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
-
-replace github.com/andrewhowdencom/ore/x/tool/set_title => ../ore/x/tool/set_title
-
-replace github.com/andrewhowdencom/ore/x/tool/skills => ../ore/x/tool/skills
-
-replace github.com/andrewhowdencom/ore/x/telemetry => ../ore/x/telemetry
-
-replace github.com/andrewhowdencom/ore/x/conduit/tui => ../ore/x/conduit/tui
-
-replace github.com/andrewhowdencom/ore => ../ore
-
-replace github.com/andrewhowdencom/ore/x/analytics => ../ore/x/analytics
-
-replace github.com/andrewhowdencom/ore/x/llmbytes => ../ore/x/llmbytes
-
-replace github.com/andrewhowdencom/ore/x/verifier => ../ore/x/verifier
-
-replace github.com/andrewhowdencom/ore/x/compaction => ../ore/x/compaction
-
-replace github.com/andrewhowdencom/ore/x/provider/openai => ../ore/x/provider/openai
-
-replace github.com/andrewhowdencom/ore/x/provider/anthropic => ../ore/x/provider/anthropic
-
-replace github.com/andrewhowdencom/ore/x/provider/retry => ../ore/x/provider/retry
-
-replace github.com/andrewhowdencom/ore/x/tool => ../ore/x/tool
-
-replace github.com/andrewhowdencom/ore/x/tool/bash => ../ore/x/tool/bash
-
-replace github.com/andrewhowdencom/ore/x/tool/filesystem => ../ore/x/tool/filesystem
-
-replace github.com/andrewhowdencom/ore/x/wire/anthropic => ../ore/x/wire/anthropic
-
-replace github.com/andrewhowdencom/ore/x/wire/openai => ../ore/x/wire/openai
-
-replace github.com/andrewhowdencom/ore/x/usage => ../ore/x/usage
-
-replace github.com/andrewhowdencom/ore/x/conduit => ../ore/x/conduit
-
-replace github.com/andrewhowdencom/ore/x/conduit/http => ../ore/x/conduit/http
-
-replace github.com/andrewhowdencom/ore/x/conduit/stdio => ../ore/x/conduit/stdio
