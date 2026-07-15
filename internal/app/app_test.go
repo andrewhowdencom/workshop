@@ -477,7 +477,7 @@ func TestRoleCommand_NoArgListsRoles(t *testing.T) {
 	assert.Contains(t, res.Notice.Content, "Role: (none)", "no current role should render as (none)")
 	assert.Contains(t, res.Notice.Content, "  planner (Plans multi-step work)", "description from frontmatter should be shown")
 	assert.Contains(t, res.Notice.Content, "  reviewer", "role with no description should still appear")
-	assert.Contains(t, res.Notice.Content, "Usage: /role <name>", "usage hint should be present")
+	assert.Contains(t, res.Notice.Content, "Usage: /role <name> | /role none", "usage hint should be present")
 }
 
 func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
@@ -611,6 +611,77 @@ func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
 
 	want := filepath.Join(dir, "planner.md")
 	assert.Equal(t, want, rc.Resolver().Path(), "SetStream should seed the resolver from metadata")
+}
+
+func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithRoles(t)
+	stream.SetMetadata("workshop.role", "ideation")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
+	require.NoError(t, err, "/role none must not return an error when a role is set")
+	assert.Equal(t, "Role: (none)", res.Notice.Content, "successful clear should report the new state")
+
+	// The role metadata is preserved with the empty-string sentinel
+	// (rather than deleted) so that defaultMeta's re-seed on Attach
+	// can distinguish "explicitly cleared" from "never set".
+	v, ok := stream.GetMetadata("workshop.role")
+	assert.True(t, ok, "workshop.role should still be present after clear, just empty (sentinel)")
+	assert.Equal(t, "", v)
+
+	assert.Equal(t, "", rc.Resolver().Path(), "resolver path should be reset")
+
+	assert.Equal(t, 0, len(stream.Turns()), "no persistent handoff turn should be appended")
+}
+
+func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithRoles(t)
+	// Pre-seed with the empty-string sentinel to simulate an
+	// already-cleared thread.
+	stream.SetMetadata("workshop.role", "")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
+	require.NoError(t, err, "/role none on an already-cleared thread must not return an error")
+	assert.Equal(t, "Role: (none)", res.Notice.Content)
+
+	v, ok := stream.GetMetadata("workshop.role")
+	assert.True(t, ok)
+	assert.Equal(t, "", v)
+
+	assert.Equal(t, 0, len(stream.Turns()))
+}
+
+func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithRoles(t)
+	stream.SetMetadata("workshop.role", "ideation")
+
+	rc := &roleCommand{rdir: dir}
+	rc.SetStream(stream)
+
+	// First, attempt an invalid switch — the role metadata should
+	// remain untouched (the existing "role not found" contract).
+	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
+	require.Error(t, err, "invalid role must error")
+
+	v, ok := stream.GetMetadata("workshop.role")
+	require.True(t, ok, "metadata should still be set after the failed switch")
+	assert.Equal(t, "ideation", v)
+
+	// Now /role none succeeds even though the previous attempt
+	// failed — clearing is independent of the current state's
+	// validity.
+	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
+	require.NoError(t, err)
+	assert.Equal(t, "Role: (none)", res.Notice.Content)
+
+	v, ok = stream.GetMetadata("workshop.role")
+	assert.True(t, ok)
+	assert.Equal(t, "", v)
 }
 
 // TestCompactSlashHandler_ZeroBudgetStillCompacts verifies that /compact
