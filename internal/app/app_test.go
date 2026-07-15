@@ -792,8 +792,15 @@ func TestNameSlashHandler_ValidInput_EmitsPropertiesEvent(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected loop.PropertiesEvent, got %T", emitter.events[0])
 	}
-	if got, want := pe.Properties["title"], "Fix login bug"; got != want {
-		t.Errorf("Properties[title] = %q, want %q", got, want)
+	var got string
+	for _, op := range pe.Operations {
+		if op.Op == loop.PropertyOpSet && op.Key == "title" {
+			got = op.Value
+			break
+		}
+	}
+	if got != "Fix login bug" {
+		t.Errorf("title op value = %q, want %q", got, "Fix login bug")
 	}
 }
 
@@ -844,8 +851,15 @@ func TestNameSlashHandler_TrimsInput(t *testing.T) {
 		t.Fatalf("expected 1 event, got %d", len(emitter.events))
 	}
 	pe := emitter.events[0].(loop.PropertiesEvent)
-	if got, want := pe.Properties["title"], "spaced"; got != want {
-		t.Errorf("Properties[title] = %q, want %q", got, want)
+	var got string
+	for _, op := range pe.Operations {
+		if op.Op == loop.PropertyOpSet && op.Key == "title" {
+			got = op.Value
+			break
+		}
+	}
+	if got != "spaced" {
+		t.Errorf("title op value = %q, want %q", got, "spaced")
 	}
 }
 
