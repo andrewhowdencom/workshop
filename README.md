@@ -355,6 +355,8 @@ provider is invoked. The auto-generated `/help` lists every bound command.
   available role definitions.
 - `/role <name>` — switch the active role (see Roles). Switching to a
   role that does not exist returns an error.
+- `/role none` — clear the active role for this thread; persists
+  across session restarts until explicitly re-set.
 - `/compact` — force compaction of the conversation history (see Compaction).
 - `/thinking` — report the current thinking level and the available levels.
 - `/thinking <level>` — set the thinking level for this thread, where
