@@ -367,6 +367,9 @@ type metadataStore interface {
 // "help" subcommand) it returns a feedback message listing the
 // current role and the available role definitions. With a name it
 // validates the role exists and updates the active resolver's path.
+// With `none` it clears the active role by resetting the resolver
+// path and setting workshop.role to the empty-string sentinel,
+// matching the fresh-thread "no role" state. The clear is idempotent.
 //
 // The role change is communicated to the LLM via the system prompt
 // transform on the next turn: the transform reads the active role
@@ -444,6 +447,42 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	}
 
 	name := args[0]
+	// "none" is reserved as a subcommand so that /role none always
+	// clears the active role, mirroring the fresh-thread state. This
+	// matches the convention used by other slash commands and means a
+	// user-defined role literally named "none" cannot collide with the
+	// clear affordance. The check happens before role.LoadRole so that
+	// "none" is never caught by the "role not found" path.
+	if name == "none" {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if c.stream == nil || c.resolver == nil {
+			return slash.Result{}, fmt.Errorf("no active stream")
+		}
+		// Reset the resolver path and set the role metadata to the
+		// empty-string sentinel. FileResolver.Resolve treats an empty
+		// path the same as "no role file", matching the fresh-thread
+		// state, so the system prompt transform emits no role content.
+		// The empty-string sentinel is necessary, not optional: the
+		// defaultMeta seed runs on every Attach and re-applies the
+		// CLI cfg.role whenever the role key is absent, which would
+		// silently overwrite a cleared state on reopen. Empty-string
+		// is consistent with how the workshop subsystem already clears
+		// workshop.worktree.path on worktree destroy, and every reader
+		// of workshop.role in this codebase already gates on
+		// `ok && role != ""`. The operation is idempotent: clearing
+		// a cleared role is a no-op.
+		c.resolver.SetPath("")
+		c.stream.SetMetadata("workshop.role", "")
+
+		return slash.Result{
+			Notice: loop.Notice{
+				Content:  "Role: (none)",
+				Severity: loop.SeverityInfo,
+			},
+		}, nil
+	}
+
 	if _, err := role.LoadRole(c.rdir, name, nil); err != nil {
 		return slash.Result{}, fmt.Errorf("role %q not found: %w", name, err)
 	}
@@ -482,12 +521,12 @@ func (c *roleCommand) formatRoleList() string {
 
 	roles, err := role.ListRoleDefinitions(c.rdir, nil)
 	if err != nil {
-		return fmt.Sprintf("Role: %s\nError reading roles from %s: %v\nUsage: /role <name>",
+		return fmt.Sprintf("Role: %s\nError reading roles from %s: %v\nUsage: /role <name> | /role none",
 			current, c.rdir, err)
 	}
 
 	if len(roles) == 0 {
-		return fmt.Sprintf("Role: %s\nNo roles available in %s\nUsage: /role <name>",
+		return fmt.Sprintf("Role: %s\nNo roles available in %s\nUsage: /role <name> | /role none",
 			current, c.rdir)
 	}
 
@@ -501,7 +540,7 @@ func (c *roleCommand) formatRoleList() string {
 			lines = append(lines, fmt.Sprintf("  %s", r.Name))
 		}
 	}
-	lines = append(lines, "Usage: /role <name>")
+	lines = append(lines, "Usage: /role <name> | /role none")
 	return strings.Join(lines, "\n")
 }
 
