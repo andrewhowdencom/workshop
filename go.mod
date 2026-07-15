@@ -33,6 +33,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+require github.com/andrewhowdencom/ore/x/subagent v0.3.1 // indirect
+
 require (
 	github.com/andrewhowdencom/ore/x/provider/retry v0.0.3
 	github.com/andrewhowdencom/ore/x/wire/anthropic v0.2.1 // indirect
