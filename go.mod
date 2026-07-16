@@ -4,21 +4,21 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v1.2.1
+	github.com/andrewhowdencom/ore v1.2.2
 	github.com/andrewhowdencom/ore/x/analytics v0.2.5
 	github.com/andrewhowdencom/ore/x/compaction v0.5.1
-	github.com/andrewhowdencom/ore/x/conduit/http v0.8.1
+	github.com/andrewhowdencom/ore/x/conduit/http v0.8.2
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.7
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.7
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.9
 	github.com/andrewhowdencom/ore/x/export v0.1.0
 	github.com/andrewhowdencom/ore/x/provider/openai v0.6.5
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.4
-	github.com/andrewhowdencom/ore/x/tool v0.6.0
+	github.com/andrewhowdencom/ore/x/tool v0.6.1
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.7
 	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.2
-	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.2
+	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.3
 	github.com/andrewhowdencom/ore/x/tool/skills v0.5.2
-	github.com/andrewhowdencom/ore/x/usage v0.2.2
+	github.com/andrewhowdencom/ore/x/usage v0.2.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
