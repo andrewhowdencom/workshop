@@ -12,6 +12,7 @@ require (
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.9
 	github.com/andrewhowdencom/ore/x/export v0.1.0
 	github.com/andrewhowdencom/ore/x/provider/openai v0.6.5
+	github.com/andrewhowdencom/ore/x/subagent v0.3.1
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.4
 	github.com/andrewhowdencom/ore/x/tool v0.6.1
 	github.com/andrewhowdencom/ore/x/tool/bash v0.3.7

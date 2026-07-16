@@ -38,6 +38,8 @@ github.com/andrewhowdencom/ore/x/provider/openai v0.6.5 h1:dYVqIRfxNLe7MGkfODLW1
 github.com/andrewhowdencom/ore/x/provider/openai v0.6.5/go.mod h1:lLx4GvV8NbDhTsCY6uK4lswtrYKBhrqZwB2vnKMbKH4=
 github.com/andrewhowdencom/ore/x/provider/retry v0.0.3 h1:hSfSKo7jzYQrjvaEHiyivfod5U2FaOa5wOaJlPaWfUc=
 github.com/andrewhowdencom/ore/x/provider/retry v0.0.3/go.mod h1:2zgSUOf65hQ72u1GDMiy6V5Una18yWAvPJqzcMIGUfE=
+github.com/andrewhowdencom/ore/x/subagent v0.3.1 h1:5efZNynhNC9M9GzJN3uhk8iwMXDNL/+nB9AJ4cK2liM=
+github.com/andrewhowdencom/ore/x/subagent v0.3.1/go.mod h1:EBdVOTOotuG14bGjLJ5hwgp/VYPfUD2sL24eR1S2u9E=
 github.com/andrewhowdencom/ore/x/telemetry v0.1.4 h1:1R6LC9Q9BdqrKJt8k3QL9lRWIXgMymYGf9fAbAU6wtY=
 github.com/andrewhowdencom/ore/x/telemetry v0.1.4/go.mod h1:1n6NFCP9EK648EgGZM6y6QLYi9rXH88+Vr2s4kI0oqE=
 github.com/andrewhowdencom/ore/x/tool v0.6.1 h1:NtlqMLls72/TCU+nDEO2HMfauWpMDPnX3/mjPMDotcg=

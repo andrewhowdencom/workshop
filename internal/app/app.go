@@ -53,8 +53,6 @@ import (
 	"github.com/andrewhowdencom/ore/x/systemprompt/source"
 	"github.com/andrewhowdencom/ore/x/telemetry"
 	xtool "github.com/andrewhowdencom/ore/x/tool"
-	"github.com/andrewhowdencom/ore/x/tool/bash"
-	"github.com/andrewhowdencom/ore/x/tool/filesystem"
 	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 	"github.com/andrewhowdencom/ore/x/usage"
@@ -62,6 +60,7 @@ import (
 	"github.com/adrg/xdg"
 
 	"github.com/andrewhowdencom/workshop/internal/role"
+	"github.com/andrewhowdencom/workshop/internal/subagent"
 )
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
@@ -915,11 +914,17 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 		// Create tool registry with filesystem and bash functions.
 		registry := tool.NewRegistry()
 
+		// Construct the workshop sandbox once and share it between the
+		// parent's registry and the per-sub-agent registries built
+		// below, so sub-agent tool calls resolve against the same
+		// active worktree.
+		wsSandbox := &workshopSandbox{name: "workshop", mr: stream}
+
 		// Register the workshop sandbox as the default. It resolves relative
 		// paths against the active git worktree and provides the worktree
 		// directory as the default working directory for command execution.
 		if sbr, ok := registry.(tool.SandboxRegistry); ok {
-			sbr.SetDefaultSandbox(&workshopSandbox{name: "workshop", mr: stream})
+			sbr.SetDefaultSandbox(wsSandbox)
 		}
 
 		// Register skills toolkit tools into the registry.
@@ -927,20 +932,51 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 			return nil, fmt.Errorf("register skills toolkit: %w", err)
 		}
 
-		mustRegister(registry, filesystem.ReadFileTool, filesystem.ReadFile)
-		mustRegister(registry, filesystem.WriteFileTool, filesystem.WriteFile)
-		mustRegister(registry, filesystem.EditFileTool, filesystem.EditFile)
-		mustRegister(registry, filesystem.ListDirectoryTool, filesystem.ListDirectory)
-		mustRegister(registry, filesystem.SearchFilesTool, filesystem.SearchFiles)
-		mustRegister(registry, bash.BashTool, bash.Bash)
+		// Register the workshop's built-in tools. The returned pairs
+		// map is reused below to wire the same closures into each
+		// sub-agent's per-call registry, so sub-agents inherit the
+		// workshop's full tool set at v1 (Path B in
+		// .plans/add-declarative-subagents.md).
+		parentPairs, err := registerWorkshopTools(registry, stream, cfg.defaultProviderConfig())
+		if err != nil {
+			return nil, fmt.Errorf("register workshop tools: %w", err)
+		}
 
-		// Workspace and git tools.
-		mustRegisterRaw(registry, "workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(stream))
-		mustRegisterRaw(registry, "workspace_destroy", "Remove the git worktree created in this junk.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(stream))
-		mustRegisterRaw(registry, "git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(stream, cfg.defaultProviderConfig()))
+		// Sub-agents: each definition becomes a tool backed by a fresh
+		// *agent.Agent per invocation via x/subagent.AsTool. Loaded
+		// per stream (parallel to skill discovery) so newly-added
+		// sub-agent files are picked up between sessions without
+		// restart.
+		subs, err := subagent.ListSubagentDefinitions(subagent.Dir(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("list subagents: %w", err)
+		}
 
-		// Title management.
-		mustRegisterRaw(registry, "set_title", "Set the conversation title visible to all conduits.", setTitleSchema, settitle.Tool())
+		// Build a name set of all currently-registered tools so
+		// sub-agent filenames that collide with any registered tool
+		// (built-in or skills toolkit) cause stepFactory to fail
+		// loudly rather than silently overwriting a real tool with
+		// a sub-agent wrapper.
+		registered := make(map[string]bool, len(parentPairs))
+		for _, t := range registry.Tools() {
+			registered[t.Name] = true
+		}
+
+		parentFuncs := make(map[string]tool.ToolFunc, len(parentPairs))
+		for name, p := range parentPairs {
+			parentFuncs[name] = p.Func
+		}
+
+		for _, sa := range subs {
+			if registered[sa.Name] {
+				return nil, fmt.Errorf("subagent %q collides with already-registered tool", sa.Name)
+			}
+			saTool, saFn := buildSubagentTool(sa, prov, defaultSpec,
+				registry.Tools(), parentFuncs, wsSandbox, tracer,
+				cfg.defaultProviderConfig().Kind)
+			mustRegister(registry, saTool, saFn)
+			registered[sa.Name] = true
+		}
 
 		invokeOpts := buildInvokeOptions(cfg, registry.Tools())
 
