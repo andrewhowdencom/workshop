@@ -438,8 +438,6 @@ cobra flags, because the names are dynamic.
 Workshop supports dynamic system prompts via role definitions stored as
 YAML-frontmatter markdown files in the XDG data directory.
 
-**Role directory**
-
 - Linux / macOS: `$XDG_DATA_HOME/workshop/roles/`
   (fallback: `~/.local/share/workshop/roles/`)
 - Windows: `%LOCALAPPDATA%\workshop\roles\`
@@ -512,6 +510,84 @@ cat > api/CLAUDE.md << 'EOF'
 - Use structured logging via slog.
 EOF
 ```
+
+## Sub-agents
+
+Workshop exposes **sub-agents** as a parallel declarative construction
+to roles: agent definitions the parent agent can call mid-turn as
+tools. Each invocation runs a fresh `*agent.Agent` against an
+isolated conversation thread and returns a structured JSON result.
+
+> **Roles** define the *active* agent (loaded as the system prompt).
+> **Sub-agents** define *invokable* agents (loaded as tools). Use a
+> role for the persona the assistant takes; use a sub-agent for a
+> specialist the assistant can delegate to.
+
+**Sub-agent directory**
+
+- Linux / macOS: `$XDG_DATA_HOME/workshop/subagents/`
+  (fallback: `~/.local/share/workshop/subagents/`)
+- Windows: `%LOCALAPPDATA%\workshop\subagents\`
+
+**File format**
+
+Each sub-agent is a `.md` file with YAML frontmatter delimited by
+`---`. The filename (without `.md`) becomes the tool name:
+
+```markdown
+---
+description: A research-focused sub-agent that finds and cites references.
+---
+You are a research sub-agent. When invoked with a question, find
+relevant references in the codebase or via the `bash` tool, and
+return a JSON object matching the workshop sub-agent result schema.
+```
+
+> The example above is illustrative. Create your own sub-agent
+> files in the XDG data directory to add delegation capabilities.
+
+The frontmatter fields are:
+
+- `description` — Tool description shown to the model (recommended;
+  the model uses it to decide whether to call the sub-agent). Falls
+  back to an empty string if absent.
+
+Everything after the closing `---` becomes the sub-agent's spec —
+the system prompt it runs against.
+
+**Invocation**
+
+Sub-agents are not user-invoked. The model calls a sub-agent by
+emitting a tool call with a `prompt` string; the workshop
+constructs a fresh agent, runs it against an isolated conversation
+thread, and returns a structured `{status, summary, findings}`
+JSON object as the tool result.
+
+> **State isolation is hard.** Every sub-agent invocation starts
+> from a fresh conversation thread. Sub-agents do not see the
+> parent's history, and they cannot mutate the parent's state.
+
+**Capabilities**
+
+Sub-agents at v1 run with:
+
+- The parent's provider and default model spec (no per-sub-agent
+  model override yet).
+- The `ReAct` cognitive pattern (no per-sub-agent pattern choice
+  yet).
+- The workshop's full tool set: `read_file`, `write_file`,
+  `edit_file`, `list_directory`, `search_files`, `bash`,
+  `workspace_create`, `workspace_destroy`, `git_commit`,
+  `set_title`, `read_skill`. Tool calls operate against the
+  parent's active worktree.
+
+**Name collisions**
+
+A sub-agent filename that matches an already-registered tool
+(`read_file`, `bash`, `read_skill`, etc.) causes the workshop
+session to fail to start with a descriptive error. Namespace
+your sub-agent filenames (e.g., `my-team.researcher`, not
+`researcher`) to avoid collisions.
 
 ## Available tools
 
