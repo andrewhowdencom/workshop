@@ -31,6 +31,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 
 	"github.com/andrewhowdencom/workshop/internal/role"
+	"github.com/andrewhowdencom/workshop/internal/subagent"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2254,6 +2255,34 @@ func TestSkillsFragment_BuiltinReadReturnsContent(t *testing.T) {
 	}
 	if !strings.Contains(body, "writing-skills") {
 		t.Errorf("expected writing-skills content to mention the skill by name; got %q", body)
+	}
+}
+
+// TestSkillsFragment_SurfacesSubagentAuthoring verifies that the
+// workshop's own subagent-authoring skill (shipped via
+// internal/subagent.BuiltInSkills) is composed into the system-prompt
+// fragment when wired into a skills.Toolkit alongside the framework's
+// BuiltInSkills — the exact discoverer order used by stepFactory in
+// internal/app/app.go. Catches a regression where subagent.BuiltInSkills
+// is dropped from the discoverer slice or where the embedded SKILL.md
+// fails to parse.
+func TestSkillsFragment_SurfacesSubagentAuthoring(t *testing.T) {
+	tk := skills.NewToolkit(skills.BuiltInSkills, subagent.BuiltInSkills)
+
+	fragment := tk.SystemPromptFragment()(context.Background())
+	if fragment == "" {
+		t.Fatal("expected non-empty fragment when BuiltInSkills are wired in")
+	}
+	if !strings.Contains(fragment, "subagent-authoring") {
+		t.Errorf("fragment does not list subagent-authoring: %q", fragment)
+	}
+
+	body, err := subagent.BuiltInSkills.Read(context.Background(), "subagent-authoring", "")
+	if err != nil {
+		t.Fatalf("subagent.BuiltInSkills.Read(subagent-authoring) error: %v", err)
+	}
+	if !strings.Contains(body, "ReAct") || !strings.Contains(body, "agent.WithState") {
+		t.Errorf("subagent-authoring body missing key SOP terms: %q", body)
 	}
 }
 

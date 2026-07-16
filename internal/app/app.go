@@ -879,18 +879,18 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 		tc.SetStream(stream)
 		ac.SetStream(stream)
 
-		// Set up progressive skill discovery. Built-in skills (the
-		// framework-shipped registry, e.g. `writing-skills`) are
-		// authoritative: passing skills.BuiltInSkills first lets the
-		// framework's defaults win on name collision, matching the
-		// composition pattern in x/tool/skills/doc.go. Repo-local
-		// (.agents/skills) and user-global (~/.agents/skills) discoverers
-		// follow so any unique skills they expose are added to the catalog.
+		// Set up progressive skill discovery. Built-in skills are
+		// authoritative on name collision — passed first so the framework's
+		// defaults (ore's writing-skills) and workshop's own sub-agent
+		// authoring guidance (subagent-authoring) win over any skill the
+		// user has dropped into .agents/skills or ~/.agents/skills.
+		// Composition pattern: x/tool/skills/doc.go.
 		var discoverers []skills.Discoverer
-		discoverers = append(discoverers, skills.BuiltInSkills)
-		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills"))
+		discoverers = append(discoverers, skills.BuiltInSkills)        // ore: writing-skills
+		discoverers = append(discoverers, subagent.BuiltInSkills)      // workshop: subagent-authoring
+		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills")) // repo-local
 		if homeDir, err := os.UserHomeDir(); err == nil {
-			discoverers = append(discoverers, skills.NewFSDiscoverer(filepath.Join(homeDir, ".agents", "skills")))
+			discoverers = append(discoverers, skills.NewFSDiscoverer(filepath.Join(homeDir, ".agents", "skills"))) // user-global
 		}
 		skillsToolkit := skills.NewToolkit(discoverers...)
 
