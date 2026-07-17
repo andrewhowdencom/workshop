@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/andrewhowdencom/ore/junk"
+	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/x/analytics"
 	"github.com/andrewhowdencom/ore/x/export"
 	"github.com/spf13/cobra"
@@ -393,15 +394,27 @@ func runThreadExportWithStore(store junk.Store, id, format string, w io.Writer) 
 		return fmt.Errorf("get thread: %w", err)
 	}
 
+	t := exportThread(thread)
 	switch format {
 	case "text":
-		return export.Text(w, thread)
+		return export.Text(w, t)
 	case "json":
-		return export.JSON(w, thread)
+		return export.JSON(w, t)
 	case "html":
-		return export.HTML(w, thread)
+		return export.HTML(w, t)
 	default:
 		return fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+// exportThread lifts the data the exporters need from a *junk.Thread
+// into an export.Thread value. The exporters take the value type to
+// avoid pulling junk into x/export.
+func exportThread(thread *junk.Thread) export.Thread {
+	return export.Thread{
+		ID:       thread.ID,
+		Metadata: thread.Metadata,
+		Turns:    thread.State.Turns(),
 	}
 }
 
@@ -458,13 +471,46 @@ func runThreadAnalyticsWithStore(days int, id string, store junk.Store, w io.Wri
 		} else if err != nil {
 			return fmt.Errorf("get thread: %w", err)
 		}
-		stats = analytics.AnalyzeThread(thread)
+		// Single-thread mode: pass the thread directly. The thread's
+		// State IS the turn-list source; we hand the *ledger.Thread
+		// to AnalyzeThread, which does the whole-scope
+		// tool_call/tool_result join within those turns.
+		stats = analytics.AnalyzeThread(thread.State)
 	} else {
 		cutoff := time.Now().AddDate(0, 0, -days)
-		filtered := &storeFilter{Store: store, cutoff: cutoff}
+		// Multi-thread mode: enumerate threads, filter by
+		// last-activity cutoff, flatten to a single turn slice
+		// that analytics.AnalyzeStore processes. Per-thread join
+		// is not used here — the load function flattens across
+		// threads, which is the right semantic for a
+		// recency-filtered aggregate.
+		loadFn := func() ([]ledger.Turn, error) {
+			threads, err := store.List()
+			if err != nil {
+				return nil, err
+			}
+			var all []ledger.Turn
+			for _, thr := range threads {
+				if thr == nil || thr.State == nil {
+					continue
+				}
+				at := lastActivity(thr)
+				// Empty threads (no turns) and threads with last
+				// activity before the cutoff are both excluded. A
+				// thread whose last activity equals the cutoff
+				// exactly is included so the boundary is consistent
+				// with the >= comparison used elsewhere in the
+				// pipeline.
+				if at.IsZero() || at.Before(cutoff) {
+					continue
+				}
+				all = append(all, thr.State.Turns()...)
+			}
+			return all, nil
+		}
 
 		var err error
-		stats, err = analytics.AnalyzeStore(filtered)
+		stats, err = analytics.AnalyzeStore(loadFn)
 		if err != nil {
 			return fmt.Errorf("analyze store: %w", err)
 		}
@@ -480,41 +526,4 @@ func runThreadAnalyticsWithStore(days int, id string, store junk.Store, w io.Wri
 		return fmt.Errorf("flush tabwriter: %w", err)
 	}
 	return nil
-}
-
-// storeFilter wraps a junk.Store so that List() returns only threads
-// whose last-activity timestamp is at-or-after the configured cutoff.
-// It exists to let runThreadAnalyticsWithStore apply a --days lookback
-// before delegating to analytics.AnalyzeStore, which only accepts a
-// Store.
-//
-// The embedded junk.Store auto-forwards all other methods unchanged;
-// only List is overridden. This is intentional — the analytics path is
-// read-only, but the analyzer still requires a value of type
-// junk.Store, so the wrapper must satisfy the full interface.
-type storeFilter struct {
-	junk.Store
-	cutoff time.Time
-}
-
-func (s *storeFilter) List() ([]*junk.Thread, error) {
-	threads, err := s.Store.List()
-	if err != nil {
-		return nil, err
-	}
-
-	filtered := make([]*junk.Thread, 0, len(threads))
-	for _, thr := range threads {
-		at := lastActivity(thr)
-		// Empty threads (no turns) and threads with last activity
-		// before the cutoff are both excluded. A thread whose last
-		// activity equals the cutoff exactly is included so the
-		// boundary is consistent with the >= comparison used
-		// elsewhere in the analytics pipeline.
-		if at.IsZero() || at.Before(s.cutoff) {
-			continue
-		}
-		filtered = append(filtered, thr)
-	}
-	return filtered, nil
 }

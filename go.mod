@@ -5,12 +5,12 @@ go 1.26.2
 require (
 	github.com/adrg/xdg v0.5.3
 	github.com/andrewhowdencom/ore v1.2.3
-	github.com/andrewhowdencom/ore/x/analytics v0.2.5
+	github.com/andrewhowdencom/ore/x/analytics v0.3.0
 	github.com/andrewhowdencom/ore/x/compaction v0.5.1
 	github.com/andrewhowdencom/ore/x/conduit/http v0.8.2
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.7
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.9
-	github.com/andrewhowdencom/ore/x/export v0.1.0
+	github.com/andrewhowdencom/ore/x/export v0.2.0
 	github.com/andrewhowdencom/ore/x/provider/openai v0.6.5
 	github.com/andrewhowdencom/ore/x/subagent v0.3.1
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.5
@@ -83,7 +83,7 @@ require (
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
+	github.com/lucasb-eyer/go-colorful v1.4.0
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
