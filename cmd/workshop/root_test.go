@@ -63,6 +63,32 @@ func TestLoadProvidersConfig_Valid(t *testing.T) {
 	if pc.MaxTokens != 32000 {
 		t.Errorf("MaxTokens = %d, want 32000", pc.MaxTokens)
 	}
+	// Default: CacheControl is unset.
+	if pc.CacheControl != "" {
+		t.Errorf("CacheControl = %q, want empty", pc.CacheControl)
+	}
+}
+
+// TestLoadProvidersConfig_CacheControl asserts that the cache-control
+// field round-trips through viper into ProviderConfig.CacheControl.
+// Workshop plumbs this onto models.Spec.CacheControl in
+// buildDefaultSpec so the Anthropic wire stamps cache_control blocks.
+func TestLoadProvidersConfig_CacheControl(t *testing.T) {
+	v := newTestViper()
+	v.Set("provider", "sonnet")
+	v.Set("providers.sonnet.kind", "anthropic")
+	v.Set("providers.sonnet.api-key", "sk-ant")
+	v.Set("providers.sonnet.model", "claude-sonnet-4-5")
+	v.Set("providers.sonnet.cache-control", "5m")
+
+	_, providers, err := loadProvidersConfig(v)
+	if err != nil {
+		t.Fatalf("loadProvidersConfig: %v", err)
+	}
+	pc := providers["sonnet"]
+	if pc.CacheControl != "5m" {
+		t.Errorf("CacheControl = %q, want 5m", pc.CacheControl)
+	}
 }
 
 func TestLoadProvidersConfig_MultipleProviders(t *testing.T) {

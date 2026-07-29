@@ -149,6 +149,7 @@ var namedProviderFields = []string{
 	"temperature",
 	"thinking-level",
 	"max-tokens",
+	"cache-control",
 }
 
 // bindNamedProviderEnvVars discovers the named providers from the

@@ -88,6 +88,18 @@ type ProviderConfig struct {
 	// ore v0.12 explicit-only compaction model) is the per-invocation
 	// output budget for compaction.Summarize, not a request cap.
 	MaxTokens int64
+	// CacheControl enables Anthropic prompt caching on the request.
+	// Empty means "no cache control" (the framework default; the
+	// request body is byte-equivalent to the pre-change shape).
+	// Valid values are "5m" and "1h" (mapped to models.CacheControlTTL);
+	// invalid values are silently dropped at spec-build time because
+	// buildDefaultSpec is not the right place to fail loudly. The
+	// field flows through models.Spec.CacheControl when set; the
+	// Anthropic wire stamps Anthropic-style cache_control blocks at
+	// the system message, the last tool definition, and the last
+	// user/assistant text content part. OpenAI-compatible providers
+	// silently ignore it.
+	CacheControl string
 }
 
 // CompactionConfig holds the configuration for the /compact slash
@@ -1136,6 +1148,16 @@ func buildDefaultSpec(pc ProviderConfig) models.Spec {
 	}
 	if maxTokens > 0 {
 		spec.MaxOutputTokens = maxTokens
+	}
+	if pc.CacheControl != "" {
+		ttl := models.CacheControlTTL(pc.CacheControl)
+		if ttl.Valid() {
+			spec.CacheControl = &models.CacheControl{TTL: ttl}
+		}
+		// Invalid TTLs are dropped silently: buildDefaultSpec is
+		// not the place to fail loudly. A future validation pass in
+		// loadProvidersConfig could reject them at config-load time
+		// (out of scope here).
 	}
 	return spec
 }
