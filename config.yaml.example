@@ -36,8 +36,10 @@ providers:
     # Enable Anthropic prompt caching on stable prefixes (system
     # prompt, tools, last user/assistant text). Costs more on cache
     # write, less on cache read; ignored on non-Anthropic providers.
-    # Values: "5m" (default ephemeral TTL), "1h" (longer TTL when
-    # the same prefix is reused across sessions within an hour).
+    # The value is a Go duration string ("5m", "1h", or any other
+    # time.ParseDuration-accepting form). Values not in Anthropic's
+    # enumerated vocabulary are forwarded verbatim and rejected
+    # by the upstream at request time.
     # cache-control: "5m"
 
   # OpenAI-compatible example. To use, set `provider: openai-fast` and

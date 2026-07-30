@@ -91,14 +91,18 @@ type ProviderConfig struct {
 	// CacheControl enables Anthropic prompt caching on the request.
 	// Empty means "no cache control" (the framework default; the
 	// request body is byte-equivalent to the pre-change shape).
-	// Valid values are "5m" and "1h" (mapped to models.CacheControlTTL);
-	// invalid values are silently dropped at spec-build time because
-	// buildDefaultSpec is not the right place to fail loudly. The
-	// field flows through models.Spec.CacheControl when set; the
-	// Anthropic wire stamps Anthropic-style cache_control blocks at
-	// the system message, the last tool definition, and the last
-	// user/assistant text content part. OpenAI-compatible providers
-	// silently ignore it.
+	// The value is parsed as a Go duration string ("5m", "1h", or
+	// any other time.ParseDuration-accepting form). The framework's
+	// canonical 5m / 1h constants are the values Anthropic's API
+	// accepts; other durations are forwarded verbatim and may be
+	// rejected by the upstream at request time. Invalid
+	// duration strings are silently dropped at spec-build time
+	// because buildDefaultSpec is not the right place to fail
+	// loudly. The field flows through models.Spec.CacheControl.TTL
+	// when set; the Anthropic wire stamps Anthropic-style
+	// cache_control blocks at the system message, the last tool
+	// definition, and the last user/assistant text content
+	// part. OpenAI-compatible providers silently ignore it.
 	CacheControl string
 }
 
@@ -1150,14 +1154,18 @@ func buildDefaultSpec(pc ProviderConfig) models.Spec {
 		spec.MaxOutputTokens = maxTokens
 	}
 	if pc.CacheControl != "" {
-		ttl := models.CacheControlTTL(pc.CacheControl)
-		if ttl.Valid() {
-			spec.CacheControl = &models.CacheControl{TTL: ttl}
+		// pc.CacheControl is a Go duration string (e.g. "5m",
+		// "1h"). Any value time.ParseDuration accepts is
+		// forwarded; the framework's canonical 5m / 1h constants
+		// are documented but not enforced here. Values that fail
+		// to parse, or that parse to 0, are dropped silently —
+		// buildDefaultSpec is not the place to fail loudly. A
+		// future validation pass in loadProvidersConfig could
+		// reject malformed values at config-load time (out of
+		// scope here).
+		if d, err := time.ParseDuration(pc.CacheControl); err == nil && d != 0 {
+			spec.CacheControl = &models.CacheControl{TTL: d}
 		}
-		// Invalid TTLs are dropped silently: buildDefaultSpec is
-		// not the place to fail loudly. A future validation pass in
-		// loadProvidersConfig could reject them at config-load time
-		// (out of scope here).
 	}
 	return spec
 }
