@@ -33,6 +33,12 @@ providers:
     temperature: 0
     thinking-level: "medium"
     max-tokens: 0                  # 0 = workshop default of 32000
+    # Enable Anthropic prompt caching on stable prefixes (system
+    # prompt, tools, last user/assistant text). Costs more on cache
+    # write, less on cache read; ignored on non-Anthropic providers.
+    # Values: "5m" (default ephemeral TTL), "1h" (longer TTL when
+    # the same prefix is reused across sessions within an hour).
+    # cache-control: "5m"
 
   # OpenAI-compatible example. To use, set `provider: openai-fast` and
   # supply the env var WORKSHOP_PROVIDER_OPENAI_FAST_API_KEY.
