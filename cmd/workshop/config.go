@@ -80,6 +80,7 @@ func buildConfigMap() map[string]interface{} {
 			"temperature":    viper.GetFloat64("providers." + name + ".temperature"),
 			"thinking-level": resolveThinkingLevelForConfig(kind, viper.GetString("providers."+name+".thinking-level")),
 			"max-tokens":     viper.GetInt64("providers." + name + ".max-tokens"),
+			"cache-control":  viper.GetString("providers." + name + ".cache-control"),
 		}
 	}
 

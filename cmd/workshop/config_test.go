@@ -43,6 +43,7 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	setViperValue(t, "providers.haiku.temperature", "0.7")
 	setViperValue(t, "providers.haiku.thinking-level", "medium")
 	setViperInt64Value(t, "providers.haiku.max-tokens", 32000)
+	setViperValue(t, "providers.haiku.cache-control", "5m")
 	setViperValue(t, "compaction.provider", "haiku")
 	// Pin compaction.max-tokens so a stale value in the user's local
 	// config.yaml doesn't leak into the test. The default pflag value
@@ -103,6 +104,9 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	// YAML round-trips int64 as int; compare as int (values fit comfortably).
 	if got, want := prov["max-tokens"], 32000; got != want {
 		t.Errorf("providers.haiku.max-tokens = %v (%T), want %v (%T)", got, got, want, want)
+	}
+	if got, want := prov["cache-control"], "5m"; got != want {
+		t.Errorf("providers.haiku.cache-control = %v, want %v", got, want)
 	}
 
 	compaction, ok := settings["compaction"].(map[string]interface{})
