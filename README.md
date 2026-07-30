@@ -77,16 +77,19 @@ response always has room). The level is also settable at runtime via
 the `/thinking` slash command; see "Slash commands" below.
 
 To opt into Anthropic's prompt caching, set
-`providers.<name>.cache-control` to either `5m` (the default ephemeral
-TTL, the right choice for most sessions) or `1h` (when the same system
-prompt and tool set are reused across many sessions within an hour).
-The field is plumbed onto `models.Spec.CacheControl` and the wire
-stamps Anthropic-style `cache_control:{type:"ephemeral",ttl:?}` blocks
-at the system message, the last tool definition, and the last
-user/assistant text content part. The field is silently ignored on
-OpenAI-compatible providers; cache hits are surfaced via the
-`cache_read` / `cache_write` segments in the TUI status bar when the
-upstream reports them.
+`providers.<name>.cache-control` to a Go duration string (e.g. `5m`,
+the default ephemeral TTL, or `1h` when the same system prompt and
+tool set are reused across many sessions within an hour). The value
+is parsed via `time.ParseDuration` and forwarded into
+`models.Spec.CacheControl.TTL`; the wire stamps Anthropic-style
+`cache_control:{type:"ephemeral",ttl:?}` blocks at the system
+message, the last tool definition, and the last user/assistant text
+content part. Durations not in Anthropic's enumerated vocabulary
+(e.g. `30m`) are forwarded verbatim via `time.Duration.String()` and
+will be rejected by the upstream API at request time. The field is
+silently ignored on OpenAI-compatible providers; cache hits are
+surfaced via the `cache_read` / `cache_write` segments in the TUI
+status bar when the upstream reports them.
 
 ### OpenRouter (via the Anthropic Messages mirror)
 
@@ -284,7 +287,7 @@ providers:
     temperature: 0
     max-tokens: 0           # hard cap on output tokens; 0 = workshop default (anthropic only)
     thinking-level: "off"   # off, minimal, low, medium, high, max (shared by every backend)
-    cache-control: "5m"     # Anthropic prompt caching TTL; "5m" or "1h"
+    cache-control: "5m"     # Anthropic prompt caching TTL; Go duration string ("5m", "1h", ...)
   haiku:
     kind: anthropic
     api-key: sk-ant-...
