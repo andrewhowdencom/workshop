@@ -213,6 +213,7 @@ func loadProvidersConfig(v *viper.Viper) (string, map[string]app.ProviderConfig,
 			Temperature:   v.GetFloat64("providers." + name + ".temperature"),
 			ThinkingLevel: resolveThinkingLevelForConfig(kind, v.GetString("providers."+name+".thinking-level")),
 			MaxTokens:     v.GetInt64("providers." + name + ".max-tokens"),
+			CacheControl:  v.GetString("providers." + name + ".cache-control"),
 		}
 		providers[name] = pc
 	}
