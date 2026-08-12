@@ -1069,7 +1069,7 @@ func TestRoleToolSchemas(t *testing.T) {
 }
 
 func TestBuildManager_Smoke(t *testing.T) {
-	mgr, err := buildManager(&config{
+	mgr, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1089,7 +1089,7 @@ func TestBuildManager_Smoke(t *testing.T) {
 }
 
 func TestBuildManager_WithCompaction(t *testing.T) {
-	mgr, err := buildManager(&config{
+	mgr, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1117,7 +1117,7 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr, err := buildManager(&config{
+	mgr, _, err := buildManager(&config{
 		storeDir:   t.TempDir(),
 		workingDir: dir,
 		providers: map[string]ProviderConfig{
@@ -1138,7 +1138,7 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 }
 
 func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
-	mgr, err := buildManager(&config{
+	mgr, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1176,7 +1176,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	storeDir := t.TempDir()
 
 	// First session: create with role "reviewer"
-	mgr1, err := buildManager(&config{
+	mgr1, _, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1208,7 +1208,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	}
 
 	// Second session: attach with different role "planner"
-	mgr2, err := buildManager(&config{
+	mgr2, _, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "planner",
 		providers: map[string]ProviderConfig{
@@ -2900,7 +2900,7 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 		notified = turns
 	})
 
-	mgr, err := buildManager(&config{
+	mgr, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -3070,7 +3070,7 @@ func TestBuildManager_CompactionProvider_DefaultsToInference(t *testing.T) {
 			MaxTokens: 50000, // Provider is intentionally left empty.
 		},
 	}
-	mgr, err := buildManager(cfg)
+	mgr, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}
@@ -3097,7 +3097,7 @@ func TestBuildManager_CompactionProvider_DistinctFromInference(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	mgr, err := buildManager(cfg)
+	mgr, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}
@@ -3122,7 +3122,7 @@ func TestBuildManager_CompactionProvider_UndefinedErrors(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	_, err := buildManager(cfg)
+	_, _, err := buildManager(cfg)
 	if err == nil {
 		t.Fatal("expected error for undefined compaction.provider")
 	}
@@ -3151,7 +3151,7 @@ func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 			MaxTokens: 0,
 		},
 	}
-	mgr, err := buildManager(cfg)
+	mgr, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}

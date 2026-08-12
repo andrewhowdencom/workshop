@@ -290,7 +290,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	notifier := &compactionNotifier{}
 	cfg.compactionNotifier = notifier
 
-	mgr, err := buildManager(cfg)
+	mgr, factory, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -298,8 +298,6 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	// Create a *session.Session for the TUI. The session-based TUI
 	// contract requires a session; we proxy a fresh session through
 	// the junkBackend adapter so thread state lives in the manager.
-	// Event processing (the engine) is not yet wired; see
-	// internal/app/backend.go for the migration note.
 	tuiBackend := newJunkBackend(mgr)
 	tuiSess, err := tuiBackend.CreateSession(ctx, cfg.threadID)
 	if err != nil {
@@ -321,13 +319,24 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	}
 
 	// Wire the notifier to reload the TUI history when compaction occurs.
-	if tuiImpl, ok := tuiConduit.(*tui.TUI); ok {
-		notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
-			_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
-		})
+	tuiImpl, ok := tuiConduit.(*tui.TUI)
+	if !ok {
+		return fmt.Errorf("TUI conduit does not implement *tui.TUI")
+	}
+	notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+		_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
+	})
+
+	// Look up the *junk.Stream backing the session. The stream is
+	// the persistence handle — runTUIEngine calls stream.Save()
+	// after every turn to restore the pre-bump junk.Manager save
+	// behavior.
+	stream, err := mgr.Get(tuiSess.ID())
+	if err != nil {
+		return fmt.Errorf("lookup TUI stream: %w", err)
 	}
 
-	return tuiConduit.Start(ctx)
+	return runTUIEngine(ctx, tuiSess, tuiImpl, factory, stream)
 }
 
 // RunHTTP initializes and starts the HTTP web UI application.
@@ -341,7 +350,7 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 		cfg.httpAddr = ":8080"
 	}
 
-	mgr, err := buildManager(cfg)
+	mgr, _, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -369,7 +378,7 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 		opt(cfg)
 	}
 
-	mgr, err := buildManager(cfg)
+	mgr, _, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -820,7 +829,12 @@ func (s *workshopSandbox) WorkingDirectory() string {
 }
 
 // buildManager creates the shared session manager from configuration.
-func buildManager(cfg *config) (*junk.Manager, error) {
+// It returns the *junk.Manager (used by stdio and HTTP conduits, plus
+// the bulk of the test suite) alongside a *tuiEngineFactory used by
+// the TUI conduit's session-based inference path. Callers that do
+// not need the TUI factory (stdio, HTTP, and the existing test
+// suite) discard the second return value.
+func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 	// Resolve tracer (noop fallback for tests that don't use WithTracer).
 	tracer := cfg.tracer
 	if tracer == nil {
@@ -835,7 +849,7 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 	}
 	store, err := junk.NewJSONStore(storeDir)
 	if err != nil {
-		return nil, fmt.Errorf("create JSON store: %w", err)
+		return nil, nil, fmt.Errorf("create JSON store: %w", err)
 	}
 
 	// Build the providers: validate every defined named provider,
@@ -844,7 +858,7 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 	// when unset).
 	compiled, err := compileProviders(cfg, tracer)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	prov := compiled[cfg.defaultProviderName]
 	compactionName := cfg.compaction.Provider
@@ -852,7 +866,7 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 		compactionName = cfg.defaultProviderName
 	}
 	if _, ok := compiled[compactionName]; !ok {
-		return nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
+		return nil, nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
 	}
 	compactionProv := compiled[compactionName]
 
@@ -1072,6 +1086,13 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 	}
 
 	// Create session manager.
+	mgr := junk.NewManager(store, prov, stepFactory, processor, junk.WithDefaultMetadata(defaultMeta))
+
+	// Build the TUI engine factory. The factory is only consumed
+	// by RunTUI; RunStdio and RunHTTP discard it. The factory
+	// reuses the stepFactory closure so the per-turn step carries
+	// the same transforms, handlers, spec, tracer, and on-emit
+	// callbacks as the junk.Manager-driven worker did pre-bump.
 	//
 	// Slash interceptor wiring note: ore v1.0 removed
 	// junk.WithInterceptor. Slash commands are now wired by the
@@ -1080,7 +1101,15 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 	// implement that wiring; slash commands will not fire until the
 	// engine-based rewrite lands. See internal/app/backend.go for the
 	// broader migration note.
-	return junk.NewManager(store, prov, stepFactory, processor, junk.WithDefaultMetadata(defaultMeta)), nil
+	tuiFactory := &tuiEngineFactory{
+		mgr:         mgr,
+		stepFactory: stepFactory,
+		prov:        prov,
+		defaultSpec: defaultSpec,
+		tracer:      tracer,
+	}
+
+	return mgr, tuiFactory, nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
