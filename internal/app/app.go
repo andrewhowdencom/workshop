@@ -295,9 +295,19 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
+	// Create a *session.Session for the TUI. The session-based TUI
+	// contract requires a session; we proxy a fresh session through
+	// the junkBackend adapter so thread state lives in the manager.
+	// Event processing (the engine) is not yet wired; see
+	// internal/app/backend.go for the migration note.
+	tuiBackend := newJunkBackend(mgr)
+	tuiSess, err := tuiBackend.CreateSession(ctx, cfg.threadID)
+	if err != nil {
+		return fmt.Errorf("create TUI session: %w", err)
+	}
+
 	// Create the TUI conduit.
-	tuiConduit, err := tui.New(mgr,
-		tui.WithThreadID(cfg.threadID),
+	tuiConduit, err := tui.New(tuiSess,
 		tui.WithName("ws"),
 		tui.WithTracer(cfg.tracer),
 		tui.WithStatusZones(statusZoneMapping),
@@ -336,8 +346,15 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	// Create the HTTP conduit with web UI enabled.
-	httpConduit, err := httpc.New(mgr, httpc.WithUI(), httpc.WithName("workshop"), httpc.WithAddr(cfg.httpAddr), httpc.WithTracer(cfg.tracer))
+	// Create the HTTP conduit with web UI enabled. The HTTP
+	// conduit now consumes a Backend interface (ore v1.3.0);
+	// junkBackend adapts *junk.Manager onto that surface.
+	httpConduit, err := httpc.New(newJunkBackend(mgr),
+		httpc.WithUI(),
+		httpc.WithName("workshop"),
+		httpc.WithAddr(cfg.httpAddr),
+		httpc.WithTracer(cfg.tracer),
+	)
 	if err != nil {
 		return fmt.Errorf("create HTTP conduit: %w", err)
 	}
@@ -1055,7 +1072,15 @@ func buildManager(cfg *config) (*junk.Manager, error) {
 	}
 
 	// Create session manager.
-	return junk.NewManager(store, prov, stepFactory, processor, junk.WithDefaultMetadata(defaultMeta), junk.WithInterceptor(slashReg)), nil
+	//
+	// Slash interceptor wiring note: ore v1.0 removed
+	// junk.WithInterceptor. Slash commands are now wired by the
+	// application calling slashReg.Intercept(ctx, event, sess, emitter)
+	// before each Submit. Workshop's conduits currently do not
+	// implement that wiring; slash commands will not fire until the
+	// engine-based rewrite lands. See internal/app/backend.go for the
+	// broader migration note.
+	return junk.NewManager(store, prov, stepFactory, processor, junk.WithDefaultMetadata(defaultMeta)), nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
