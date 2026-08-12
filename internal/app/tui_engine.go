@@ -42,13 +42,18 @@
 //
 // To avoid that, the factory builds the per-turn step WITHOUT
 // WithState — using the same loop.Options that junk.Manager's worker
-// would have applied (transforms, handlers, spec, tracer, on-emit
-// callbacks) — and starts a bridge goroutine that forwards every
-// emission on the per-turn step to the session's emitter. The
-// session's bound state handles the append exactly once: the user
-// turn is added by the engine via sess.Submit (session step's
-// auto-append), and the assistant turn is added by the bridge (also
-// session step's auto-append). No double-append.
+// would have applied (transforms, handlers, spec, tracer) — and
+// registers a synchronous OnEmit callback that forwards every
+// emission to the session's emitter. The OnEmit runs inline inside
+// EventBus.Emit, so by the time step.Turn returns the session's
+// bound state has appended the assistant turn. No double-append,
+// no race between the bridge and the pattern.
+//
+// Synchronous forwarding is load-bearing. An asynchronous bridge
+// (Subscribe + goroutine) would race with the pattern's check of
+// last-role-in-state; ReAct would call step.Turn multiple times for
+// one user message, producing duplicate assistant turns. The OnEmit
+// approach closes that race by serializing the forward with Emit.
 //
 // # Persistence
 //
@@ -71,6 +76,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
+	"sync"
 
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/cognitive"
@@ -96,27 +103,45 @@ import (
 // Build is invoked once per dequeued event by engine.Engine. Each
 // call produces a fresh agent with a fresh loop.Step; the agent is
 // discarded when the engine moves on to the next event.
+//
+// Per-turn steps are tracked so the factory can release them on
+// Close. The engine does not know about the steps — it only sees
+// *agent.Agent — so the factory must own the lifecycle. Callers
+// (runTUIEngine, the test suite) must invoke Close when done to
+// release the per-turn step resources; see Close.
 type tuiEngineFactory struct {
 	mgr         *junk.Manager
 	stepFactory func(*junk.Stream) ([]loop.Option, error)
 	prov        provider.Provider
 	defaultSpec models.Spec
 	tracer      trace.Tracer
+
+	// mu guards pending. Build appends to pending; Close reads and
+	// clears pending. Build calls are concurrent across sessions
+	// (the engine serializes per-session via its mailbox), so mu
+	// is necessary.
+	mu      sync.Mutex
+	pending []*loop.Step
 }
 
 // Build implements agent.Factory. It looks up the *junk.Stream backing
 // the session, calls the workshop's stepFactory to obtain the
 // configured loop.Options, and constructs a dedicated per-turn step
-// from those options. The step is intentionally NOT state-bound (see
-// the package docstring on double-append avoidance); a bridge
-// goroutine forwards emissions from this step to the session for
-// both subscriber fanout (the TUI) and state auto-append
-// (TurnCompleteEvent → bound thread).
+// from those options.
 //
-// The bridge goroutine is owned by the per-turn step: it closes the
-// step on exit, and the engine's per-event lifecycle ensures only one
-// bridge runs per active turn. See bridgeStepToSession for the
-// lifecycle contract.
+// The step is intentionally NOT state-bound (see the package
+// docstring on double-append avoidance). Instead, an OnEmit callback
+// is registered that synchronously forwards every emission to the
+// session's emitter. Synchronous forwarding is load-bearing: the
+// pattern (ReAct) reads the session thread on every iteration to
+// decide whether to loop again, so the assistant turn produced by
+// step.Turn MUST be appended to the thread before that read. An
+// asynchronous bridge (Subscribe + goroutine) races with the pattern
+// and causes ReAct to call step.Turn multiple times for a single
+// user message, producing N duplicates of the assistant turn. The
+// OnEmit callback runs inside EventBus.Emit (synchronously, before
+// the fanout send), so by the time step.Turn returns, the session
+// has appended the assistant turn and the pattern sees it.
 func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	stream, err := f.mgr.Get(sess.ID())
 	if err != nil {
@@ -128,15 +153,35 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 		return nil, fmt.Errorf("engine: build step options: %w", err)
 	}
 
-	// The per-turn step carries all the workshop's transforms,
-	// handlers, spec, tracer, and on-emit callbacks — but is NOT
-	// bound to the session's thread. The session's step (created
-	// by session.New) is the only state-bound step, and the
-	// bridge below routes every emission here so that step's
-	// auto-append runs exactly once.
+	// Append the synchronous bridge OnEmit to the stepFactory's
+	// options. The OnEmit forwards every emission to the session's
+	// emitter, which:
+	//   - auto-appends TurnCompleteEvents to the session thread
+	//     (via the session's bound state), and
+	//   - fans the event out to the session's subscribers (the
+	//     TUI's Subscribe loop).
+	//
+	// The OnEmit runs synchronously inside EventBus.Emit (see
+	// x/loop/eventbus.go), so step.Turn does not return until
+	// every emission has been forwarded.
+	opts = append(opts, loop.WithOnEmit(func(ctx context.Context, event loop.OutputEvent) {
+		sess.Emitter().Emit(ctx, event)
+	}))
+
 	step := loop.New(opts...)
 
-	go bridgeStepToSession(step, sess)
+	// Track the per-turn step so Close can drain its FanOut
+	// subscribers (if any) at shutdown. With the synchronous
+	// OnEmit design, the bridge is no longer a separate
+	// goroutine — emissions are forwarded inline — so there is
+	// nothing for the bridge to "drain". But step.Close still
+	// closes the EventBus and is required for resource cleanup
+	// (the FanOut's run goroutine, the buffered events channel,
+	// etc.). The test suite and runTUIEngine both invoke Close
+	// to release those resources.
+	f.mu.Lock()
+	f.pending = append(f.pending, step)
+	f.mu.Unlock()
 
 	return agent.New(sess.ID(),
 		agent.WithProvider(f.prov),
@@ -147,32 +192,30 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	), nil
 }
 
-// bridgeStepToSession forwards every event emitted on src to the
-// destination session's emitter. It is a single-pass pump: it
-// subscribes to src, ranges over the channel until it closes, and
-// closes src on exit so the per-turn step's resources are released.
+// Close drains every pending per-turn step. Each step.Close closes
+// its EventBus/FanOut, releasing the buffered events channel and
+// stopping the FanOut's run goroutine. With the synchronous OnEmit
+// design (see Build), every event has already been forwarded to
+// the session by the time step.Turn returns; Close is purely for
+// resource cleanup, not for waiting on in-flight bridges.
 //
-// ctx is used only for the Emit calls. Background is appropriate
-// here because the per-turn context may be cancelled by the engine
-// when the parent context is cancelled; the bridge should still
-// drain in-flight emissions so the session sees a coherent event
-// stream.
+// Close is safe to call once; subsequent calls are no-ops because
+// pending is cleared on the first call. Concurrent Build calls
+// during Close are safe: a new Build appends to pending after
+// Close has cleared it; that new step is the caller's
+// responsibility to drain (e.g. by calling Close again).
 //
-// Why we don't use sess.Submit on the bridge path: sess.Submit runs
-// the pipeline handlers and emits a fresh TurnCompleteEvent. The
-// per-turn step has already emitted a TurnCompleteEvent with the
-// assistant turn; calling sess.Submit would re-emit it (double emit
-// to subscribers) and trigger double auto-append. Forwarding the
-// raw event through the session's emitter preserves the canonical
-// "single emit, single append" invariant.
-func bridgeStepToSession(src *loop.Step, sess *session.Session) {
-	defer src.Close()
-	out := src.Subscribe(
-		"text_delta", "reasoning_delta", "tool_call", "tool_result",
-		"turn_complete", "error", "properties", "lifecycle", "notice", "activity",
-	)
-	for event := range out {
-		sess.Emitter().Emit(context.Background(), event)
+// Production callers (runTUIEngine) call Close after the TUI
+// exits. Test callers call Close via t.Cleanup to release the
+// per-turn step resources.
+func (f *tuiEngineFactory) Close() {
+	f.mu.Lock()
+	pending := f.pending
+	f.pending = nil
+	f.mu.Unlock()
+
+	for _, p := range pending {
+		_ = p.Close()
 	}
 }
 
@@ -218,10 +261,24 @@ func runTUIEngine(
 	// user presses Ctrl+C / Esc. engine.Submit returns an error
 	// only on session-not-found or queue-full; either is fatal to
 	// the pump.
-	events := tuiConduit.Events()
+	//
+	// tuiConduit.Events() returns nil until tuiConduit.Start()
+	// initializes t.events (see x/conduit/tui/tui.go:333). The
+	// pump goroutine must read Events() AFTER Start() has begun;
+	// ranging over a nil channel blocks forever, which would
+	// silently drop every user message. We poll Events() inside
+	// the goroutine and yield via runtime.Gosched until it
+	// returns a non-nil channel.
 	pumpDone := make(chan struct{})
 	go func() {
 		defer close(pumpDone)
+		var events <-chan session.Event
+		for events == nil {
+			events = tuiConduit.Events()
+			if events == nil {
+				runtime.Gosched()
+			}
+		}
 		for evt := range events {
 			if err := eng.Submit(ctx, sess.ID(), evt); err != nil {
 				slog.Error("engine.Submit failed; stopping pump", "err", err)
@@ -236,6 +293,11 @@ func runTUIEngine(
 	// turn; this restores that behavior. The save is best-effort
 	// because failing to persist is not a fatal error for an
 	// interactive TUI session — the user can retry by typing.
+	//
+	// The subscription is closed when sess.Close is called below,
+	// which lets the goroutine drain. Without that, the channel
+	// stays open for the lifetime of the session and <-lifecycleDone
+	// hangs forever after the TUI exits.
 	lifecycleDone := make(chan struct{})
 	go func() {
 		defer close(lifecycleDone)
@@ -252,14 +314,28 @@ func runTUIEngine(
 
 	// 3. Start the TUI. Blocks until ctx is cancelled, the user
 	// presses Ctrl+C, or the Bubble Tea program errors. tui.Start
-	// closes the Events() channel on return.
+	// closes t.events on return, which lets the pump goroutine
+	// drain (its for-range over Events() exits when the channel
+	// closes).
 	startErr := tuiConduit.Start(ctx)
 
-	// 4. Drain the pumps. By this point the Events() channel is
-	// closed (tui.Start closes it on return), so pumpDone closes
-	// once the for-range loop exits. lifecycleDone closes only
-	// when the session is closed; cancelling the context and
-	// closing the engine drains the lifecycle subscription.
+	// 4. Close the session. This releases every Subscribe-based
+	// channel (the lifecycle goroutine above, and any TUI-side
+	// subscriptions that survived tui.Start's exit), letting both
+	// pumpDone and lifecycleDone close cleanly.
+	_ = sess.Close()
+
+	// 5. Release the TUI engine factory's per-turn steps. With the
+	// synchronous OnEmit design (see tuiEngineFactory.Build), every
+	// event has already been forwarded to the session by the time
+	// step.Turn returned; Close is purely for resource cleanup
+	// (EventBus/FanOut channels, run goroutines).
+	factory.Close()
+
+	// 6. Drain the pumps. pumpDone closes when t.events is closed
+	// (already happened inside tui.Start) and the for-range exits.
+	// lifecycleDone closes when sess.Close above propagates
+	// through the session's step into the subscription channel.
 	<-pumpDone
 	<-lifecycleDone
 
