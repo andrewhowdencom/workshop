@@ -20,6 +20,7 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/junk"
 	state "github.com/andrewhowdencom/ore/ledger"
+	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/x/compaction"
 	"github.com/andrewhowdencom/ore/x/provider/retry"
 	slash "github.com/andrewhowdencom/ore/x/slash"
@@ -393,7 +394,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	}
 
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
 
 	// Valid role (first set on a fresh thread): the resolver's path
 	// is updated and the role metadata is recorded. No turn is
@@ -405,7 +406,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	}
 	assert.Equal(t, "Role: reviewer", res.Notice.Content, "successful set should confirm the new role")
 
-	v, ok := stream.GetMetadata("workshop.role")
+	v, ok := sess.Thread().Meta().Get("workshop.role")
 	if !ok || v != "reviewer" {
 		t.Errorf("metadata = %q, want reviewer", v)
 	}
@@ -442,9 +443,12 @@ func TestRoleSlashHandler(t *testing.T) {
 	}
 }
 
-// newRoleCommandStream creates a session stream suitable for the
-// role-command tests below. The test provider is a no-op; the role
-// handler does not invoke the LLM.
+// newRoleCommandStream creates a session suitable for the role-command
+// tests below. Pre-bump this helper built a *junk.Stream via
+// junk.Manager.Create; the slash handlers now work session-first so
+// a *session.Session backed by a fresh *ledger.Thread is sufficient.
+// The thread is exposed via sess.Thread() for tests that want to
+// seed thread metadata directly.
 func newRoleCommandStream(t *testing.T) *junk.Stream {
 	t.Helper()
 	store := junk.NewMemoryStore()
@@ -461,6 +465,19 @@ func newRoleCommandStream(t *testing.T) *junk.Stream {
 	return stream
 }
 
+// newRoleCommandSession creates a session for slash handler tests.
+// It returns both the session (for SetSession) and the underlying
+// junk.Stream (for stream-level helpers — SetMetadata, GetMetadata,
+// Turns). The two share a *ledger.Thread so metadata seeded via
+// stream.SetMetadata is visible to the slash handler's SetSession
+// reader (which reads via sess.Thread().Meta().Get).
+func newRoleCommandSession(t *testing.T) (*session.Session, *junk.Stream) {
+	t.Helper()
+	stream := newRoleCommandStream(t)
+	sess := session.New(stream.ID(), stream.State().(*state.Thread))
+	return sess, stream
+}
+
 func TestRoleCommand_NoArgListsRoles(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
@@ -471,7 +488,7 @@ func TestRoleCommand_NoArgListsRoles(t *testing.T) {
 	}
 
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(newRoleCommandStream(t))
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err, "no-arg form must not return an error")
@@ -488,7 +505,7 @@ func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
 	}
 
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(newRoleCommandStream(t))
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "help"})
 	require.NoError(t, err, "/role help must not return an error")
@@ -501,11 +518,9 @@ func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream := newRoleCommandStream(t)
-	stream.SetMetadata("workshop.role", "reviewer")
-
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess.Thread().Meta().Set("workshop.role", "reviewer")
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err)
@@ -515,7 +530,7 @@ func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
 func TestRoleCommand_NoArgEmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(newRoleCommandStream(t))
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err)
@@ -529,16 +544,14 @@ func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream := newRoleCommandStream(t)
-	stream.SetMetadata("workshop.role", "reviewer")
-
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess.Thread().Meta().Set("workshop.role", "reviewer")
 
 	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err)
 
-	got, _ := stream.GetMetadata("workshop.role")
+	got, _ := sess.Thread().Meta().Get("workshop.role")
 	assert.Equal(t, "reviewer", got, "no-arg form must not change the active role")
 }
 
@@ -559,10 +572,9 @@ func newRoleCommandStreamWithRoles(t *testing.T) (*junk.Stream, string) {
 
 func TestRoleCommand_UpdateResolver(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
-	stream.SetMetadata("workshop.role", "ideation")
-
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess.Thread().Meta().Set("workshop.role", "ideation")
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
 	require.NoError(t, err)
@@ -584,10 +596,10 @@ func TestRoleCommand_UpdateResolver(t *testing.T) {
 
 func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
-	stream.SetMetadata("workshop.role", "planner")
-
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)
+	sess.Thread().Meta().Set("workshop.role", "planner")
+	rc.SetSession(sess)
 	initialPath := rc.Resolver().Path()
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
@@ -604,22 +616,21 @@ func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
 }
 
 func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
-	stream.SetMetadata("workshop.role", "planner")
-
+	_, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)
+	sess.Thread().Meta().Set("workshop.role", "planner")
+	rc.SetSession(sess)
 
 	want := filepath.Join(dir, "planner.md")
-	assert.Equal(t, want, rc.Resolver().Path(), "SetStream should seed the resolver from metadata")
+	assert.Equal(t, want, rc.Resolver().Path(), "SetSession should seed the resolver from metadata")
 }
 
 func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
-	stream.SetMetadata("workshop.role", "ideation")
-
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess.Thread().Meta().Set("workshop.role", "ideation")
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
 	require.NoError(t, err, "/role none must not return an error when a role is set")
@@ -628,7 +639,7 @@ func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 	// The role metadata is preserved with the empty-string sentinel
 	// (rather than deleted) so that defaultMeta's re-seed on Attach
 	// can distinguish "explicitly cleared" from "never set".
-	v, ok := stream.GetMetadata("workshop.role")
+	v, ok := sess.Thread().Meta().Get("workshop.role")
 	assert.True(t, ok, "workshop.role should still be present after clear, just empty (sentinel)")
 	assert.Equal(t, "", v)
 
@@ -639,18 +650,17 @@ func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 
 func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
+	rc := &roleCommand{rdir: dir}
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
 	// Pre-seed with the empty-string sentinel to simulate an
 	// already-cleared thread.
-	stream.SetMetadata("workshop.role", "")
-
-	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess.Thread().Meta().Set("workshop.role", "")
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
 	require.NoError(t, err, "/role none on an already-cleared thread must not return an error")
 	assert.Equal(t, "Role: (none)", res.Notice.Content)
 
-	v, ok := stream.GetMetadata("workshop.role")
+	v, ok := sess.Thread().Meta().Get("workshop.role")
 	assert.True(t, ok)
 	assert.Equal(t, "", v)
 
@@ -658,18 +668,17 @@ func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
 }
 
 func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
-	stream.SetMetadata("workshop.role", "ideation")
-
+	_, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	rc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess.Thread().Meta().Set("workshop.role", "ideation")
 
 	// First, attempt an invalid switch — the role metadata should
 	// remain untouched (the existing "role not found" contract).
 	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
 	require.Error(t, err, "invalid role must error")
 
-	v, ok := stream.GetMetadata("workshop.role")
+	v, ok := sess.Thread().Meta().Get("workshop.role")
 	require.True(t, ok, "metadata should still be set after the failed switch")
 	assert.Equal(t, "ideation", v)
 
@@ -680,7 +689,7 @@ func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Role: (none)", res.Notice.Content)
 
-	v, ok = stream.GetMetadata("workshop.role")
+	v, ok = sess.Thread().Meta().Get("workshop.role")
 	assert.True(t, ok)
 	assert.Equal(t, "", v)
 }
@@ -723,6 +732,12 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 			agent.WithPattern(&cognitive.SingleShot{}),
 		),
 	}
+	// Build a session that shares this stream's thread, so the
+	// pre-populated turns are visible to the handler. The
+	// newRoleCommandSession helper creates a fresh stream/thread
+	// and would not see the populated turns.
+	sess := session.New(stream.ID(), stream.State().(*state.Thread))
+	cc.SetSession(sess)
 	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
@@ -791,6 +806,10 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 			agent.WithPattern(&cognitive.SingleShot{}),
 		),
 	}
+	// Build a session that shares this stream's thread, so the
+	// pre-populated turns are visible to the handler.
+	sess := session.New(stream.ID(), stream.State().(*state.Thread))
+	cc.SetSession(sess)
 	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
@@ -1158,7 +1177,12 @@ func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create stream: %v", err)
 	}
+	_ = stream
 
+	// defaultMeta seeds the role into the stream's metadata. The
+	// manager's defaultMeta reads the role from the stream's
+	// thread metadata (not the session's), so verify via the
+	// stream.
 	workshopRole, ok := stream.GetMetadata("workshop.role")
 	if !ok {
 		t.Fatal("workshop.role not seeded for new thread")
@@ -2856,6 +2880,12 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 		),
 		notifier: notifier,
 	}
+	// Build a session that shares this stream's thread, so the
+	// pre-populated turns are visible to the handler. (The
+	// newRoleCommandSession helper would create a fresh
+	// stream/thread and miss the populated turns.)
+	sess := session.New(stream.ID(), stream.State().(*state.Thread))
+	cc.SetSession(sess)
 	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
@@ -2869,6 +2899,7 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	if notified[0].Role != state.RoleSystem {
 		t.Errorf("notified summary role = %v, want RoleSystem", notified[0].Role)
 	}
+	t.Logf("debug: notified boundary: %+v", notifiedBoundary)
 
 	// The notifier also observes the full tree; the 5 original
 	// turns are preserved behind the boundary even though they no
@@ -2929,30 +2960,15 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 		t.Errorf("notifier did not receive test turns: got %v", notified)
 	}
 }
-
-// newThinkingCommandStream creates a fresh in-memory session manager
-// and stream for the thinking-command tests. The provider is a
-// no-op; only the slash handler is exercised.
-func newThinkingCommandStream(t *testing.T) *junk.Stream {
-	t.Helper()
-	store := junk.NewMemoryStore()
-	prov := &testSlashProvider{}
-	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
-		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return st, nil
-	})
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
-	return stream
-}
+// newThinkingCommandStream was used when thinking-command tests
+// needed their own stream. The slash handler is now session-based;
+// tests seed via sess.Thread().Meta() and verify there, so the
+// per-handler stream helper is no longer needed.
 
 func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
-	stream := newThinkingCommandStream(t)
 	tc := &thinkingCommand{}
-	tc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)
+	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: ""})
 	require.NoError(t, err)
@@ -2961,59 +2977,59 @@ func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
 }
 
 func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
-	stream := newThinkingCommandStream(t)
 	tc := &thinkingCommand{}
-	tc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)
+	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
 	require.NoError(t, err)
 	assert.Equal(t, "Thinking: high", res.Notice.Content)
 
-	// Verify the metadata was actually written. GetMetadata returns the
-	// value the next read of buildInvokeOptions will see.
-	got, ok := stream.GetMetadata("workshop.thinking_level")
+	// Verify the metadata was actually written. The handler writes
+	// via sess.Thread().Meta().Set, which is the same store as
+	// stream.thread.Metadata since the two share the thread.
+	got, ok := sess.Thread().Meta().Get("workshop.thinking_level")
 	require.True(t, ok, "metadata should be set")
 	assert.Equal(t, "high", got)
 }
 
 func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
-	stream := newThinkingCommandStream(t)
 	tc := &thinkingCommand{}
-	tc.SetStream(stream)
-
 	// Pre-set a known level so we can verify it isn't overwritten.
-	stream.SetMetadata("workshop.thinking_level", "medium")
+	sess, _ := newRoleCommandSession(t); tc.SetSession(sess)
+	sess.Thread().Meta().Set("workshop.thinking_level", "medium")
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "frobnicate"})
 	require.NoError(t, err)
 	assert.Contains(t, res.Notice.Content, "Unknown level: frobnicate", "should report the unknown level name")
 	assert.Contains(t, res.Notice.Content, "Available:", "should list valid levels in the error")
 
-	got, _ := stream.GetMetadata("workshop.thinking_level")
+	got, _ := sess.Thread().Meta().Get("workshop.thinking_level")
 	assert.Equal(t, "medium", got, "metadata must not be mutated by an invalid set")
 }
 
 func TestThinkingCommand_OffIsValid(t *testing.T) {
-	stream := newThinkingCommandStream(t)
 	tc := &thinkingCommand{}
-	tc.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)
+	tc.SetSession(sess)
 
 	// "off" is a valid level that disables thinking; it must be accepted
 	// and must write the metadata.
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "off"})
 	require.NoError(t, err)
 	assert.Equal(t, "Thinking: off", res.Notice.Content)
-	got, _ := stream.GetMetadata("workshop.thinking_level")
+	got, _ := sess.Thread().Meta().Get("workshop.thinking_level")
 	assert.Equal(t, "off", got)
 }
 
 func TestThinkingCommand_NoStreamError(t *testing.T) {
 	tc := &thinkingCommand{}
-	// No SetStream call: simulates invoking /thinking before any stream
-	// has been opened. The handler must surface a clear error.
+	// No SetSession call: simulates invoking /thinking before any
+	// session has been bound. The handler must surface a clear
+	// error.
 	_, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no active stream")
+	assert.Contains(t, err.Error(), "no active session")
 }
 
 // TestThinkingCommand_LevelRoundTripsThroughDefaultSpec verifies the
@@ -3025,10 +3041,10 @@ func TestThinkingCommand_NoStreamError(t *testing.T) {
 // buildInvokeOptions-then-thinkLevelOption path: thinking level
 // lives on the spec, not on InvokeOptions.
 func TestThinkingCommand_LevelRoundTripsThroughDefaultSpec(t *testing.T) {
-	stream := newThinkingCommandStream(t)
 
 	// Simulate the user setting the level via /thinking.
-	stream.SetMetadata("workshop.thinking_level", "high")
+	sess, _ := newRoleCommandSession(t)
+	sess.Thread().Meta().Set("workshop.thinking_level", "high")
 
 	cfg := &config{
 		providers: map[string]ProviderConfig{
@@ -3043,7 +3059,7 @@ func TestThinkingCommand_LevelRoundTripsThroughDefaultSpec(t *testing.T) {
 	// In production, buildManager reads the metadata into cfg once at
 	// step-open time, then buildDefaultSpec reads from cfg. Mirror that
 	// here so the assertion targets the same code path.
-	if v, ok := stream.GetMetadata("workshop.thinking_level"); ok {
+	if v, ok := sess.Thread().Meta().Get("workshop.thinking_level"); ok {
 		pc := cfg.providers[cfg.defaultProviderName]
 		pc.ThinkingLevel = v
 		cfg.providers[cfg.defaultProviderName] = pc
@@ -3160,24 +3176,9 @@ func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 	}
 }
 
-// newAnalyticsCommandStream creates a fresh in-memory session manager
-// and stream for the analytics-command tests. The provider is a no-op;
-// only the slash handler is exercised.
-func newAnalyticsCommandStream(t *testing.T) *junk.Stream {
-	t.Helper()
-	store := junk.NewMemoryStore()
-	prov := &testSlashProvider{}
-	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
-		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return st, nil
-	})
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
-	return stream
-}
+// newAnalyticsCommandStream was used when analytics-command tests
+// needed their own stream. The slash handler is now session-based;
+// tests use newRoleCommandSession, so this helper is no longer needed.
 
 func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
 	// With no stream wired, the handler must surface the friendly
@@ -3192,9 +3193,9 @@ func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
 func TestAnalyticsCommand_EmptyThreadFriendlyMessage(t *testing.T) {
 	// A freshly-created thread has no turns yet. AnalyzeTurns returns
 	// nil and Render translates that to the same friendly message.
-	stream := newAnalyticsCommandStream(t)
 	ac := &analyticsCommand{}
-	ac.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)
+	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
 	require.NoError(t, err)
@@ -3205,9 +3206,11 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	// A populated thread produces a Markdown table. We assert on the
 	// structural shape rather than exact formatting so the test is
 	// resilient to changes in the column layout.
-	stream := newAnalyticsCommandStream(t)
 
-	// Seed two turns: one with a single Text artifact, one with two.
+	// Seed two turns via the underlying stream. The session and
+	// stream share a thread, so the handler's sess.Turns() sees the
+	// same data.
+	_, stream := newRoleCommandSession(t)
 	if err := stream.Process(context.Background(), junk.UserMessageEvent{Content: "first"}); err != nil {
 		t.Fatalf("process first turn: %v", err)
 	}
@@ -3216,7 +3219,16 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	}
 
 	ac := &analyticsCommand{}
-	ac.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)  // fresh session, empty thread
+	// Note: this test creates two sessions. The handler reads via
+	// sess.Turns(), so it sees the second session's thread (empty).
+	// To assert via the handler we need to bind it to the populated
+	// session. Override the binding:
+	ac.SetSession(sess)
+	// Re-bind to the populated session by reading its thread back:
+	if thread, ok := stream.State().(*state.Thread); ok {
+		ac.SetSession(session.New(stream.ID(), thread))
+	}
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
 	require.NoError(t, err)
@@ -3232,9 +3244,9 @@ func TestAnalyticsCommand_ConsumesEvent(t *testing.T) {
 	// (Result.Replace is nil) so no LLM inference is triggered. The
 	// slash registry uses Result.Replace to decide whether to feed
 	// the event into the inference pipeline.
-	stream := newAnalyticsCommandStream(t)
 	ac := &analyticsCommand{}
-	ac.SetStream(stream)
+	sess, _ := newRoleCommandSession(t)
+	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
 	require.NoError(t, err)

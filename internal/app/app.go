@@ -33,6 +33,7 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/junk"
 	state "github.com/andrewhowdencom/ore/ledger"
+	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/tool"
 
 	"go.opentelemetry.io/otel/metric"
@@ -421,27 +422,45 @@ type metadataStore interface {
 type roleCommand struct {
 	mu       sync.Mutex
 	rdir     string
-	stream   *junk.Stream
+	session  *session.Session
 	resolver *source.FileResolver
 }
 
-// SetStream is called from the stepFactory when a new stream is bound.
-// It creates a fresh resolver for the stream and seeds it from the
-// stream's current role metadata, if any. Existing streams preserve
-// their previously-set role; new streams start with no role until
-// one is selected via /role.
-func (c *roleCommand) SetStream(stream *junk.Stream) {
+// SetSession is called from the tui engine factory when a new
+// session is bound. It creates a fresh resolver for the session
+// and seeds it from the session's current role metadata, if any.
+// Existing sessions preserve their previously-set role; new sessions
+// start with no role until one is selected via /role.
+//
+// session-based design: the slash handler reads and writes through
+// the *session.Session directly. Pre-bump the handler held a
+// *junk.Stream, but the post-bump TUI conduit is session-based and
+// slashReg.Intercept threads the session through; making the handler
+// session-only keeps the data flow uniform across conduits.
+//
+// Persistence note: the handler writes to both
+// sess.Thread().Metadata (which junk.Stream.Save persists) and
+// sess.SetMetadata (which drives the live TUI status zone via
+// PropertiesEvent and seeds this resolver on reload). Writing to
+// only one of the two stores would either lose persistence across
+// TUI restarts or leave the status zone stale. See
+// writeRole for the dual-write rationale.
+func (c *roleCommand) SetSession(sess *session.Session) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stream = stream
+	c.session = sess
 	c.resolver = source.NewFileResolver("")
-	if role, ok := stream.GetMetadata("workshop.role"); ok && role != "" {
+	// Read the role from thread.Metadata (the persisted store),
+	// not session.metadata (in-memory only). The handler writes
+	// to both via writeRole, so thread.Metadata is the durable
+	// source across TUI restarts.
+	if role, ok := sess.Thread().Meta().Get("workshop.role"); ok && role != "" {
 		c.resolver.SetPath(filepath.Join(c.rdir, role+".md"))
 	}
 }
 
-// Resolver returns the resolver for the current stream. Returns nil
-// when no stream is attached. Intended to be passed to
+// Resolver returns the resolver for the current session. Returns nil
+// when no session is attached. Intended to be passed to
 // makeSystemPromptTransform so the system prompt can read the
 // active role directly from the file, without going through metadata.
 func (c *roleCommand) Resolver() *source.FileResolver {
@@ -450,17 +469,49 @@ func (c *roleCommand) Resolver() *source.FileResolver {
 	return c.resolver
 }
 
-// currentRole returns the active role from stream metadata, or the
-// empty string when no role is set (or no stream is attached). The
+// writeRole persists the active role in two places and emits a
+// PropertiesEvent for live status updates. The dual-write is
+// load-bearing:
+//
+//   - sess.Thread().Metadata is what junk.Stream.Save writes to
+//     disk. Without this write, /role would reset across TUI
+//     restarts.
+//   - sess.SetMetadata drives the TUI status zone via
+//     PropertiesEvent AND seeds this handler's resolver on
+//     SetSession (see the comment on SetSession above).
+//
+// Writing to only one of the two stores would either drop the
+// role on restart or leave the TUI's status display stale. Both
+// writes are required.
+//
+// The caller MUST hold c.mu. writeRole does not lock because the
+// only callers are Handler and SetSession, both of which already
+// hold the lock. Re-locking here would deadlock.
+func (c *roleCommand) writeRole(name string) {
+	if c.session == nil {
+		return
+	}
+	c.session.Thread().Meta().Set("workshop.role", name)
+	c.session.SetMetadata("workshop.role", name)
+}
+
+// currentRole returns the active role from session metadata, or the
+// empty string when no role is set (or no session is attached). The
 // empty string is rendered as "(none)" by callers.
+//
+// Reads from sess.Thread().Meta() (the persisted source of truth
+// across TUI restarts) rather than session.metadata. The two stores
+// stay in sync because writeRole writes to both.
 func (c *roleCommand) currentRole() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.stream == nil {
+	if c.session == nil {
 		return ""
 	}
-	v, _ := c.stream.GetMetadata("workshop.role")
-	return v
+	if v, ok := c.session.Thread().Meta().Get("workshop.role"); ok {
+		return v
+	}
+	return ""
 }
 
 // Handler dispatches the /role slash command. With no argument (or
@@ -497,8 +548,8 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	if name == "none" {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		if c.stream == nil || c.resolver == nil {
-			return slash.Result{}, fmt.Errorf("no active stream")
+		if c.session == nil || c.resolver == nil {
+			return slash.Result{}, fmt.Errorf("no active session")
 		}
 		// Reset the resolver path and set the role metadata to the
 		// empty-string sentinel. FileResolver.Resolve treats an empty
@@ -514,7 +565,7 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 		// `ok && role != ""`. The operation is idempotent: clearing
 		// a cleared role is a no-op.
 		c.resolver.SetPath("")
-		c.stream.SetMetadata("workshop.role", "")
+		c.writeRole("")
 
 		return slash.Result{
 			Notice: loop.Notice{
@@ -530,8 +581,8 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.stream == nil || c.resolver == nil {
-		return slash.Result{}, fmt.Errorf("no active stream")
+	if c.session == nil || c.resolver == nil {
+		return slash.Result{}, fmt.Errorf("no active session")
 	}
 	// Update the resolver's path. The system prompt transform picks
 	// up the new role on the next Transform call. The role metadata
@@ -540,7 +591,7 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	// persistent RoleSystem turn is appended; the system prompt
 	// itself is the single source of truth.
 	c.resolver.SetPath(filepath.Join(c.rdir, name+".md"))
-	c.stream.SetMetadata("workshop.role", name)
+	c.writeRole(name)
 
 	return slash.Result{
 		Notice: loop.Notice{
@@ -592,28 +643,33 @@ func (c *roleCommand) formatRoleList() string {
 // emits a loop.PropertiesEvent so the TUI status bar updates in real
 // time; buildInvokeOptions reads the same key at request time.
 type thinkingCommand struct {
-	mu     sync.Mutex
-	stream *junk.Stream
+	mu      sync.Mutex
+	session *session.Session
 }
 
-// SetStream updates the shared stream reference. Called by the
-// stepFactory on every stream open.
-func (c *thinkingCommand) SetStream(s *junk.Stream) {
+// SetSession updates the shared session reference. Called by the
+// tui engine factory on every Build call (one per dequeued event).
+//
+// session-based design: the slash handler reads and writes through
+// the *session.Session directly. See roleCommand.SetSession for the
+// rationale.
+func (c *thinkingCommand) SetSession(sess *session.Session) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stream = s
+	c.session = sess
 }
 
-// currentThinkingLevel reads the active stream's thinking level from
-// metadata, defaulting to ThinkingLevelOff when unset. The empty
-// string is treated as off, matching resolveThinkingLevel's contract.
+// currentThinkingLevel reads the active session's thinking level
+// from metadata, defaulting to ThinkingLevelOff when unset. The
+// empty string is treated as off, matching resolveThinkingLevel's
+// contract.
 func (c *thinkingCommand) currentThinkingLevel() models.ThinkingLevel {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.stream == nil {
+	if c.session == nil {
 		return models.ThinkingLevelOff
 	}
-	v, ok := c.stream.GetMetadata("workshop.thinking_level")
+	v, ok := c.session.GetMetadata("workshop.thinking_level")
 	if !ok || v == "" {
 		return models.ThinkingLevelOff
 	}
@@ -622,6 +678,23 @@ func (c *thinkingCommand) currentThinkingLevel() models.ThinkingLevel {
 		return models.ThinkingLevelOff
 	}
 	return level
+}
+
+// writeLevel persists the active thinking level in two places and
+// emits a PropertiesEvent for live status updates. The dual-write
+// rationale matches roleCommand.writeRole: thread.Metadata for
+// persistence (junk.Stream.Save), session.metadata for live status
+// (PropertiesEvent).
+//
+// The caller MUST hold c.mu. writeLevel does not lock because the
+// only callers (Handler) already hold the lock. Re-locking here
+// would deadlock.
+func (c *thinkingCommand) writeLevel(level string) {
+	if c.session == nil {
+		return
+	}
+	c.session.Thread().Meta().Set("workshop.thinking_level", level)
+	c.session.SetMetadata("workshop.thinking_level", level)
 }
 
 // Handler validates the level name and updates the stream metadata.
@@ -665,11 +738,12 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.stream == nil {
-		return slash.Result{}, fmt.Errorf("no active stream")
+	if c.session == nil {
+		c.mu.Unlock()
+		return slash.Result{}, fmt.Errorf("no active session")
 	}
-	c.stream.SetMetadata("workshop.thinking_level", string(level))
+	c.writeLevel(string(level))
+	c.mu.Unlock()
 	return slash.Result{
 		Notice: loop.Notice{
 			Content:  fmt.Sprintf("Thinking: %s", level),
@@ -690,6 +764,13 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 // told why.
 type compactCommand struct {
 	mu       sync.Mutex
+	session  *session.Session
+	// stream is the *junk.Stream backing the session. Held so the
+	// handler can write to junk.Thread.Metadata (the store that
+	// junk.Stream.Save persists). session.GetMetadata reads from a
+	// different store (Session.metadata), so a dual write is
+	// required for the boundary info to survive a TUI restart AND
+	// for the TUI to display it live.
 	stream   *junk.Stream
 	agent    *agent.Agent
 	notifier *compactionNotifier
@@ -700,13 +781,24 @@ type compactCommand struct {
 // always wires the handler with one, so the kill-switch path that used to
 // return "compaction is not enabled" for MaxTokens <= 0 is gone. The event
 // is consumed (nil, nil) so no LLM inference is triggered.
+//
+// session-based design: the summary turn is appended via
+// session.Submit (which auto-appends to the bound thread), and the
+// boundary info is written to session metadata under
+// compaction.MetaKeyBoundaryInfo. The framework's
+// readBoundaryFromSession reads from the same key. No explicit Save
+// call here — persistence is the responsibility of the runTUIEngine
+// lifecycle pump, which saves on every LifecycleEvent "done" emitted
+// by the engine. The pre-bump handler called stream.Save() inline;
+// that was a junk.Manager-era convenience and is no longer needed
+// here.
 func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.stream == nil {
-		return slash.Result{}, fmt.Errorf("no active stream")
+	if c.session == nil {
+		return slash.Result{}, fmt.Errorf("no active session")
 	}
-	turns := c.stream.Turns()
+	turns := c.session.Turns()
 	if len(turns) == 0 {
 		return slash.Result{}, fmt.Errorf("no turns to compact")
 	}
@@ -724,32 +816,59 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 		}
 		return slash.Result{}, err
 	}
-	if err := c.stream.AppendTurn(ctx, turn.Role, turn.Artifacts...); err != nil {
+	// session.Submit auto-appends to the bound thread via WithState.
+	if _, err := c.session.Submit(ctx, turn.Role, turn.Artifacts...); err != nil {
 		return slash.Result{}, fmt.Errorf("append compaction turn: %w", err)
 	}
-	// Record the boundary on state.Control so the next Transform call
-	// stops projecting at the compaction turn. MarkBoundary takes the
-	// just-appended summary turn's ID and a pre-encoded JSON string for
-	// the boundary info to keep the session package free of any
-	// x/compaction dependency.
-	boundaryID := c.stream.Turns()[len(c.stream.Turns())-1].ID
+	// Set ControlStop on the summary turn (the just-appended one)
+	// so the active-path walk stops there. Without this,
+	// session.Turns() returns ALL turns (including the originals),
+	// and the LLM-facing view bleeds past the compaction boundary.
+	// Pre-bump, stream.MarkBoundary did this; in the session-based
+	// design we set ControlStop directly on the thread. Re-read
+	// turns here because `turns` (declared above) was the
+	// pre-submit state.
+	postSubmitTurns := c.session.Turns()
+	summaryID := postSubmitTurns[len(postSubmitTurns)-1].ID
+	c.session.Thread().SetControl(summaryID, state.ControlStop)
+
+	// Record the boundary under the framework's key. The dual-write
+	// is load-bearing, mirroring roleCommand.writeRole and
+	// thinkingCommand.writeLevel:
+//
+//   - thread.Metadata is what junk.Stream.Save persists to
+//     disk. Without this, /compact's effect would not survive
+//     a TUI restart.
+//   - session.SetMetadata drives the TUI's readBoundaryFromSession
+//     (see x/conduit/tui/tui.go), which checks
+//     session.GetMetadata.
 	encoded, err := compaction.EncodeBoundaryInfo(info)
 	if err != nil {
 		return slash.Result{}, fmt.Errorf("encode boundary info: %w", err)
 	}
-	if err := c.stream.MarkBoundary(boundaryID, encoded); err != nil {
-		return slash.Result{}, fmt.Errorf("mark boundary: %w", err)
+	c.session.Thread().Meta().Set(compaction.MetaKeyBoundaryInfo, encoded)
+	c.session.SetMetadata(compaction.MetaKeyBoundaryInfo, encoded)
+	if c.stream != nil {
+		c.stream.SetMetadata(compaction.MetaKeyBoundaryInfo, encoded)
 	}
 	if c.notifier != nil {
-		c.notifier.Notify(c.stream.Turns(), info)
-	}
-	if err := c.stream.Save(); err != nil {
-		return slash.Result{}, fmt.Errorf("save thread: %w", err)
+		c.notifier.Notify(c.session.Turns(), info)
 	}
 	return slash.Result{}, nil
 }
 
-// SetStream updates the shared stream reference.
+// SetSession updates the shared session reference. Called by the
+// tui engine factory on every Build call.
+func (c *compactCommand) SetSession(sess *session.Session) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.session = sess
+}
+
+// SetStream updates the shared stream reference. Called once
+// after the junk stream is created (it doesn't change per session
+// like the session does). The stream is needed to write the
+// compaction boundary info to junk.Thread.Metadata for persistence.
 func (c *compactCommand) SetStream(s *junk.Stream) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -763,20 +882,23 @@ func (c *compactCommand) SetStream(s *junk.Stream) {
 // /analytics is slash-only by design so the model cannot spend context
 // budget calling it.
 type analyticsCommand struct {
-	mu     sync.Mutex
-	stream *junk.Stream
+	mu      sync.Mutex
+	session *session.Session
 }
 
 // Handler analyzes the current thread's turns and renders the result
-// as a Markdown table. When the active stream is unset (e.g. the
+// as a Markdown table. When the active session is unset (e.g. the
 // command is invoked from a unit test without going through the
 // session pipeline), the friendly empty-state message is returned
 // rather than panicking. The event is consumed (no Result.Replace) so
 // no LLM inference is triggered.
+//
+// session-based design: see roleCommand.SetSession for the
+// rationale.
 func (c *analyticsCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.stream == nil {
+	if c.session == nil {
 		return slash.Result{
 			Notice: loop.Notice{
 				Content:  "No artifacts in this thread yet.",
@@ -784,7 +906,7 @@ func (c *analyticsCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slas
 			},
 		}, nil
 	}
-	stats := analytics.AnalyzeTurns(c.stream.Turns())
+	stats := analytics.AnalyzeTurns(c.session.Turns())
 	return slash.Result{
 		Notice: loop.Notice{
 			Content:  analytics.Render(stats),
@@ -793,12 +915,12 @@ func (c *analyticsCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slas
 	}, nil
 }
 
-// SetStream updates the shared stream reference. Called by the
-// stepFactory on every stream open.
-func (c *analyticsCommand) SetStream(s *junk.Stream) {
+// SetSession updates the shared session reference. Called by the
+// tui engine factory on every Build call.
+func (c *analyticsCommand) SetSession(sess *session.Session) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.stream = s
+	c.session = sess
 }
 
 // workshopSandbox is a FileSandbox that resolves relative paths against the
@@ -920,12 +1042,17 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
 
 	// Step factory: inject system prompt and guardrails as transforms.
+	//
+	// stepFactory is invoked by junk.Manager.Create/Attach for every
+	// stream. The slash handlers (rc, cc, tc, ac) used to be bound
+	// here via SetStream; that wiring moved out. For the TUI path
+	// the tuiEngineFactory binds handlers to the session via
+	// SetSession on every Build. For stdio (which does not
+	// intercept slash commands today) the handlers stay unbound,
+	// which is fine — their state is only consulted when the
+	// slash interceptor invokes them, and stdio has no
+	// interceptor.
 	stepFactory := func(stream *junk.Stream) ([]loop.Option, error) {
-		rc.SetStream(stream)
-		cc.SetStream(stream)
-		tc.SetStream(stream)
-		ac.SetStream(stream)
-
 		// Set up progressive skill discovery. Built-in skills are
 		// authoritative on name collision — passed first so the framework's
 		// defaults (ore's writing-skills) and workshop's own sub-agent
@@ -1094,19 +1221,19 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 	// the same transforms, handlers, spec, tracer, and on-emit
 	// callbacks as the junk.Manager-driven worker did pre-bump.
 	//
-	// Slash interceptor wiring note: ore v1.0 removed
-	// junk.WithInterceptor. Slash commands are now wired by the
-	// application calling slashReg.Intercept(ctx, event, sess, emitter)
-	// before each Submit. Workshop's conduits currently do not
-	// implement that wiring; slash commands will not fire until the
-	// engine-based rewrite lands. See internal/app/backend.go for the
-	// broader migration note.
+	// The factory also owns the slash registry and the slash
+	// handlers. runTUIEngine uses slashReg.Intercept to fire slash
+	// commands before each Submit; factory.Build binds handlers
+	// to the session via SetSession so each /slash invocation sees
+	// the active session's metadata.
 	tuiFactory := &tuiEngineFactory{
 		mgr:         mgr,
 		stepFactory: stepFactory,
 		prov:        prov,
 		defaultSpec: defaultSpec,
 		tracer:      tracer,
+		slashReg:    slashReg,
+		handlers:    slashHandlers{rc, cc, tc, ac},
 	}
 
 	return mgr, tuiFactory, nil
