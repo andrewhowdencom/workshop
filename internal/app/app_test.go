@@ -15,11 +15,11 @@ import (
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
+	"github.com/andrewhowdencom/ore/junk"
+	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
-	"github.com/andrewhowdencom/ore/junk"
-	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/x/compaction"
 	"github.com/andrewhowdencom/ore/x/provider/retry"
@@ -394,12 +394,14 @@ func TestRoleSlashHandler(t *testing.T) {
 	}
 
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 
 	// Valid role (first set on a fresh thread): the resolver's path
-	// is updated and the role metadata is recorded. No turn is
-	// appended to the conversation; the system prompt transform
-	// reflects the role change on the next turn via the resolver.
+	// is updated and the role metadata is recorded. A RoleSystem
+	// handoff turn is appended so the LLM is grounded in the new role
+	// on its next turn. Because this is the first set on a fresh
+	// thread, the message uses the "set" framing.
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
@@ -415,9 +417,17 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Errorf("resolver path = %q, want %q", rc.Resolver().Path(), got)
 	}
 
-	if got := len(stream.Turns()); got != 0 {
-		t.Errorf("len(turns) = %d, want 0 (no persistent handoff turn)", got)
+	turns := stream.Turns()
+	if got := len(turns); got != 1 {
+		t.Fatalf("len(turns) = %d, want 1 (first set appends one transition turn)", got)
 	}
+	assert.Equal(t, state.RoleSystem, turns[0].Role)
+	require.Len(t, turns[0].Artifacts, 1)
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	require.True(t, ok)
+	assert.Contains(t, text.Content, "Role set: reviewer.", "first set must use the set framing")
+	assert.NotContains(t, text.Content, "switched", "first set must not use the switched framing")
+	assert.NotContains(t, text.Content, "carried over", "first set must not reference carried-over behavior")
 
 	// Switching to the same role is a no-op: the resolver path is
 	// already correct, no additional turn is appended.
@@ -425,8 +435,8 @@ func TestRoleSlashHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error on no-op: %v", err)
 	}
-	if got := len(stream.Turns()); got != 0 {
-		t.Errorf("len(turns) after no-op = %d, want 0 (unchanged)", got)
+	if got := len(stream.Turns()); got != 1 {
+		t.Errorf("len(turns) after no-op = %d, want 1 (unchanged)", got)
 	}
 	assert.Equal(t, "Role: reviewer", res.Notice.Content, "no-op should still confirm the active role")
 
@@ -438,8 +448,8 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Fatal("expected error for nonexistent role")
 	}
 	assert.Contains(t, err.Error(), "nonexistent", "error should mention the unknown role name")
-	if got := len(stream.Turns()); got != 0 {
-		t.Errorf("invalid role should not append a turn: len(turns) = %d, want 0", got)
+	if got := len(stream.Turns()); got != 1 {
+		t.Errorf("invalid role should not append a turn: len(turns) = %d, want 1", got)
 	}
 }
 
@@ -465,17 +475,14 @@ func newRoleCommandStream(t *testing.T) *junk.Stream {
 	return stream
 }
 
-// newRoleCommandSession creates a session for slash handler tests.
-// It returns both the session (for SetSession) and the underlying
-// junk.Stream (for stream-level helpers — SetMetadata, GetMetadata,
-// Turns). The two share a *ledger.Thread so metadata seeded via
-// stream.SetMetadata is visible to the slash handler's SetSession
-// reader (which reads via sess.Thread().Meta().Get).
-func newRoleCommandSession(t *testing.T) (*session.Session, *junk.Stream) {
+// newRoleCommandSession creates a session bound to the supplied
+// stream's thread. The session-submit path needs to land turns on
+// the same thread that the test fixture's stream exposes, so the
+// session must be created from the same stream that the caller
+// already uses for role files and stream-level assertions.
+func newRoleCommandSession(t *testing.T, stream *junk.Stream) *session.Session {
 	t.Helper()
-	stream := newRoleCommandStream(t)
-	sess := session.New(stream.ID(), stream.State().(*state.Thread))
-	return sess, stream
+	return session.New(stream.ID(), stream.State().(*state.Thread))
 }
 
 func TestRoleCommand_NoArgListsRoles(t *testing.T) {
@@ -487,8 +494,10 @@ func TestRoleCommand_NoArgListsRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	stream := newRoleCommandStream(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err, "no-arg form must not return an error")
@@ -504,8 +513,10 @@ func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	stream := newRoleCommandStream(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "help"})
 	require.NoError(t, err, "/role help must not return an error")
@@ -518,8 +529,10 @@ func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	stream := newRoleCommandStream(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "reviewer")
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
@@ -529,8 +542,10 @@ func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
 
 func TestRoleCommand_NoArgEmptyDir(t *testing.T) {
 	dir := t.TempDir()
+	stream := newRoleCommandStream(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
 	require.NoError(t, err)
@@ -544,8 +559,10 @@ func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	stream := newRoleCommandStream(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "reviewer")
 
 	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
@@ -573,7 +590,8 @@ func newRoleCommandStreamWithRoles(t *testing.T) (*junk.Stream, string) {
 func TestRoleCommand_UpdateResolver(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "ideation")
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
@@ -584,20 +602,25 @@ func TestRoleCommand_UpdateResolver(t *testing.T) {
 	want := filepath.Join(dir, "planner.md")
 	assert.Equal(t, want, rc.Resolver().Path(), "resolver should track the new role")
 
-	// No turn should have been appended to the conversation. The
-	// system prompt transform reflects the role change on the next
-	// turn; persisting a handoff turn would stack the previous role
-	// body in conversation history.
+	// A RoleSystem handoff turn should have been appended to ground
+	// the LLM in the new role on its next turn. The fixture's role
+	// files have no YAML frontmatter, so no description parenthetical
+	// is expected.
 	turns := stream.Turns()
-	if len(turns) != 0 {
-		t.Errorf("len(turns) = %d, want 0 (no persistent handoff turn)", len(turns))
-	}
+	require.Equal(t, 1, len(turns), "exactly one transition turn on actual change")
+	assert.Equal(t, state.RoleSystem, turns[0].Role)
+	require.Len(t, turns[0].Artifacts, 1)
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	require.True(t, ok)
+	assert.Contains(t, text.Content, "Role switched: ideation → planner.")
+	assert.Contains(t, text.Content, "follow the planner role")
+	assert.NotContains(t, text.Content, "(", "no parenthesized description when destination has no frontmatter")
 }
 
 func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	sess.Thread().Meta().Set("workshop.role", "planner")
 	rc.SetSession(sess)
 	initialPath := rc.Resolver().Path()
@@ -616,9 +639,9 @@ func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
 }
 
 func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
-	_, dir := newRoleCommandStreamWithRoles(t)
+	stream, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	sess.Thread().Meta().Set("workshop.role", "planner")
 	rc.SetSession(sess)
 
@@ -629,7 +652,8 @@ func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
 func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "ideation")
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
@@ -645,13 +669,24 @@ func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 
 	assert.Equal(t, "", rc.Resolver().Path(), "resolver path should be reset")
 
-	assert.Equal(t, 0, len(stream.Turns()), "no persistent handoff turn should be appended")
+	// A RoleSystem handoff turn should be appended on the actual
+	// clear so the LLM is grounded in the cleared state on its next
+	// turn. The transition uses the "cleared" framing.
+	turns := stream.Turns()
+	require.Equal(t, 1, len(turns), "exactly one transition turn on actual clear")
+	assert.Equal(t, state.RoleSystem, turns[0].Role)
+	require.Len(t, turns[0].Artifacts, 1)
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	require.True(t, ok)
+	assert.Contains(t, text.Content, "Role cleared: was ideation, now (none).")
+	assert.Contains(t, text.Content, "follow the default prompt")
 }
 
 func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
 	stream, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 	// Pre-seed with the empty-string sentinel to simulate an
 	// already-cleared thread.
 	sess.Thread().Meta().Set("workshop.role", "")
@@ -668,30 +703,81 @@ func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
 }
 
 func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
-	_, dir := newRoleCommandStreamWithRoles(t)
+	stream, dir := newRoleCommandStreamWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess, _ := newRoleCommandSession(t); rc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "ideation")
 
 	// First, attempt an invalid switch — the role metadata should
 	// remain untouched (the existing "role not found" contract).
+	// The invalid switch appends no turn.
 	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
 	require.Error(t, err, "invalid role must error")
 
 	v, ok := sess.Thread().Meta().Get("workshop.role")
 	require.True(t, ok, "metadata should still be set after the failed switch")
 	assert.Equal(t, "ideation", v)
+	assert.Equal(t, 0, len(stream.Turns()), "failed switch must not append a turn")
 
 	// Now /role none succeeds even though the previous attempt
 	// failed — clearing is independent of the current state's
-	// validity.
+	// validity. Because ideation was the active role all along,
+	// the success branch is an actual change and appends one
+	// transition turn.
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
 	require.NoError(t, err)
 	assert.Equal(t, "Role: (none)", res.Notice.Content)
+	assert.Equal(t, 1, len(stream.Turns()), "successful clear should append one transition turn")
 
 	v, ok = sess.Thread().Meta().Get("workshop.role")
 	assert.True(t, ok)
 	assert.Equal(t, "", v)
+}
+
+// newRoleCommandStreamWithFrontmatterRoles creates a stream plus
+// two role files with YAML frontmatter describing their purpose.
+// Used by the description-rendering test that exercises the
+// transition message's parenthetical label.
+func newRoleCommandStreamWithFrontmatterRoles(t *testing.T) (*junk.Stream, string) {
+	t.Helper()
+	dir := t.TempDir()
+	roles := map[string]string{
+		"ideation": "Generates options and explores possibilities.",
+		"planner":  "Plans multi-step work.",
+	}
+	for name, desc := range roles {
+		body := fmt.Sprintf("---\ndescription: %s\n---\nPrompt %s.\n", desc, name)
+		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return newRoleCommandStream(t), dir
+}
+
+// TestRoleCommand_TransitionTurnWithDescription verifies the
+// destination role's description from YAML frontmatter is rendered
+// into the transition message, while the previous role's name stays
+// bare. The description grounds the LLM in the new role's purpose on
+// its next turn.
+func TestRoleCommand_TransitionTurnWithDescription(t *testing.T) {
+	stream, dir := newRoleCommandStreamWithFrontmatterRoles(t)
+	rc := &roleCommand{rdir: dir}
+	sess := newRoleCommandSession(t, stream)
+	rc.SetSession(sess)
+	sess.Thread().Meta().Set("workshop.role", "ideation")
+
+	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
+	require.NoError(t, err)
+
+	turns := stream.Turns()
+	require.Equal(t, 1, len(turns))
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	require.True(t, ok)
+
+	assert.Contains(t, text.Content, "planner (Plans multi-step work.)", "destination role must include its description parenthetical")
+	assert.Contains(t, text.Content, "ideation → planner", "previous role is rendered bare, destination role is rendered with description")
+	assert.NotContains(t, text.Content, "ideation (Generates options", "previous role must NOT carry its description parenthetical")
 }
 
 // TestCompactSlashHandler_ZeroBudgetStillCompacts verifies that /compact
@@ -2960,14 +3046,16 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 		t.Errorf("notifier did not receive test turns: got %v", notified)
 	}
 }
+
 // newThinkingCommandStream was used when thinking-command tests
 // needed their own stream. The slash handler is now session-based;
 // tests seed via sess.Thread().Meta() and verify there, so the
 // per-handler stream helper is no longer needed.
 
 func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
+	stream := newRoleCommandStream(t)
 	tc := &thinkingCommand{}
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: ""})
@@ -2977,8 +3065,9 @@ func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
 }
 
 func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
+	stream := newRoleCommandStream(t)
 	tc := &thinkingCommand{}
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
@@ -2994,9 +3083,11 @@ func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
 }
 
 func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
+	stream := newRoleCommandStream(t)
 	tc := &thinkingCommand{}
 	// Pre-set a known level so we can verify it isn't overwritten.
-	sess, _ := newRoleCommandSession(t); tc.SetSession(sess)
+	sess := newRoleCommandSession(t, stream)
+	tc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.thinking_level", "medium")
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "frobnicate"})
@@ -3009,8 +3100,9 @@ func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
 }
 
 func TestThinkingCommand_OffIsValid(t *testing.T) {
+	stream := newRoleCommandStream(t)
 	tc := &thinkingCommand{}
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	tc.SetSession(sess)
 
 	// "off" is a valid level that disables thinking; it must be accepted
@@ -3041,9 +3133,10 @@ func TestThinkingCommand_NoStreamError(t *testing.T) {
 // buildInvokeOptions-then-thinkLevelOption path: thinking level
 // lives on the spec, not on InvokeOptions.
 func TestThinkingCommand_LevelRoundTripsThroughDefaultSpec(t *testing.T) {
+	stream := newRoleCommandStream(t)
 
 	// Simulate the user setting the level via /thinking.
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	sess.Thread().Meta().Set("workshop.thinking_level", "high")
 
 	cfg := &config{
@@ -3193,8 +3286,9 @@ func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
 func TestAnalyticsCommand_EmptyThreadFriendlyMessage(t *testing.T) {
 	// A freshly-created thread has no turns yet. AnalyzeTurns returns
 	// nil and Render translates that to the same friendly message.
+	stream := newRoleCommandStream(t)
 	ac := &analyticsCommand{}
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
@@ -3210,7 +3304,7 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	// Seed two turns via the underlying stream. The session and
 	// stream share a thread, so the handler's sess.Turns() sees the
 	// same data.
-	_, stream := newRoleCommandSession(t)
+	stream := newRoleCommandStream(t)
 	if err := stream.Process(context.Background(), junk.UserMessageEvent{Content: "first"}); err != nil {
 		t.Fatalf("process first turn: %v", err)
 	}
@@ -3219,13 +3313,9 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	}
 
 	ac := &analyticsCommand{}
-	sess, _ := newRoleCommandSession(t)  // fresh session, empty thread
-	// Note: this test creates two sessions. The handler reads via
-	// sess.Turns(), so it sees the second session's thread (empty).
-	// To assert via the handler we need to bind it to the populated
-	// session. Override the binding:
-	ac.SetSession(sess)
-	// Re-bind to the populated session by reading its thread back:
+	// Bind to the populated thread: session.Submit / sess.Turns() read
+	// through the session's bound state, which must be the stream's
+	// thread for the seeded turns to be visible to the handler.
 	if thread, ok := stream.State().(*state.Thread); ok {
 		ac.SetSession(session.New(stream.ID(), thread))
 	}
@@ -3244,8 +3334,9 @@ func TestAnalyticsCommand_ConsumesEvent(t *testing.T) {
 	// (Result.Replace is nil) so no LLM inference is triggered. The
 	// slash registry uses Result.Replace to decide whether to feed
 	// the event into the inference pipeline.
+	stream := newRoleCommandStream(t)
 	ac := &analyticsCommand{}
-	sess, _ := newRoleCommandSession(t)
+	sess := newRoleCommandSession(t, stream)
 	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
