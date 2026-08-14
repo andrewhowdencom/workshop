@@ -626,14 +626,23 @@ func (c *roleCommand) formatRoleList() string {
 
 	lines := []string{fmt.Sprintf("Role: %s", current), "Available:"}
 	for _, r := range roles {
-		if r.Description != "" {
-			lines = append(lines, fmt.Sprintf("  %s (%s)", r.Name, r.Description))
-		} else {
-			lines = append(lines, fmt.Sprintf("  %s", r.Name))
-		}
+		lines = append(lines, "  "+c.roleLabel(r.Name, r.Description))
 	}
 	lines = append(lines, "Usage: /role <name> | /role none")
 	return strings.Join(lines, "\n")
+}
+
+// roleLabel returns a one-line display label for a role, formatted
+// as `<name>` when no description is set and `<name> (<description>)`
+// when one is. Used by roleTransitionMessage so the LLM can ground
+// itself in the new role's purpose without reading the full system
+// prompt body. Empty descriptions render the bare name with no
+// parenthetical.
+func (c *roleCommand) roleLabel(name, description string) string {
+	if description == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, description)
 }
 
 // thinkingCommand handles the /thinking slash command for changing
