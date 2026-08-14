@@ -289,6 +289,20 @@ func runTUIEngine(
 	factory *tuiEngineFactory,
 	stream *junk.Stream,
 ) error {
+	// Bind slash handlers to the session BEFORE the TUI starts so
+	// slash commands (e.g. /role, /thinking) work on a fresh
+	// TUI without requiring the user to send a chat message first.
+	// The factory's Build also binds handlers, but Build only runs
+	// when the engine processes an inference event — so without
+	// this pre-bind, the user gets "no active session" on their
+	// first /role attempt.
+	if cc, ok := findHandler[*compactCommand](factory.handlers); ok {
+		cc.SetStream(stream)
+	}
+	for _, h := range factory.handlers {
+		h.SetSession(sess)
+	}
+
 	reg := session.NewInMemoryRegistry()
 	if err := reg.Register(sess); err != nil {
 		return fmt.Errorf("register session: %w", err)
