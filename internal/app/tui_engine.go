@@ -90,7 +90,35 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
+	slash "github.com/andrewhowdencom/ore/x/slash"
 )
+
+// slashHandler is the narrow interface the factory needs from
+// each slash command: the ability to bind to a session. The
+// slash.Handler interface (Handle) is implemented separately and
+// bound to slashReg in buildManager; this is just the session-bind
+// surface the factory uses on every Build.
+type slashHandler interface {
+	SetSession(sess *session.Session)
+}
+
+// findHandler returns the first handler in hs whose concrete type
+// is T. Used by the factory to call type-specific methods like
+// compactCommand.SetStream. Returns (handler, true) on a match;
+// (zero, false) if no handler of that type is registered.
+func findHandler[T slashHandler](hs slashHandlers) (T, bool) {
+	var zero T
+	for _, h := range hs {
+		if v, ok := h.(T); ok {
+			return v, true
+		}
+	}
+	return zero, false
+}
+
+// slashHandlers is a slice of slashHandler, bound as a group on
+// every factory Build call.
+type slashHandlers []slashHandler
 
 // tuiEngineFactory is the per-session agent.Factory that builds
 // agents for the TUI's session-based inference path.
@@ -109,12 +137,20 @@ import (
 // *agent.Agent — so the factory must own the lifecycle. Callers
 // (runTUIEngine, the test suite) must invoke Close when done to
 // release the per-turn step resources; see Close.
+//
+// The factory also owns the slash registry (so the runTUIEngine pump
+// can call slashReg.Intercept before submitting) and the slash
+// handlers (so it can bind them to the session on every Build via
+// SetSession). The handlers live here rather than in a global so
+// their lifetime is tied to the TUI session's lifetime.
 type tuiEngineFactory struct {
 	mgr         *junk.Manager
 	stepFactory func(*junk.Stream) ([]loop.Option, error)
 	prov        provider.Provider
 	defaultSpec models.Spec
 	tracer      trace.Tracer
+	slashReg    slash.Registry
+	handlers    slashHandlers
 
 	// mu guards pending. Build appends to pending; Close reads and
 	// clears pending. Build calls are concurrent across sessions
@@ -143,9 +179,25 @@ type tuiEngineFactory struct {
 // the fanout send), so by the time step.Turn returns, the session
 // has appended the assistant turn and the pattern sees it.
 func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
+	// Bind slash handlers to the session before any agent code runs.
+	// SetSession is idempotent — each handler caches the session
+	// reference and seeds per-session state (e.g. roleCommand's
+	// resolver path from session metadata). The TUI path goes
+	// through here on every dequeued event; stdio doesn't
+	// intercept slash commands today and skips this.
+	for _, h := range f.handlers {
+		h.SetSession(sess)
+	}
+
 	stream, err := f.mgr.Get(sess.ID())
 	if err != nil {
 		return nil, fmt.Errorf("engine: lookup stream for session %s: %w", sess.ID(), err)
+	}
+	// Bind the stream to compactCommand so the boundary info it
+	// writes survives junk.Stream.Save. Other handlers (role,
+	// thinking, analytics) don't need the stream.
+	if cc, ok := findHandler[*compactCommand](f.handlers); ok {
+		cc.SetStream(stream)
 	}
 
 	opts, err := f.stepFactory(stream)
@@ -262,6 +314,16 @@ func runTUIEngine(
 	// only on session-not-found or queue-full; either is fatal to
 	// the pump.
 	//
+	// Slash interception: every event flows through
+	// slashReg.Intercept before reaching the engine. The
+	// interceptor matches against /<name> prefixes; matched
+	// commands are consumed (no inference triggered) and any
+	// notices (e.g. "Role: reviewer") are emitted on the
+	// session's emitter so the user sees the feedback. Unmatched
+	// events fall through unchanged. This is the ore v1.x
+	// replacement for the removed junk.WithInterceptor; the
+	// wiring lives in the application.
+	//
 	// tuiConduit.Events() returns nil until tuiConduit.Start()
 	// initializes t.events (see x/conduit/tui/tui.go:333). The
 	// pump goroutine must read Events() AFTER Start() has begun;
@@ -280,7 +342,26 @@ func runTUIEngine(
 			}
 		}
 		for evt := range events {
-			if err := eng.Submit(ctx, sess.ID(), evt); err != nil {
+			result, err := factory.slashReg.Intercept(ctx, evt, sess, sess.Emitter())
+			if err != nil {
+				// The interceptor converts handler errors into
+				// notices itself; reaching here means the
+				// registry itself failed. Log and continue.
+				slog.Warn("slash intercept failed", "err", err)
+			}
+			for _, n := range result.Notice {
+				sess.Emitter().Emit(ctx, loop.NoticeEvent{Notice: n, Ctx: loop.WithProvenance(ctx, "tui")})
+			}
+			if result.Event == nil {
+				// Slash handler consumed the event. Skip
+				// engine.Submit; no LLM inference for this
+				// turn. The persistence pump still picks up
+				// the LifecycleEvent "done" emitted by
+				// sess.Submit for the slash handler's
+				// state-changing side effects.
+				continue
+			}
+			if err := eng.Submit(ctx, sess.ID(), result.Event); err != nil {
 				slog.Error("engine.Submit failed; stopping pump", "err", err)
 				return
 			}
