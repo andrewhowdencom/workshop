@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/artifact"
@@ -94,7 +95,87 @@ func TestSeedSession_OverwritesExistingValues(t *testing.T) {
 	}
 }
 
-// TestSeedSession_DualWritesToThreadMetadata verifies that seedSession
+// TestSessionPersister_AppendsJournalEntryPerTurn wires a stub
+// ledger.Repository, runs a session through a single turn, and
+// asserts that SaveTurn and UpdateThreadTip are called exactly
+// once each. The test stub counts calls. This is the most
+// important behavioral test for the Task 4 migration: it pins
+// down the journal-append contract that the lifecycle pump now
+// relies on.
+func TestSessionPersister_AppendsJournalEntryPerTurn(t *testing.T) {
+	repo := &countingRepo{}
+	p := NewSessionPersister(repo, nil)
+
+	thread := ledger.NewThread()
+	sess := session.New("thread-persist", thread)
+
+	// Pre-populate the thread's current tip so the persister
+	// exercises the UpdateThreadTip path. Without a recorded tip,
+	// UpdateThreadTip is skipped (see persist); pre-populating
+	// makes the test's call counts deterministic.
+	thread.CurrentTip = "u-init"
+
+	// Subscribe so the persister's goroutine has a chance to drain.
+	require.NoError(t, p.Attach(sess))
+
+	// Brief sleep ensures the subscription becomes live before
+	// Emit is called. Without this, the Emit can race the Subscribe
+	// call inside the goroutine and the event is lost (Subscribe
+	// is live-only, not a replay queue).
+	time.Sleep(50 * time.Millisecond)
+
+	// Drive a TurnCompleteEvent through the session's emitter.
+	sess.Emitter().Emit(context.Background(), loop.TurnCompleteEvent{
+		Turn: ledger.Turn{ID: "a-1", Role: "assistant"},
+		Ctx:  loop.WithProvenance(context.Background(), "test"),
+	})
+
+	// Give the persister goroutine a moment to drain.
+	require.Eventually(t, func() bool {
+		return atomic.LoadInt32(&repo.saveTurns) > 0
+	}, time.Second, 10*time.Millisecond)
+
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.saveTurns), "SaveTurn should fire once per turn")
+	require.Equal(t, int32(1), atomic.LoadInt32(&repo.updateTips), "UpdateThreadTip should fire once per turn")
+
+	_ = sess.Close()
+}
+
+// countingRepo is a ledger.Repository that counts SaveTurn and
+// UpdateThreadTip calls. It is not safe for concurrent use; the
+// persister calls it from a single goroutine.
+type countingRepo struct {
+	saveTurns  int32
+	updateTips int32
+}
+
+func (c *countingRepo) SaveTurn(_ context.Context, _ string, _ *ledger.Turn) error {
+	atomic.AddInt32(&c.saveTurns, 1)
+	return nil
+}
+
+func (c *countingRepo) UpdateThreadTip(_ context.Context, _, _ string) error {
+	atomic.AddInt32(&c.updateTips, 1)
+	return nil
+}
+
+func (c *countingRepo) UpdateTurnControl(_ context.Context, _, _ string, _ ledger.TraversalControl) error {
+	return nil
+}
+
+func (c *countingRepo) UpdateTurnParent(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
+func (c *countingRepo) HydrateThread(_ context.Context, _ string) (map[string]*ledger.Turn, string, error) {
+	return map[string]*ledger.Turn{}, "", nil
+}
+
+func (c *countingRepo) ListThreadIDs(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+
+
 // also writes the five static keys to sess.Thread().Meta() so the
 // persistent store (what ledger.Repository reads on hydration)
 // carries them. Without this dual-write, the values would only
@@ -1248,7 +1329,7 @@ func TestRoleToolSchemas(t *testing.T) {
 }
 
 func TestBuildManager_Smoke(t *testing.T) {
-	mgr, _, _, err := buildManager(&config{
+	mgr, _, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1268,7 +1349,7 @@ func TestBuildManager_Smoke(t *testing.T) {
 }
 
 func TestBuildManager_WithCompaction(t *testing.T) {
-	mgr, _, _, err := buildManager(&config{
+	mgr, _, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1296,7 +1377,7 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr, _, _, err := buildManager(&config{
+	mgr, _, _, _, err := buildManager(&config{
 		storeDir:   t.TempDir(),
 		workingDir: dir,
 		providers: map[string]ProviderConfig{
@@ -1317,7 +1398,7 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 }
 
 func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
-	mgr, _, _, err := buildManager(&config{
+	mgr, _, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1360,7 +1441,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	storeDir := t.TempDir()
 
 	// First session: create with role "reviewer"
-	mgr1, _, _, err := buildManager(&config{
+	mgr1, _, _, _, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1392,7 +1473,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	}
 
 	// Second session: attach with different role "planner"
-	mgr2, _, _, err := buildManager(&config{
+	mgr2, _, _, _, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "planner",
 		providers: map[string]ProviderConfig{
@@ -3091,7 +3172,7 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 		notified = turns
 	})
 
-	mgr, _, _, err := buildManager(&config{
+	mgr, _, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -3253,7 +3334,7 @@ func TestBuildManager_CompactionProvider_DefaultsToInference(t *testing.T) {
 			MaxTokens: 50000, // Provider is intentionally left empty.
 		},
 	}
-	mgr, _, _, err := buildManager(cfg)
+	mgr, _, _, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}
@@ -3280,7 +3361,7 @@ func TestBuildManager_CompactionProvider_DistinctFromInference(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	mgr, _, _, err := buildManager(cfg)
+	mgr, _, _, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}
@@ -3305,7 +3386,7 @@ func TestBuildManager_CompactionProvider_UndefinedErrors(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	_, _, _, err := buildManager(cfg)
+	_, _, _, _, err := buildManager(cfg)
 	if err == nil {
 		t.Fatal("expected error for undefined compaction.provider")
 	}
@@ -3334,7 +3415,7 @@ func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 			MaxTokens: 0,
 		},
 	}
-	mgr, _, _, err := buildManager(cfg)
+	mgr, _, _, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}

@@ -254,32 +254,19 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	), nil
 }
 
-// SaveThread persists the thread backing the session. It is the
-// persistence half of the runTUIEngine lifecycle pump; the
-// lifecycle "done" event the engine emits (one per handled event
-// on success) triggers a save. Pre-bump, junk.Manager's worker
-// persisted on every turn; this restores that behavior. The save
-// is best-effort because failing to persist is not a fatal error
-// for an interactive TUI session — the user can retry by typing.
-//
-// This wraps junk.Stream.Save. In Task 4 of the kill-junk
-// migration, this method is replaced by a ledger.Repository-driven
-// journal append (see Task 4's plan).
-func (f *tuiEngineFactory) SaveThread() error {
-	if f.stream == nil {
-		return fmt.Errorf("save thread: stream not set")
-	}
-	return f.stream.Save()
-}
-
 // SetStream binds the *junk.Stream backing the session to the
 // factory. It is called once per session, from RunTUI, after
 // junkBackend.CreateSession resolves the stream. Build then uses
 // f.stream for the compact handler's SetStream and the
-// stepFactory; SaveThread uses it for persistence. This removes
-// the per-event mgr.Get(sess.ID()) lookup that Block 2's migration
-// discarded: the stream is resolved once per session, not once
-// per dequeued event.
+// stepFactory. Persistence is driven by SessionPersister (Task 4)
+// which subscribes directly to the session's TurnCompleteEvent;
+// f.stream.Save is no longer called by the lifecycle pump.
+//
+// Note: the stream field is still needed in Task 4 because
+// compactCommand's SetStream takes a *junk.Stream and the
+// stepFactory closure takes a *junk.Stream. Both are slated for
+// removal in Task 5 (slash handler and compact lose the stream
+// field) and Task 7 (test fixtures rewrite).
 func (f *tuiEngineFactory) SetStream(stream *junk.Stream) {
 	f.stream = stream
 }
@@ -313,7 +300,8 @@ func (f *tuiEngineFactory) Close() {
 
 // runTUIEngine wires the TUI's session into an engine.Engine,
 // forwards the TUI's outbound Events() channel into engine.Submit,
-// and persists the thread after every turn.
+// and persists the thread after every turn via the supplied
+// SessionPersister.
 //
 // Returns the error from tuiConduit.Start (the TUI's blocking loop)
 // once both the engine pump and the persistence pump have drained.
@@ -327,6 +315,7 @@ func runTUIEngine(
 	sess *session.Session,
 	tuiConduit *tui.TUI,
 	factory *tuiEngineFactory,
+	persister SessionPersister,
 ) error {
 	// Bind slash handlers to the session BEFORE the TUI starts so
 	// slash commands (e.g. /role, /thinking) work on a fresh
@@ -354,6 +343,21 @@ func runTUIEngine(
 		// cancelled at this point.
 		if err := eng.Close(context.Background()); err != nil {
 			slog.Warn("engine close", "err", err)
+		}
+	}()
+
+	// Persister: subscribe to the session's TurnCompleteEvent and
+	// append a journal entry per turn. Replaces the legacy
+	// junk.Stream.Save() snapshot path. The subscription is closed
+	// when sess.Close below propagates through the session's step
+	// into the subscription channel, letting the persister goroutine
+	// drain cleanly.
+	if err := persister.Attach(sess); err != nil {
+		return fmt.Errorf("attach persister: %w", err)
+	}
+	defer func() {
+		if err := persister.Close(); err != nil {
+			slog.Warn("persister close", "err", err)
 		}
 	}()
 
@@ -418,31 +422,6 @@ func runTUIEngine(
 		}
 	}()
 
-	// 2. Persistence pump: best-effort save after every lifecycle
-	// "done" event the engine emits (one per handled event on
-	// success). Pre-bump, junk.Manager's worker persisted on every
-	// turn; this restores that behavior. The save is best-effort
-	// because failing to persist is not a fatal error for an
-	// interactive TUI session — the user can retry by typing.
-	//
-	// The subscription is closed when sess.Close is called below,
-	// which lets the goroutine drain. Without that, the channel
-	// stays open for the lifetime of the session and <-lifecycleDone
-	// hangs forever after the TUI exits.
-	lifecycleDone := make(chan struct{})
-	go func() {
-		defer close(lifecycleDone)
-		for event := range sess.Subscribe("lifecycle") {
-			le, ok := event.(loop.LifecycleEvent)
-			if !ok || le.Phase != "done" {
-				continue
-			}
-			if err := factory.SaveThread(); err != nil {
-				slog.Warn("save thread failed", "err", err)
-			}
-		}
-	}()
-
 	// 3. Start the TUI. Blocks until ctx is cancelled, the user
 	// presses Ctrl+C, or the Bubble Tea program errors. tui.Start
 	// closes t.events on return, which lets the pump goroutine
@@ -451,9 +430,9 @@ func runTUIEngine(
 	startErr := tuiConduit.Start(ctx)
 
 	// 4. Close the session. This releases every Subscribe-based
-	// channel (the lifecycle goroutine above, and any TUI-side
+	// channel (the persister goroutine above, and any TUI-side
 	// subscriptions that survived tui.Start's exit), letting both
-	// pumpDone and lifecycleDone close cleanly.
+	// pumpDone and the persister goroutine close cleanly.
 	_ = sess.Close()
 
 	// 5. Release the TUI engine factory's per-turn steps. With the
@@ -463,12 +442,9 @@ func runTUIEngine(
 	// (EventBus/FanOut channels, run goroutines).
 	factory.Close()
 
-	// 6. Drain the pumps. pumpDone closes when t.events is closed
+	// 6. Drain the pump. pumpDone closes when t.events is closed
 	// (already happened inside tui.Start) and the for-range exits.
-	// lifecycleDone closes when sess.Close above propagates
-	// through the session's step into the subscription channel.
 	<-pumpDone
-	<-lifecycleDone
 
 	return startErr
 }

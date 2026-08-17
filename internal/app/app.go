@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -369,7 +370,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	notifier := &compactionNotifier{}
 	cfg.compactionNotifier = notifier
 
-	mgr, factory, seed, err := buildManager(cfg)
+	mgr, factory, seed, persister, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -422,7 +423,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	}
 	factory.SetStream(stream)
 
-	return runTUIEngine(ctx, tuiSess, tuiImpl, factory)
+	return runTUIEngine(ctx, tuiSess, tuiImpl, factory, persister)
 }
 
 // RunHTTP initializes and starts the HTTP web UI application.
@@ -436,7 +437,7 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 		cfg.httpAddr = ":8080"
 	}
 
-	mgr, _, seed, err := buildManager(cfg)
+	mgr, _, seed, _, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -464,7 +465,7 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 		opt(cfg)
 	}
 
-	mgr, _, _, err := buildManager(cfg)
+	mgr, _, _, _, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -1091,17 +1092,29 @@ func (s *workshopSandbox) WorkingDirectory() string {
 // the TUI conduit's session-based inference path. The sessionSeed is
 // the static metadata every new session receives at construction so
 // the TUI's statusFromSession sees the keys from session creation
-// (cwd, git_branch, thread_id, tui.pid, model). Callers that do not
-// need the TUI factory or the seed (stdio, HTTP, and the existing
-// test suite) discard the relevant return values.
-func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, error) {
+// (cwd, git_branch, thread_id, tui.pid, model). The SessionPersister
+// is the per-turn save hook (Task 4) that subscribes to the
+// session's TurnCompleteEvent and appends a journal entry per turn
+// via ledger.Repository.SaveTurn / UpdateThreadTip. Callers that
+// do not need the TUI factory, the seed, or the persister (stdio,
+// HTTP, and the existing test suite) discard the relevant return
+// values.
+func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, SessionPersister, error) {
 	// Resolve tracer (noop fallback for tests that don't use WithTracer).
 	tracer := cfg.tracer
 	if tracer == nil {
 		tracer = noop.NewTracerProvider().Tracer("")
 	}
 
-	// Create thread store.
+	// Create thread stores. junk.NewJSONStore writes the legacy
+	// <id>.json snapshot format (read by junk.Stream.Attach); the
+	// new ledger.FileRepository writes <id>.jsonl journal entries
+	// (read by ledger.Repository.HydrateThread). Both share the
+	// same directory but use different extensions, so they coexist
+	// without file collision. Pre-migration threads written by
+	// the old format are not readable by the new code; see
+	// internal/app/persist.go for the format-compatibility note.
+	//
 	// Keep this fallback in sync with cmd/workshop/defaultStoreDir().
 	storeDir := cfg.storeDir
 	if storeDir == "" {
@@ -1109,7 +1122,11 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, e
 	}
 	store, err := junk.NewJSONStore(storeDir)
 	if err != nil {
-		return nil, nil, sessionSeed{}, fmt.Errorf("create JSON store: %w", err)
+		return nil, nil, sessionSeed{}, nil, fmt.Errorf("create JSON store: %w", err)
+	}
+	repo, err := state.NewFileRepository(storeDir)
+	if err != nil {
+		return nil, nil, sessionSeed{}, nil, fmt.Errorf("create ledger repository: %w", err)
 	}
 
 	// Build the providers: validate every defined named provider,
@@ -1118,7 +1135,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, e
 	// when unset).
 	compiled, err := compileProviders(cfg, tracer)
 	if err != nil {
-		return nil, nil, sessionSeed{}, err
+		return nil, nil, sessionSeed{}, nil, err
 	}
 	prov := compiled[cfg.defaultProviderName]
 	compactionName := cfg.compaction.Provider
@@ -1126,7 +1143,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, e
 		compactionName = cfg.defaultProviderName
 	}
 	if _, ok := compiled[compactionName]; !ok {
-		return nil, nil, sessionSeed{}, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
+		return nil, nil, sessionSeed{}, nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
 	}
 	compactionProv := compiled[compactionName]
 
@@ -1369,13 +1386,20 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, e
 		handlers:    slashHandlers{rc, cc, tc, ac},
 		// stream is set by RunTUI after junkBackend.CreateSession
 		// resolves the *junk.Stream for the session. Build uses it
-		// for the compact handler's SetStream and the stepFactory;
-		// SaveThread uses it for persistence. In Task 4 of the
-		// kill-junk migration, this field is removed and persistence
-		// is driven by ledger.Repository instead.
+		// for the compact handler's SetStream and the stepFactory.
+		// Persistence is driven by SessionPersister (Task 4) which
+		// subscribes directly to the session's TurnCompleteEvent;
+		// f.stream.Save is no longer called by the lifecycle pump.
 	}
 
-	return mgr, tuiFactory, seed, nil
+	// Per-turn persister. Task 4 of the kill-junk migration.
+	// Subscribes to the session's TurnCompleteEvent and appends
+	// a journal entry per turn via ledger.Repository.SaveTurn /
+	// UpdateThreadTip. Replaces the post-turn junk.Stream.Save()
+	// snapshot path.
+	persister := NewSessionPersister(repo, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	return mgr, tuiFactory, seed, persister, nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
