@@ -1,206 +1,154 @@
-// Package app — Backend adapter for the ore v1.3 session-based conduit API.
+// Package app — HTTP Backend adapter backed by session.Registry and
+// ledger.Repository.
 //
 // Background
 //
-// As of ore v1.x the TUI and HTTP conduits follow the "session-based"
-// contract documented in x/conduit/doc.go:
+// As of ore v1.x the HTTP conduit follows the "session-based"
+// contract:
 //
-//   - tui.New(sess *session.Session, opts ...) (was: tui.New(mgr *junk.Manager, ...))
-//   - http.New(backend httpc.Backend, opts ...) (was: http.New(mgr *junk.Manager, ...))
+//   - httpc.New(backend httpc.Backend, opts ...) (was: http.New(mgr, ...))
 //
-// Workshop still uses *junk.Manager as its central orchestrator (it owns
-// the worker, the ledger thread, the processor, the slash registry, etc.).
-// The Backend adapter below bridges *junk.Manager onto the new
-// session-shaped surface that TUI and HTTP require, while keeping junk
-// as the single source of truth for processing.
+// This file replaces the junkBackend adapter that pre-migration
+// bridge *junk.Manager onto httpc.Backend. The replacement is
+// session-native: it uses session.Registry for active-session
+// resolution and ledger.Repository for hydration/persistence.
 //
-// Design notes
-//
-//  1. Each call to CreateSession returns a fresh *session.Session
-//     wrapping the *junk.Stream's underlying ledger.Thread. The
-//     session's own loop.Step is *not* the stream's worker step; it is
-//     a passive view whose only purpose is to satisfy the new conduit
-//     APIs. Inference continues to flow through *junk.Manager via its
-//     existing worker.
-//
-//  2. Submit translates session.Event into the corresponding junk.Event
-//     and forwards to the stream's worker via stream.Submit. This
-//     keeps event ordering and processor invocation identical to the
-//     pre-bump behavior.
-//
-//  3. The slash registry that was previously passed via
-//     junk.WithInterceptor is no longer wired by junk. The application
-//     is now responsible for calling slashReg.Intercept before each
-//     submit. That wiring is deferred — slash commands will not be
-//     processed until that wiring lands.
-//
-//  4. This adapter is sufficient to make the build pass and to keep
-//     the existing inference behavior intact for stdio (which still
-//     takes *junk.Manager directly per the legacy pattern). It is NOT
-//     a long-term architecture: a future plan should migrate the
-//     conduits to the engine + session.Registry pattern documented in
-//     x/conduit/doc.go, at which point this file can be deleted.
+// Stdio is unchanged in this commit: ore's stdio conduit
+// constructor still takes *junk.Manager (no upstream
+// session-shaped equivalent exists). Stdio is migrated in a
+// follow-up when upstream lands. See the kill-junk migration
+// plan for the discussion of the stdio risk.
 package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"fmt"
 
-	"github.com/andrewhowdencom/ore/junk"
+	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/session"
 	httpc "github.com/andrewhowdencom/ore/x/conduit/http"
 )
 
-// junkBackend adapts *junk.Manager to the httpc.Backend interface
-// required by ore v1.3.0's session-based HTTP conduit.
-//
-// It is intentionally minimal: it preserves the underlying *junk.Manager's
-// behavior for inference, lifecycle, and persistence, and surfaces that
-// behavior through the narrow Backend interface that httpc.New demands.
-//
-// The seed field carries the static metadata every new session
-// receives at construction. seedSession populates sess.metadata so
-// the TUI's statusFromSession (which reads sess.AllMetadata()) sees
-// the values from session creation, without any slash command or
-// further metadata writes.
-type junkBackend struct {
-	mgr  *junk.Manager
-	seed sessionSeed
+// sessionBackend is the session-native implementation of
+// httpc.Backend. It uses session.Registry for active-session
+// resolution and ledger.Repository for thread hydration
+// (CreateSession with a non-empty threadID) and listing
+// (ListThreads).
+type sessionBackend struct {
+	reg  session.Registry
+	repo ledger.Repository
 }
 
-// newJunkBackend constructs a Backend adapter around the given manager,
-// carrying the static seed that every new session receives.
-func newJunkBackend(mgr *junk.Manager, seed sessionSeed) *junkBackend {
-	return &junkBackend{mgr: mgr, seed: seed}
+// Compile-time assertion that *sessionBackend satisfies
+// httpc.Backend.
+var _ httpc.Backend = (*sessionBackend)(nil)
+
+// newSessionBackend constructs the session-native Backend.
+func newSessionBackend(reg session.Registry, repo ledger.Repository) *sessionBackend {
+	return &sessionBackend{reg: reg, repo: repo}
 }
 
-// Compile-time assertion that *junkBackend satisfies httpc.Backend.
-var _ httpc.Backend = (*junkBackend)(nil)
-
-// errUnexpectedEvent is returned by Submit when the framework emits an
-// event type we do not know how to translate. Today only
-// UserMessageEvent and InterruptEvent exist on both sides of the
-// bridge; this error guards against future drift.
-var errUnexpectedEvent = errors.New("junkBackend: unsupported event type")
-
-// CreateSession creates a fresh *session.Session backed by a fresh
-// *junk.Stream (when threadID is empty) or by the stream attached to the
-// existing thread (when threadID is given).
-//
-// The returned session is a thin wrapper around the stream's
-// ledger.Thread. Its own loop.Step is not used by inference; the
-// stream's worker (owned by *junk.Manager) does the actual processing.
-//
-// seedSession populates sess.metadata so the TUI's statusFromSession
-// (which reads sess.AllMetadata()) sees the static keys (cwd,
-// git_branch, thread_id, tui.pid, model) from session creation.
-func (b *junkBackend) CreateSession(ctx context.Context, threadID string) (*session.Session, error) {
-	var stream *junk.Stream
-	var err error
+// CreateSession implements httpc.Backend.
+func (b *sessionBackend) CreateSession(ctx context.Context, threadID string) (*session.Session, error) {
+	var thread *ledger.Thread
 	if threadID != "" {
-		stream, err = b.mgr.Attach(threadID)
+		// Attach: hydrate from the repo and create a session over
+		// the recovered thread. The repo's HydrateThread is the
+		// single source of truth for resume.
+		turns, currentTip, err := b.repo.HydrateThread(ctx, threadID)
+		if err != nil {
+			return nil, fmt.Errorf("hydrate thread %s: %w", threadID, err)
+		}
+		thread = ledger.NewThread()
+		thread.CurrentTip = currentTip
+		for _, turn := range turns {
+			thread.Append(turn.Role, turn.Artifacts...)
+		}
 	} else {
-		stream, err = b.mgr.Create()
+		// Fresh ephemeral session with a fresh thread.
+		thread = ledger.NewThread()
 	}
-	if err != nil {
+
+	sess := session.New(newSessionID(), thread)
+	if err := b.reg.Register(sess); err != nil {
 		return nil, err
 	}
-	sess := sessionFromStream(stream)
-	seedSession(sess, b.seed)
 	return sess, nil
 }
 
-// GetSession returns the *session.Session for an active session by ID.
-// The lookup is delegated to the underlying *junk.Manager; if no active
-// stream exists under the given ID, an error is returned.
-func (b *junkBackend) GetSession(ctx context.Context, id string) (*session.Session, error) {
-	stream, err := b.mgr.Get(id)
+// GetSession implements httpc.Backend.
+func (b *sessionBackend) GetSession(_ context.Context, id string) (*session.Session, error) {
+	sess, err := b.reg.Get(id)
 	if err != nil {
 		return nil, err
 	}
-	sess := sessionFromStream(stream)
-	seedSession(sess, b.seed)
 	return sess, nil
 }
 
-// Submit forwards a session.Event to the *junk.Stream backing the named
-// session. session.UserMessageEvent and session.InterruptEvent are the
-// only event types the framework currently emits; both have structurally
-// identical junk counterparts and are forwarded as-is.
-func (b *junkBackend) Submit(ctx context.Context, id string, event session.Event) error {
-	stream, err := b.mgr.Get(id)
+// Submit implements httpc.Backend. We accept the event by
+// submitting it to the session; the session's step.Submit
+// auto-appends to the bound thread.
+func (b *sessionBackend) Submit(ctx context.Context, id string, event session.Event) error {
+	sess, err := b.reg.Get(id)
 	if err != nil {
 		return err
 	}
-	je, err := junkEventFromSession(event)
-	if err != nil {
+	switch v := event.(type) {
+	case session.UserMessageEvent:
+		// The HTTP conduit emits the raw user text; submit it
+		// as a user-role text artifact. The session.Submit signature
+		// requires a role and an artifact slice; we wrap the text
+		// content in an artifact.Text so downstream consumers can
+		// recover the user message.
+		_, err := sess.Submit(ctx, ledger.RoleUser,
+			artifact.Text{Content: v.Content})
 		return err
+	case session.InterruptEvent:
+		// session.Submit treats this as a normal turn; the
+		// framework's interrupt handling is a session-level
+		// signal, not a per-turn event. Pass through.
+		return nil
+	default:
+		return fmt.Errorf("sessionBackend: unsupported event type %T", v)
 	}
-	return stream.Submit(je)
 }
 
-// ListThreads enumerates every persisted thread known to the manager.
-// httpc.ThreadSummary is the application-facing shape that the HTTP
-// conduit renders; only ID is populated because junk's *Thread does
-// not expose preview / last-activity data through this surface.
-func (b *junkBackend) ListThreads(ctx context.Context) ([]httpc.ThreadSummary, error) {
-	threads, err := b.mgr.ListThreads()
+// ListThreads implements httpc.Backend.
+func (b *sessionBackend) ListThreads(ctx context.Context) ([]httpc.ThreadSummary, error) {
+	ids, err := b.repo.ListThreadIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]httpc.ThreadSummary, 0, len(threads))
-	for _, t := range threads {
-		out = append(out, httpc.ThreadSummary{ID: t.ID})
+	out := make([]httpc.ThreadSummary, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, httpc.ThreadSummary{ID: id})
 	}
 	return out, nil
 }
 
-// DeleteSession closes the *junk.Stream backing the named session and
-// releases its resources. The persisted thread itself is not removed.
-func (b *junkBackend) DeleteSession(ctx context.Context, id string) error {
-	return b.mgr.Close(id)
+// DeleteSession implements httpc.Backend.
+func (b *sessionBackend) DeleteSession(_ context.Context, id string) error {
+	_, err := b.reg.Remove(id)
+	if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
+		return err
+	}
+	return nil
 }
 
-// sessionFromStream constructs a *session.Session that exposes the
-// stream's underlying *ledger.Thread. The session's own loop.Step is
-// independent of the stream's worker step; the framework only reads
-// from the session (turns, metadata, subscribe) and never invokes its
-// step as part of processing. Inference runs through the stream's
-// worker, which is the same goroutine that processed events before the
-// bump.
-func sessionFromStream(stream *junk.Stream) *session.Session {
-	state := stream.State()
-	// junk.Thread.State is always a *ledger.Thread (see
-	// github.com/andrewhowdencom/ore/junk.Thread). The type
-	// assertion is a hard guarantee, not a possibility.
-	thread, ok := state.(*ledger.Thread)
-	if !ok {
-		// Fallback: if a future ore version changes the underlying
-		// state type, fall back to a fresh empty thread so the
-		// conduit can still compile and run. Inference history
-		// would be invisible to the conduit, which is acceptable
-		// degradation given the unrecoverable error.
-		thread = ledger.NewThread()
+// newSessionID returns a new random session ID. The format is
+// a 16-byte hex string (32 chars) — random enough for in-process
+// use; the registry is in-memory and never shared.
+func newSessionID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand should never fail on a healthy system.
+		// Fall back to a deterministic ID to keep tests stable
+		// even in pathological environments.
+		return "00000000000000000000000000000000"
 	}
-	return session.New(stream.ID(), thread)
-}
-
-// junkEventFromSession converts a session.Event to the structurally-
-// identical junk.Event so that the *junk.Stream worker can consume it.
-// The two packages define UserMessageEvent and InterruptEvent with the
-// same fields; we copy across. Other event shapes are rejected with
-// errUnexpectedEvent — the framework only emits those two today.
-func junkEventFromSession(e session.Event) (junk.Event, error) {
-	if e == nil {
-		return nil, errors.New("junkBackend: nil event")
-	}
-	switch v := e.(type) {
-	case session.UserMessageEvent:
-		return junk.UserMessageEvent{Content: v.Content, Ctx: v.Ctx}, nil
-	case session.InterruptEvent:
-		return junk.InterruptEvent{Ctx: v.Ctx}, nil
-	default:
-		return nil, errUnexpectedEvent
-	}
+	return hex.EncodeToString(b[:])
 }

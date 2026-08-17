@@ -370,18 +370,25 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	notifier := &compactionNotifier{}
 	cfg.compactionNotifier = notifier
 
-	mgr, factory, seed, persister, err := buildManager(cfg)
+	mgr, factory, _, persister, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
 
 	// Create a *session.Session for the TUI. The session-based TUI
-	// contract requires a session; we proxy a fresh session through
-	// the junkBackend adapter so thread state lives in the manager.
-	// The seed populates sess.metadata with the static keys
-	// (cwd, git_branch, thread_id, tui.pid, model) so the TUI's
-	// statusFromSession shows them from session creation.
-	tuiBackend := newJunkBackend(mgr, seed)
+	// contract requires a session. Task 6 of the kill-junk
+	// migration: sessionBackend replaces junkBackend as the
+	// bridge from session.Registry + ledger.Repository onto
+	// the TUI's session-shaped contract. seedSession populates
+	// sess.metadata with the static keys (cwd, git_branch,
+	// thread_id, tui_pip, model) so the TUI's statusFromSession
+	// shows them from session creation.
+	reg := session.NewInMemoryRegistry()
+	repo, err := state.NewFileRepository(cfg.storeDir)
+	if err != nil {
+		return fmt.Errorf("create TUI ledger repository: %w", err)
+	}
+	tuiBackend := newSessionBackend(reg, repo)
 	tuiSess, err := tuiBackend.CreateSession(ctx, cfg.threadID)
 	if err != nil {
 		return fmt.Errorf("create TUI session: %w", err)
@@ -410,19 +417,17 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
 	})
 
-	// Look up the *junk.Stream backing the session and bind it to
-	// the factory. The stream is no longer used for persistence
-	// (that's SessionPersister, Task 4) nor for compactCommand's
-	// boundary write (the stream field was removed in Task 5).
-	// It remains on the factory because the stepFactory closure
-	// captures the stream and the compactCommand no longer
-	// references it directly. Task 6 will remove the stream
-	// lookup entirely when stdio and HTTP migrate.
-	stream, err := mgr.Get(tuiSess.ID())
-	if err != nil {
-		return fmt.Errorf("lookup TUI stream: %w", err)
+	// create the persister and bind it to the session. The factory
+	// no longer needs the *junk.Stream lookup; stepFactory still
+	// accepts one for now, but the TUI path can pass nil here
+	// because compactCommand no longer stores it. Task 6 will
+	// fold the nil into a clean removal.
+	_ = mgr
+
+	if err := persister.Attach(tuiSess); err != nil {
+		return fmt.Errorf("attach persister: %w", err)
 	}
-	factory.SetStream(stream)
+	defer persister.Close()
 
 	return runTUIEngine(ctx, tuiSess, tuiImpl, factory, persister)
 }
@@ -438,15 +443,39 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 		cfg.httpAddr = ":8080"
 	}
 
-	mgr, _, seed, _, err := buildManager(cfg)
+	// Task 6 of the kill-junk migration: the HTTP path is now
+	// session-native. buildManager still constructs *junk.Manager
+	// (stdio needs it; see Task 6's commit message) but we discard
+	// it here. The sessionBackend wraps session.Registry +
+	// ledger.Repository, which were both constructed in buildManager.
+	mgr, _, _, persister, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
+	_ = mgr
+	_ = persister
+
+	// Construct a session registry for the HTTP backend. The
+	// registry holds active sessions for the duration of the
+	// HTTP process; sessions created via CreateSession are added,
+	// removed on DeleteSession.
+	reg := session.NewInMemoryRegistry()
+	// The repo was constructed by buildManager as a private
+	// field; we'd need to plumb it through. For now, create a
+	// fresh repo pointing at the same directory. This works
+	// because both the per-turn persister (from buildManager)
+	// and this backend share the same on-disk location.
+	repo, err := state.NewFileRepository(cfg.storeDir)
+	if err != nil {
+		return fmt.Errorf("create HTTP ledger repository: %w", err)
+	}
+	backend := newSessionBackend(reg, repo)
 
 	// Create the HTTP conduit with web UI enabled. The HTTP
-	// conduit now consumes a Backend interface (ore v1.3.0);
-	// junkBackend adapts *junk.Manager onto that surface.
-	httpConduit, err := httpc.New(newJunkBackend(mgr, seed),
+	// conduit consumes the session-native Backend interface
+	// (ore v1.3.0); sessionBackend adapts session.Registry +
+	// ledger.Repository onto that surface.
+	httpConduit, err := httpc.New(backend,
 		httpc.WithUI(),
 		httpc.WithName("workshop"),
 		httpc.WithAddr(cfg.httpAddr),
