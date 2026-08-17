@@ -58,13 +58,21 @@ import (
 // It is intentionally minimal: it preserves the underlying *junk.Manager's
 // behavior for inference, lifecycle, and persistence, and surfaces that
 // behavior through the narrow Backend interface that httpc.New demands.
+//
+// The seed field carries the static metadata every new session
+// receives at construction. seedSession populates sess.metadata so
+// the TUI's statusFromSession (which reads sess.AllMetadata()) sees
+// the values from session creation, without any slash command or
+// further metadata writes.
 type junkBackend struct {
-	mgr *junk.Manager
+	mgr  *junk.Manager
+	seed sessionSeed
 }
 
-// newJunkBackend constructs a Backend adapter around the given manager.
-func newJunkBackend(mgr *junk.Manager) *junkBackend {
-	return &junkBackend{mgr: mgr}
+// newJunkBackend constructs a Backend adapter around the given manager,
+// carrying the static seed that every new session receives.
+func newJunkBackend(mgr *junk.Manager, seed sessionSeed) *junkBackend {
+	return &junkBackend{mgr: mgr, seed: seed}
 }
 
 // Compile-time assertion that *junkBackend satisfies httpc.Backend.
@@ -83,6 +91,10 @@ var errUnexpectedEvent = errors.New("junkBackend: unsupported event type")
 // The returned session is a thin wrapper around the stream's
 // ledger.Thread. Its own loop.Step is not used by inference; the
 // stream's worker (owned by *junk.Manager) does the actual processing.
+//
+// seedSession populates sess.metadata so the TUI's statusFromSession
+// (which reads sess.AllMetadata()) sees the static keys (cwd,
+// git_branch, thread_id, tui.pid, model) from session creation.
 func (b *junkBackend) CreateSession(ctx context.Context, threadID string) (*session.Session, error) {
 	var stream *junk.Stream
 	var err error
@@ -94,7 +106,9 @@ func (b *junkBackend) CreateSession(ctx context.Context, threadID string) (*sess
 	if err != nil {
 		return nil, err
 	}
-	return sessionFromStream(stream), nil
+	sess := sessionFromStream(stream)
+	seedSession(sess, b.seed)
+	return sess, nil
 }
 
 // GetSession returns the *session.Session for an active session by ID.
@@ -105,7 +119,9 @@ func (b *junkBackend) GetSession(ctx context.Context, id string) (*session.Sessi
 	if err != nil {
 		return nil, err
 	}
-	return sessionFromStream(stream), nil
+	sess := sessionFromStream(stream)
+	seedSession(sess, b.seed)
+	return sess, nil
 }
 
 // Submit forwards a session.Event to the *junk.Stream backing the named

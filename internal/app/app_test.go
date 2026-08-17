@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,7 @@ import (
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/junk"
-	state "github.com/andrewhowdencom/ore/ledger"
+	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
@@ -46,6 +47,30 @@ func TestNewProvider_MissingAPIKey(t *testing.T) {
 	}
 	if err.Error() != "missing required provider config: api_key" {
 		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestSeedSession_PopulatesSessionMetadata(t *testing.T) {
+	sess := session.New("thread-abc", ledger.NewThread())
+
+	seed := sessionSeed{
+		cwd:       "~/proj",
+		gitBranch: "main",
+		tuiPID:    "12345",
+		model:     "test-model",
+	}
+	seedSession(sess, seed)
+
+	got := sess.AllMetadata()
+	want := map[string]string{
+		"cwd":        "~/proj",
+		"git_branch": "main",
+		"thread_id":  "thread-abc",
+		"tui.pid":    "12345",
+		"model":      "test-model",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sess.AllMetadata() = %v, want %v", got, want)
 	}
 }
 
@@ -384,7 +409,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	prov := &testSlashProvider{}
 	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st ledger.State, prov provider.Provider, spec models.Spec) (ledger.State, error) {
 		return st, nil
 	})
 
@@ -421,7 +446,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	if got := len(turns); got != 1 {
 		t.Fatalf("len(turns) = %d, want 1 (first set appends one transition turn)", got)
 	}
-	assert.Equal(t, state.RoleSystem, turns[0].Role)
+	assert.Equal(t, ledger.RoleSystem, turns[0].Role)
 	require.Len(t, turns[0].Artifacts, 1)
 	text, ok := turns[0].Artifacts[0].(artifact.Text)
 	require.True(t, ok)
@@ -442,7 +467,7 @@ func TestRoleSlashHandler(t *testing.T) {
 
 	// Invalid role returns an error (preserves the long-standing contract
 	// that switching to a missing role is a hard failure) and does not
-	// mutate the state. No new turn is appended on failure.
+	// mutate the ledger. No new turn is appended on failure.
 	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for nonexistent role")
@@ -465,7 +490,7 @@ func newRoleCommandStream(t *testing.T) *junk.Stream {
 	prov := &testSlashProvider{}
 	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st ledger.State, prov provider.Provider, spec models.Spec) (ledger.State, error) {
 		return st, nil
 	})
 	stream, err := mgr.Create()
@@ -482,7 +507,7 @@ func newRoleCommandStream(t *testing.T) *junk.Stream {
 // already uses for role files and stream-level assertions.
 func newRoleCommandSession(t *testing.T, stream *junk.Stream) *session.Session {
 	t.Helper()
-	return session.New(stream.ID(), stream.State().(*state.Thread))
+	return session.New(stream.ID(), stream.State().(*ledger.Thread))
 }
 
 func TestRoleCommand_NoArgListsRoles(t *testing.T) {
@@ -608,7 +633,7 @@ func TestRoleCommand_UpdateResolver(t *testing.T) {
 	// is expected.
 	turns := stream.Turns()
 	require.Equal(t, 1, len(turns), "exactly one transition turn on actual change")
-	assert.Equal(t, state.RoleSystem, turns[0].Role)
+	assert.Equal(t, ledger.RoleSystem, turns[0].Role)
 	require.Len(t, turns[0].Artifacts, 1)
 	text, ok := turns[0].Artifacts[0].(artifact.Text)
 	require.True(t, ok)
@@ -674,7 +699,7 @@ func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 	// turn. The transition uses the "cleared" framing.
 	turns := stream.Turns()
 	require.Equal(t, 1, len(turns), "exactly one transition turn on actual clear")
-	assert.Equal(t, state.RoleSystem, turns[0].Role)
+	assert.Equal(t, ledger.RoleSystem, turns[0].Role)
 	require.Len(t, turns[0].Artifacts, 1)
 	text, ok := turns[0].Artifacts[0].(artifact.Text)
 	require.True(t, ok)
@@ -791,7 +816,7 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	prov := &testSummarizeProvider{}
 	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st ledger.State, prov provider.Provider, spec models.Spec) (ledger.State, error) {
 		return st, nil
 	})
 
@@ -822,7 +847,7 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	// pre-populated turns are visible to the handler. The
 	// newRoleCommandSession helper creates a fresh stream/thread
 	// and would not see the populated turns.
-	sess := session.New(stream.ID(), stream.State().(*state.Thread))
+	sess := session.New(stream.ID(), stream.State().(*ledger.Thread))
 	cc.SetSession(sess)
 	cc.SetStream(stream)
 
@@ -835,16 +860,16 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 visible turn (the summary), got %d", len(got))
 	}
-	if got[0].Role != state.RoleSystem {
+	if got[0].Role != ledger.RoleSystem {
 		t.Errorf("summary turn role = %v, want RoleSystem", got[0].Role)
 	}
 
 	// The 5 original turns are preserved in the tree behind the
 	// compaction boundary; they no longer participate in the LLM-facing
 	// active path (the summary stops the walk), but they are not lost.
-	thr, ok := stream.State().(*state.Thread)
+	thr, ok := stream.State().(*ledger.Thread)
 	if !ok {
-		t.Fatalf("expected stream.State() to be *state.Thread; got %T", stream.State())
+		t.Fatalf("expected stream.State() to be *ledger.Thread; got %T", stream.State())
 	}
 	if all := thr.AllTurns(); len(all) != 6 {
 		t.Errorf("tree should retain all 6 turns (5 original + 1 summary); got %d", len(all))
@@ -856,7 +881,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	prov := &testSummarizeProvider{}
 	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st ledger.State, prov provider.Provider, spec models.Spec) (ledger.State, error) {
 		return st, nil
 	})
 
@@ -894,7 +919,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	}
 	// Build a session that shares this stream's thread, so the
 	// pre-populated turns are visible to the handler.
-	sess := session.New(stream.ID(), stream.State().(*state.Thread))
+	sess := session.New(stream.ID(), stream.State().(*ledger.Thread))
 	cc.SetSession(sess)
 	cc.SetStream(stream)
 
@@ -908,15 +933,15 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 		t.Fatalf("expected 1 visible turn (the summary), got %d", len(got))
 	}
 	compactionTurn := got[0]
-	if compactionTurn.Role != state.RoleSystem {
+	if compactionTurn.Role != ledger.RoleSystem {
 		t.Errorf("compaction turn role = %v, want RoleSystem", compactionTurn.Role)
 	}
 
 	// The 5 original turns remain in the tree behind the boundary;
 	// the active path terminates at the summary.
-	thr, ok := stream.State().(*state.Thread)
+	thr, ok := stream.State().(*ledger.Thread)
 	if !ok {
-		t.Fatalf("expected stream.State() to be *state.Thread; got %T", stream.State())
+		t.Fatalf("expected stream.State() to be *ledger.Thread; got %T", stream.State())
 	}
 	if all := thr.AllTurns(); len(all) != 6 {
 		t.Errorf("tree should retain all 6 turns (5 original + 1 summary); got %d", len(all))
@@ -1042,13 +1067,13 @@ func TestNameSlashHandler_TrimsInput(t *testing.T) {
 
 type testSlashProvider struct{}
 
-func (p *testSlashProvider) Invoke(ctx context.Context, s state.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+func (p *testSlashProvider) Invoke(ctx context.Context, s ledger.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
 	return nil
 }
 
 type testSummarizeProvider struct{}
 
-func (p *testSummarizeProvider) Invoke(ctx context.Context, s state.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+func (p *testSummarizeProvider) Invoke(ctx context.Context, s ledger.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
 	ch <- artifact.Text{Content: "summary"}
 	ch <- artifact.StopReason{Reason: artifact.StopReasonStop}
 	return nil
@@ -1174,7 +1199,7 @@ func TestRoleToolSchemas(t *testing.T) {
 }
 
 func TestBuildManager_Smoke(t *testing.T) {
-	mgr, _, err := buildManager(&config{
+	mgr, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1194,7 +1219,7 @@ func TestBuildManager_Smoke(t *testing.T) {
 }
 
 func TestBuildManager_WithCompaction(t *testing.T) {
-	mgr, _, err := buildManager(&config{
+	mgr, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1222,7 +1247,7 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr, _, err := buildManager(&config{
+	mgr, _, _, err := buildManager(&config{
 		storeDir:   t.TempDir(),
 		workingDir: dir,
 		providers: map[string]ProviderConfig{
@@ -1243,7 +1268,7 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 }
 
 func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
-	mgr, _, err := buildManager(&config{
+	mgr, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1286,7 +1311,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	storeDir := t.TempDir()
 
 	// First session: create with role "reviewer"
-	mgr1, _, err := buildManager(&config{
+	mgr1, _, _, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1318,7 +1343,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	}
 
 	// Second session: attach with different role "planner"
-	mgr2, _, err := buildManager(&config{
+	mgr2, _, _, err := buildManager(&config{
 		storeDir: storeDir,
 		role:     "planner",
 		providers: map[string]ProviderConfig{
@@ -1625,7 +1650,7 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1635,7 +1660,7 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 	if len(turns) != 1 {
 		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
 	}
-	if turns[0].Role != state.RoleSystem {
+	if turns[0].Role != ledger.RoleSystem {
 		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
 	}
 	if len(turns[0].Artifacts) != 1 {
@@ -1692,7 +1717,7 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1757,7 +1782,7 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1767,7 +1792,7 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 	if len(turns) != 1 {
 		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
 	}
-	if turns[0].Role != state.RoleSystem {
+	if turns[0].Role != ledger.RoleSystem {
 		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
 	}
 	if len(turns[0].Artifacts) != 1 {
@@ -1841,7 +1866,7 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1851,7 +1876,7 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 	if len(turns) != 1 {
 		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
 	}
-	if turns[0].Role != state.RoleSystem {
+	if turns[0].Role != ledger.RoleSystem {
 		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
 	}
 	if len(turns[0].Artifacts) != 1 {
@@ -1906,7 +1931,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -1916,7 +1941,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 	if len(turns) != 1 {
 		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
 	}
-	if turns[0].Role != state.RoleSystem {
+	if turns[0].Role != ledger.RoleSystem {
 		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
 	}
 	if len(turns[0].Artifacts) != 1 {
@@ -2000,7 +2025,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2051,7 +2076,7 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2108,7 +2133,7 @@ func TestSystemPrompt_WithSkillsFragment(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2118,7 +2143,7 @@ func TestSystemPrompt_WithSkillsFragment(t *testing.T) {
 	if len(turns) != 1 {
 		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
 	}
-	if turns[0].Role != state.RoleSystem {
+	if turns[0].Role != ledger.RoleSystem {
 		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
 	}
 	if len(turns[0].Artifacts) != 1 {
@@ -2158,7 +2183,7 @@ func TestSystemPrompt_WithoutSkillsFragment(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2168,7 +2193,7 @@ func TestSystemPrompt_WithoutSkillsFragment(t *testing.T) {
 	if len(turns) != 1 {
 		t.Fatalf("expected 1 virtual turn, got %d", len(turns))
 	}
-	if turns[0].Role != state.RoleSystem {
+	if turns[0].Role != ledger.RoleSystem {
 		t.Errorf("expected RoleSystem, got %v", turns[0].Role)
 	}
 	if len(turns[0].Artifacts) != 1 {
@@ -2210,7 +2235,7 @@ func TestSystemPrompt_WithSkillsFragmentError(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2252,7 +2277,7 @@ func TestSystemPrompt_WithCWDAndSkillsFragment(t *testing.T) {
 		t.Fatalf("create system prompt: %v", err)
 	}
 
-	base := state.NewThread()
+	base := ledger.NewThread()
 	result, err := sp.Transform(context.Background(), base)
 	if err != nil {
 		t.Fatalf("transform error: %v", err)
@@ -2834,21 +2859,21 @@ func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 func TestCompactionNotifier(t *testing.T) {
 	t.Run("NotifyWithoutReloader", func(t *testing.T) {
 		n := &compactionNotifier{}
-		n.Notify([]state.Turn{}, compaction.BoundaryInfo{}) // should not panic
+		n.Notify([]ledger.Turn{}, compaction.BoundaryInfo{}) // should not panic
 	})
 
 	t.Run("NotifyWithReloader", func(t *testing.T) {
 		n := &compactionNotifier{}
-		var got []state.Turn
+		var got []ledger.Turn
 		var gotBoundary compaction.BoundaryInfo
-		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+		n.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 			got = turns
 			gotBoundary = boundary
 		})
-		want := []state.Turn{{Role: state.RoleUser}}
+		want := []ledger.Turn{{Role: ledger.RoleUser}}
 		wantBoundary := compaction.BoundaryInfo{Model: "test-model"}
 		n.Notify(want, wantBoundary)
-		if len(got) != 1 || got[0].Role != state.RoleUser {
+		if len(got) != 1 || got[0].Role != ledger.RoleUser {
 			t.Errorf("got %v, want %v", got, want)
 		}
 		if gotBoundary != wantBoundary {
@@ -2859,10 +2884,10 @@ func TestCompactionNotifier(t *testing.T) {
 	t.Run("SetReloaderOverwrites", func(t *testing.T) {
 		n := &compactionNotifier{}
 		var firstCalled, secondCalled bool
-		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+		n.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 			firstCalled = true
 		})
-		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+		n.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 			secondCalled = true
 		})
 		n.Notify(nil, compaction.BoundaryInfo{})
@@ -2876,8 +2901,8 @@ func TestCompactionNotifier(t *testing.T) {
 
 	t.Run("NotifyNilTurns", func(t *testing.T) {
 		n := &compactionNotifier{}
-		var got []state.Turn
-		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+		var got []ledger.Turn
+		n.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 			got = turns
 		})
 		n.Notify(nil, compaction.BoundaryInfo{})
@@ -2889,7 +2914,7 @@ func TestCompactionNotifier(t *testing.T) {
 	t.Run("ThreadSafety", func(t *testing.T) {
 		n := &compactionNotifier{}
 		var count int64
-		n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+		n.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 			atomic.AddInt64(&count, 1)
 		})
 
@@ -2898,14 +2923,14 @@ func TestCompactionNotifier(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				n.Notify([]state.Turn{}, compaction.BoundaryInfo{})
+				n.Notify([]ledger.Turn{}, compaction.BoundaryInfo{})
 			}()
 		}
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
-				n.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+				n.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 					atomic.AddInt64(&count, 1)
 				})
 			}(i)
@@ -2923,7 +2948,7 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	prov := &testSummarizeProvider{}
 	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
 		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
+	}, func(ctx context.Context, step *loop.Step, st ledger.State, prov provider.Provider, spec models.Spec) (ledger.State, error) {
 		return st, nil
 	})
 
@@ -2949,10 +2974,10 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	// compaction.Summarize and appends the result. The notifier
 	// receives the post-append turn slice (5 original + 1 compaction)
 	// and the boundary info for the just-appended summary turn.
-	var notified []state.Turn
+	var notified []ledger.Turn
 	var notifiedBoundary compaction.BoundaryInfo
 	notifier := &compactionNotifier{}
-	notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+	notifier.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 		notified = turns
 		notifiedBoundary = boundary
 	})
@@ -2970,7 +2995,7 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	// pre-populated turns are visible to the handler. (The
 	// newRoleCommandSession helper would create a fresh
 	// stream/thread and miss the populated turns.)
-	sess := session.New(stream.ID(), stream.State().(*state.Thread))
+	sess := session.New(stream.ID(), stream.State().(*ledger.Thread))
 	cc.SetSession(sess)
 	cc.SetStream(stream)
 
@@ -2982,7 +3007,7 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	if len(notified) != 1 {
 		t.Fatalf("expected notifier to receive 1 visible turn (the summary), got %d", len(notified))
 	}
-	if notified[0].Role != state.RoleSystem {
+	if notified[0].Role != ledger.RoleSystem {
 		t.Errorf("notified summary role = %v, want RoleSystem", notified[0].Role)
 	}
 	t.Logf("debug: notified boundary: %+v", notifiedBoundary)
@@ -3011,13 +3036,13 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 }
 
 func TestBuildManager_CompactionNotifier(t *testing.T) {
-	var notified []state.Turn
+	var notified []ledger.Turn
 	notifier := &compactionNotifier{}
-	notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+	notifier.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 		notified = turns
 	})
 
-	mgr, _, err := buildManager(&config{
+	mgr, _, _, err := buildManager(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -3040,9 +3065,9 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 	}
 
 	// Verify that the notifier is still functional after buildManager.
-	testTurns := []state.Turn{{Role: state.RoleUser}}
+	testTurns := []ledger.Turn{{Role: ledger.RoleUser}}
 	notifier.Notify(testTurns, compaction.BoundaryInfo{})
-	if len(notified) != 1 || notified[0].Role != state.RoleUser {
+	if len(notified) != 1 || notified[0].Role != ledger.RoleUser {
 		t.Errorf("notifier did not receive test turns: got %v", notified)
 	}
 }
@@ -3179,7 +3204,7 @@ func TestBuildManager_CompactionProvider_DefaultsToInference(t *testing.T) {
 			MaxTokens: 50000, // Provider is intentionally left empty.
 		},
 	}
-	mgr, _, err := buildManager(cfg)
+	mgr, _, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}
@@ -3206,7 +3231,7 @@ func TestBuildManager_CompactionProvider_DistinctFromInference(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	mgr, _, err := buildManager(cfg)
+	mgr, _, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}
@@ -3231,7 +3256,7 @@ func TestBuildManager_CompactionProvider_UndefinedErrors(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	_, _, err := buildManager(cfg)
+	_, _, _, err := buildManager(cfg)
 	if err == nil {
 		t.Fatal("expected error for undefined compaction.provider")
 	}
@@ -3260,7 +3285,7 @@ func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 			MaxTokens: 0,
 		},
 	}
-	mgr, _, err := buildManager(cfg)
+	mgr, _, _, err := buildManager(cfg)
 	if err != nil {
 		t.Fatalf("buildManager: %v", err)
 	}
@@ -3316,7 +3341,7 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	// Bind to the populated thread: session.Submit / sess.Turns() read
 	// through the session's bound state, which must be the stream's
 	// thread for the seeded turns to be visible to the handler.
-	if thread, ok := stream.State().(*state.Thread); ok {
+	if thread, ok := stream.State().(*ledger.Thread); ok {
 		ac.SetSession(session.New(stream.ID(), thread))
 	}
 

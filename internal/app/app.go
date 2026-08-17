@@ -250,6 +250,60 @@ func WithMeter(meter metric.Meter) Option {
 	return func(c *config) { c.meter = meter }
 }
 
+// sessionSeed holds the static metadata seeded into every new session
+// at construction. The TUI's statusFromSession reads from
+// sess.AllMetadata() (see x/conduit/tui@v0.12.10/tui.go), so seeding
+// here ensures the info bar shows the values from session creation
+// without any slash command or further metadata writes.
+//
+// The seed is computed once at app startup from the current process
+// and the configured provider. It does not change at runtime. The
+// model name lives here (not in defaultMeta) because defaultMeta
+// predates the routing entry — the model key was added to
+// statusZoneMapping in 690bb46 but never seeded.
+type sessionSeed struct {
+	cwd       string
+	gitBranch string
+	tuiPID    string
+	model     string
+}
+
+// computeSessionSeed returns the static seed derived from the current
+// process and the configured provider. cwd is abbreviated to "~" when
+// it sits under the user's home directory; git_branch falls back to
+// "(not in git repo)" when git cannot determine the branch. The model
+// is read from the default provider's configured Model.
+func computeSessionSeed(cfg *config) sessionSeed {
+	cwd, _ := os.Getwd()
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
+		cwd = "~" + strings.TrimPrefix(cwd, home)
+	}
+	branchBytes, _ := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branch := strings.TrimSpace(string(branchBytes))
+	if branch == "" {
+		branch = "(not in git repo)"
+	}
+	return sessionSeed{
+		cwd:       cwd,
+		gitBranch: branch,
+		tuiPID:    strconv.Itoa(os.Getpid()),
+		model:     buildDefaultSpec(cfg.defaultProviderConfig()).Name,
+	}
+}
+
+// seedSession writes the static seed into the session's metadata map
+// (so the TUI's statusFromSession picks it up via sess.AllMetadata())
+// and emits a PropertiesEvent for each key. The session is the
+// canonical store for live metadata after this call; the thread
+// metadata is updated separately if persistence is required (Task 2).
+func seedSession(sess *session.Session, seed sessionSeed) {
+	sess.SetMetadata("cwd", seed.cwd)
+	sess.SetMetadata("git_branch", seed.gitBranch)
+	sess.SetMetadata("thread_id", sess.ID())
+	sess.SetMetadata("tui.pid", seed.tuiPID)
+	sess.SetMetadata("model", seed.model)
+}
+
 // statusZoneMapping assigns each status-bar key to a semantic zone.
 // The "lifecycle" zone carries the active turn's counters (phase, title,
 // and the four token counters sent / received / total / thinking);
@@ -292,7 +346,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	notifier := &compactionNotifier{}
 	cfg.compactionNotifier = notifier
 
-	mgr, factory, err := buildManager(cfg)
+	mgr, factory, seed, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -300,7 +354,10 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	// Create a *session.Session for the TUI. The session-based TUI
 	// contract requires a session; we proxy a fresh session through
 	// the junkBackend adapter so thread state lives in the manager.
-	tuiBackend := newJunkBackend(mgr)
+	// The seed populates sess.metadata with the static keys
+	// (cwd, git_branch, thread_id, tui.pid, model) so the TUI's
+	// statusFromSession shows them from session creation.
+	tuiBackend := newJunkBackend(mgr, seed)
 	tuiSess, err := tuiBackend.CreateSession(ctx, cfg.threadID)
 	if err != nil {
 		return fmt.Errorf("create TUI session: %w", err)
@@ -352,7 +409,7 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 		cfg.httpAddr = ":8080"
 	}
 
-	mgr, _, err := buildManager(cfg)
+	mgr, _, seed, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -360,7 +417,7 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 	// Create the HTTP conduit with web UI enabled. The HTTP
 	// conduit now consumes a Backend interface (ore v1.3.0);
 	// junkBackend adapts *junk.Manager onto that surface.
-	httpConduit, err := httpc.New(newJunkBackend(mgr),
+	httpConduit, err := httpc.New(newJunkBackend(mgr, seed),
 		httpc.WithUI(),
 		httpc.WithName("workshop"),
 		httpc.WithAddr(cfg.httpAddr),
@@ -380,7 +437,7 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 		opt(cfg)
 	}
 
-	mgr, _, err := buildManager(cfg)
+	mgr, _, _, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
@@ -1004,10 +1061,13 @@ func (s *workshopSandbox) WorkingDirectory() string {
 // buildManager creates the shared session manager from configuration.
 // It returns the *junk.Manager (used by stdio and HTTP conduits, plus
 // the bulk of the test suite) alongside a *tuiEngineFactory used by
-// the TUI conduit's session-based inference path. Callers that do
-// not need the TUI factory (stdio, HTTP, and the existing test
-// suite) discard the second return value.
-func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
+// the TUI conduit's session-based inference path. The sessionSeed is
+// the static metadata every new session receives at construction so
+// the TUI's statusFromSession sees the keys from session creation
+// (cwd, git_branch, thread_id, tui.pid, model). Callers that do not
+// need the TUI factory or the seed (stdio, HTTP, and the existing
+// test suite) discard the relevant return values.
+func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, error) {
 	// Resolve tracer (noop fallback for tests that don't use WithTracer).
 	tracer := cfg.tracer
 	if tracer == nil {
@@ -1022,7 +1082,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 	}
 	store, err := junk.NewJSONStore(storeDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create JSON store: %w", err)
+		return nil, nil, sessionSeed{}, fmt.Errorf("create JSON store: %w", err)
 	}
 
 	// Build the providers: validate every defined named provider,
@@ -1031,7 +1091,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 	// when unset).
 	compiled, err := compileProviders(cfg, tracer)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, sessionSeed{}, err
 	}
 	prov := compiled[cfg.defaultProviderName]
 	compactionName := cfg.compaction.Provider
@@ -1039,7 +1099,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		compactionName = cfg.defaultProviderName
 	}
 	if _, ok := compiled[compactionName]; !ok {
-		return nil, nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
+		return nil, nil, sessionSeed{}, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
 	}
 	compactionProv := compiled[compactionName]
 
@@ -1234,6 +1294,14 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		branch = "(not in git repo)"
 	}
 
+	// Session seed for the TUI's status bar (sess.metadata is what
+	// statusFromSession reads; see seedSession). Computed once at
+	// startup and threaded through newJunkBackend. defaultMeta below
+	// keeps writing to thread metadata for compatibility with the
+	// existing junk-based persistence path; Task 2 will fold the
+	// thread write into seedSession and retire defaultMeta.
+	seed := computeSessionSeed(cfg)
+
 	defaultMeta := func(stream *junk.Stream) map[string]string {
 		defaults := map[string]string{
 			"thread_id":  stream.ID(),
@@ -1287,7 +1355,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		handlers:    slashHandlers{rc, cc, tc, ac},
 	}
 
-	return mgr, tuiFactory, nil
+	return mgr, tuiFactory, seed, nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for
