@@ -293,15 +293,38 @@ func computeSessionSeed(cfg *config) sessionSeed {
 
 // seedSession writes the static seed into the session's metadata map
 // (so the TUI's statusFromSession picks it up via sess.AllMetadata())
-// and emits a PropertiesEvent for each key. The session is the
-// canonical store for live metadata after this call; the thread
-// metadata is updated separately if persistence is required (Task 2).
+// and emits a PropertiesEvent for each key. It also writes the same
+// keys to sess.Thread().Meta() so the persistent store (what
+// ledger.Repository reads back on hydration) carries them — without
+// this, the values would only live in the in-memory session metadata
+// and disappear on TUI restart.
+//
+// The dual-write mirrors the dual-write in the slash handlers
+// (roleCommand, thinkingCommand, compactCommand) and the
+// compaction-notifier boundary write. It exists because the
+// session and thread metadata are two independent stores; they
+// share no auto-sync. The pre-migration junk.WithDefaultMetadata
+// (defaultMeta in app.go) also wrote to the thread's metadata,
+// but Task 2 retires that path — defaultMeta keeps only the role
+// (which is loaded from cfg or an existing stream) since the
+// other static keys are now handled here.
 func seedSession(sess *session.Session, seed sessionSeed) {
 	sess.SetMetadata("cwd", seed.cwd)
 	sess.SetMetadata("git_branch", seed.gitBranch)
 	sess.SetMetadata("thread_id", sess.ID())
 	sess.SetMetadata("tui.pid", seed.tuiPID)
 	sess.SetMetadata("model", seed.model)
+	// Persist the same keys into the thread's metadata. The thread
+	// is the persistent store (what ledger.Repository reads back on
+	// hydration); the slash handler dual-writes both stores for the
+	// same reason. Set on the thread's metadata so a subsequent
+	// Attach rehydrates the values into the thread.
+	thread := sess.Thread()
+	thread.Meta().Set("cwd", seed.cwd)
+	thread.Meta().Set("git_branch", seed.gitBranch)
+	thread.Meta().Set("thread_id", sess.ID())
+	thread.Meta().Set("tui.pid", seed.tuiPID)
+	thread.Meta().Set("model", seed.model)
 }
 
 // statusZoneMapping assigns each status-bar key to a semantic zone.
@@ -1282,43 +1305,31 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, e
 		}, nil
 	}
 
-	// Compute static metadata for all streams.
-	cwd, _ := os.Getwd()
-	shortCwd := cwd
-	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
-		shortCwd = "~" + strings.TrimPrefix(cwd, home)
-	}
-	branchBytes, _ := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
-	branch := strings.TrimSpace(string(branchBytes))
-	if branch == "" {
-		branch = "(not in git repo)"
-	}
-
 	// Session seed for the TUI's status bar (sess.metadata is what
 	// statusFromSession reads; see seedSession). Computed once at
-	// startup and threaded through newJunkBackend. defaultMeta below
-	// keeps writing to thread metadata for compatibility with the
-	// existing junk-based persistence path; Task 2 will fold the
-	// thread write into seedSession and retire defaultMeta.
+	// startup and threaded through newJunkBackend.
 	seed := computeSessionSeed(cfg)
 
+	// defaultMeta now only seeds workshop.role. The static keys
+	// (cwd, git_branch, thread_id, tui.pid, model) are written to
+	// both sess.metadata and the thread's metadata by seedSession;
+	// doing them here too would duplicate the writes. The role key
+	// stays here because the slash handler reads it from the
+	// thread's metadata on SetSession, and cfg.role (the --role
+	// CLI flag) only feeds through this closure.
 	defaultMeta := func(stream *junk.Stream) map[string]string {
-		defaults := map[string]string{
-			"thread_id":  stream.ID(),
-			"cwd":        shortCwd,
-			"git_branch": branch,
-		}
 		role := ""
 		if r, ok := stream.GetMetadata("workshop.role"); ok {
 			role = r
 		} else if cfg.role != "" {
 			role = cfg.role
 		}
-		if role != "" {
-			defaults["workshop.role"] = role
+		if role == "" {
+			return nil
 		}
-		defaults["tui.pid"] = strconv.Itoa(os.Getpid())
-		return defaults
+		return map[string]string{
+			"workshop.role": role,
+		}
 	}
 
 	// Wrap the ReAct processor. Compaction in ore v0.12 is explicit-only

@@ -74,6 +74,55 @@ func TestSeedSession_PopulatesSessionMetadata(t *testing.T) {
 	}
 }
 
+// TestSeedSession_OverwritesExistingValues verifies that seedSession
+// overwrites any pre-existing session metadata. The behavior matches
+// defaultMeta's re-apply-on-Attach semantics (so a /cwd command that
+// pre-seeded an old value gets refreshed, not stale).
+func TestSeedSession_OverwritesExistingValues(t *testing.T) {
+	sess := session.New("thread-xyz", ledger.NewThread())
+	sess.SetMetadata("cwd", "/old/path")
+	sess.SetMetadata("model", "old-model")
+
+	seed := sessionSeed{cwd: "/new/path", gitBranch: "main", tuiPID: "1", model: "new-model"}
+	seedSession(sess, seed)
+
+	if got, want := sess.AllMetadata()["cwd"], "/new/path"; got != want {
+		t.Errorf("cwd = %q, want %q (seed must overwrite)", got, want)
+	}
+	if got, want := sess.AllMetadata()["model"], "new-model"; got != want {
+		t.Errorf("model = %q, want %q (seed must overwrite)", got, want)
+	}
+}
+
+// TestSeedSession_DualWritesToThreadMetadata verifies that seedSession
+// also writes the five static keys to sess.Thread().Meta() so the
+// persistent store (what ledger.Repository reads on hydration)
+// carries them. Without this dual-write, the values would only
+// live in the in-memory session metadata and disappear on TUI
+// restart. The slash handlers use the same dual-write pattern
+// for their mutable keys (role, thinking_level, boundary_info).
+func TestSeedSession_DualWritesToThreadMetadata(t *testing.T) {
+	sess := session.New("thread-persist", ledger.NewThread())
+
+	seed := sessionSeed{
+		cwd:       "/persist/path",
+		gitBranch: "feat/x",
+		tuiPID:    "999",
+		model:     "claude-test",
+	}
+	seedSession(sess, seed)
+
+	thread := sess.Thread()
+	for _, key := range []string{"cwd", "git_branch", "thread_id", "tui.pid", "model"} {
+		if _, ok := thread.Meta().Get(key); !ok {
+			t.Errorf("thread metadata missing key %q", key)
+		}
+	}
+	if got := func() string { v, _ := thread.Meta().Get("model"); return v }(); got != "claude-test" {
+		t.Errorf("thread metadata model = %q, want %q", got, "claude-test")
+	}
+}
+
 func TestNewProvider_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", APIKey: "sk-test"}
 	_, err := newProvider("openai-test", &pc, nil)
