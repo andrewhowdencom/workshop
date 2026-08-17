@@ -27,12 +27,13 @@ import (
 	"time"
 
 	"github.com/andrewhowdencom/ore/agent"
+	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
+	"github.com/andrewhowdencom/ore/junk"
+	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
-	"github.com/andrewhowdencom/ore/junk"
-	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/tool"
 
@@ -413,12 +414,11 @@ type metadataStore interface {
 // path and setting workshop.role to the empty-string sentinel,
 // matching the fresh-thread "no role" state. The clear is idempotent.
 //
-// The role change is communicated to the LLM via the system prompt
-// transform on the next turn: the transform reads the active role
-// file through the resolver, so swapping the resolver's path is
-// sufficient to switch what the LLM sees. No persistent RoleSystem
-// turn is appended to the conversation history — the system prompt
-// itself is the single source of truth for the active role.
+// When the active role actually changes, a `RoleSystem` handoff
+// turn is appended before the resolver and metadata are mutated so
+// the LLM is not "surprised" by its own conversation history
+// produced under a prior role. Submit-before-mutate ordering keeps
+// state consistent on submit failure.
 type roleCommand struct {
 	mu       sync.Mutex
 	rdir     string
@@ -520,9 +520,6 @@ func (c *roleCommand) currentRole() string {
 // role name to stream metadata. An unknown role returns an error so
 // the user sees the failure rather than having their active role
 // silently changed.
-//
-// The role change is reflected in the system prompt on the next
-// turn (via the resolver); no persistent RoleSystem turn is appended.
 func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	args := slash.Fields(cmd.Input)
 	// "help" is reserved as a subcommand so that /role help always
@@ -564,6 +561,16 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 		// of workshop.role in this codebase already gates on
 		// `ok && role != ""`. The operation is idempotent: clearing
 		// a cleared role is a no-op.
+		var prev string
+		if v, ok := c.session.Thread().Meta().Get("workshop.role"); ok {
+			prev = v
+		}
+		if prev != "" {
+			msg := c.roleTransitionMessage(prev, "(none)", "")
+			if _, err := c.session.Submit(ctx, state.RoleSystem, artifact.Text{Content: msg}); err != nil {
+				return slash.Result{}, fmt.Errorf("append role transition turn: %w", err)
+			}
+		}
 		c.resolver.SetPath("")
 		c.writeRole("")
 
@@ -575,7 +582,8 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 		}, nil
 	}
 
-	if _, err := role.LoadRole(c.rdir, name, nil); err != nil {
+	def, err := role.LoadRole(c.rdir, name, nil)
+	if err != nil {
 		return slash.Result{}, fmt.Errorf("role %q not found: %w", name, err)
 	}
 
@@ -584,12 +592,16 @@ func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Com
 	if c.session == nil || c.resolver == nil {
 		return slash.Result{}, fmt.Errorf("no active session")
 	}
-	// Update the resolver's path. The system prompt transform picks
-	// up the new role on the next Transform call. The role metadata
-	// is also written so that /role no-arg, thread export, and the
-	// TUI status zone continue to display the active role name. No
-	// persistent RoleSystem turn is appended; the system prompt
-	// itself is the single source of truth.
+	var prev string
+	if v, ok := c.session.Thread().Meta().Get("workshop.role"); ok {
+		prev = v
+	}
+	if prev != name {
+		msg := c.roleTransitionMessage(prev, name, def.Description)
+		if _, err := c.session.Submit(ctx, state.RoleSystem, artifact.Text{Content: msg}); err != nil {
+			return slash.Result{}, fmt.Errorf("append role transition turn: %w", err)
+		}
+	}
 	c.resolver.SetPath(filepath.Join(c.rdir, name+".md"))
 	c.writeRole(name)
 
@@ -626,14 +638,53 @@ func (c *roleCommand) formatRoleList() string {
 
 	lines := []string{fmt.Sprintf("Role: %s", current), "Available:"}
 	for _, r := range roles {
-		if r.Description != "" {
-			lines = append(lines, fmt.Sprintf("  %s (%s)", r.Name, r.Description))
-		} else {
-			lines = append(lines, fmt.Sprintf("  %s", r.Name))
-		}
+		lines = append(lines, "  "+c.roleLabel(r.Name, r.Description))
 	}
 	lines = append(lines, "Usage: /role <name> | /role none")
 	return strings.Join(lines, "\n")
+}
+
+// roleLabel returns a one-line display label for a role: the bare
+// name when no description is set, or `<name> (<description>)` when
+// one is.
+func (c *roleCommand) roleLabel(name, description string) string {
+	if description == "" {
+		return name
+	}
+	return fmt.Sprintf("%s (%s)", name, description)
+}
+
+// roleTransitionMessage returns the body of the system turn that
+// announces a role change. prevName is "" when this is the first
+// role set on a fresh thread; newName == "(none)" indicates
+// /role none. Otherwise both are non-empty (a switch). The
+// destination role's description is rendered via roleLabel; the
+// previous role's name is rendered bare.
+func (c *roleCommand) roleTransitionMessage(prevName, newName, newDesc string) string {
+	newLabel := c.roleLabel(newName, newDesc)
+
+	var headline, body string
+	switch {
+	case newName == "(none)":
+		headline = fmt.Sprintf("Role cleared: was %s, now (none).", prevName)
+		body = fmt.Sprintf(
+			"Your system prompt has been reset to the default. From this point forward, follow the default prompt and drop behavior carried over from %s. Do not mention this transition unless asked.",
+			prevName,
+		)
+	case prevName == "":
+		headline = fmt.Sprintf("Role set: %s.", newLabel)
+		body = fmt.Sprintf(
+			"Your system prompt has been updated. From this point forward, follow the %s role. Do not mention this transition unless asked.",
+			newName,
+		)
+	default:
+		headline = fmt.Sprintf("Role switched: %s → %s.", prevName, newLabel)
+		body = fmt.Sprintf(
+			"Your system prompt has been updated. From this point forward, follow the %s role and drop behavior carried over from %s. Do not mention this transition unless asked.",
+			newName, prevName,
+		)
+	}
+	return headline + "\n\n" + body
 }
 
 // thinkingCommand handles the /thinking slash command for changing
@@ -763,8 +814,8 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 // ErrTruncatedSummary the buffer is left untouched and the user is
 // told why.
 type compactCommand struct {
-	mu       sync.Mutex
-	session  *session.Session
+	mu      sync.Mutex
+	session *session.Session
 	// stream is the *junk.Stream backing the session. Held so the
 	// handler can write to junk.Thread.Metadata (the store that
 	// junk.Stream.Save persists). session.GetMetadata reads from a
@@ -835,13 +886,13 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	// Record the boundary under the framework's key. The dual-write
 	// is load-bearing, mirroring roleCommand.writeRole and
 	// thinkingCommand.writeLevel:
-//
-//   - thread.Metadata is what junk.Stream.Save persists to
-//     disk. Without this, /compact's effect would not survive
-//     a TUI restart.
-//   - session.SetMetadata drives the TUI's readBoundaryFromSession
-//     (see x/conduit/tui/tui.go), which checks
-//     session.GetMetadata.
+	//
+	//   - thread.Metadata is what junk.Stream.Save persists to
+	//     disk. Without this, /compact's effect would not survive
+	//     a TUI restart.
+	//   - session.SetMetadata drives the TUI's readBoundaryFromSession
+	//     (see x/conduit/tui/tui.go), which checks
+	//     session.GetMetadata.
 	encoded, err := compaction.EncodeBoundaryInfo(info)
 	if err != nil {
 		return slash.Result{}, fmt.Errorf("encode boundary info: %w", err)
@@ -1060,8 +1111,8 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		// user has dropped into .agents/skills or ~/.agents/skills.
 		// Composition pattern: x/tool/skills/doc.go.
 		var discoverers []skills.Discoverer
-		discoverers = append(discoverers, skills.BuiltInSkills)        // ore: writing-skills
-		discoverers = append(discoverers, subagent.BuiltInSkills)      // workshop: subagent-authoring
+		discoverers = append(discoverers, skills.BuiltInSkills)                     // ore: writing-skills
+		discoverers = append(discoverers, subagent.BuiltInSkills)                   // workshop: subagent-authoring
 		discoverers = append(discoverers, skills.NewFSDiscoverer(".agents/skills")) // repo-local
 		if homeDir, err := os.UserHomeDir(); err == nil {
 			discoverers = append(discoverers, skills.NewFSDiscoverer(filepath.Join(homeDir, ".agents", "skills"))) // user-global
