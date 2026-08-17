@@ -143,8 +143,22 @@ type slashHandlers []slashHandler
 // handlers (so it can bind them to the session on every Build via
 // SetSession). The handlers live here rather than in a global so
 // their lifetime is tied to the TUI session's lifetime.
+//
+// The stream field carries the *junk.Stream that backs the session.
+// It is set at factory construction by the caller (see
+// buildManager / RunTUI) and used in two places:
+//
+//  1. Build calls f.stream.SetMetadata (via compactCommand) so the
+//     boundary info it writes persists across turns.
+//  2. SaveThread exposes the stream's Save for the lifecycle
+//     persistence pump; this is what Task 3 of the kill-junk
+//     migration retains so persistence works until Task 4 replaces
+//     it with ledger.Repository.SaveTurn.
+//
+// In Task 4 the stream field is removed entirely and the factory
+// takes a saveFn callback instead.
 type tuiEngineFactory struct {
-	mgr         *junk.Manager
+	stream      *junk.Stream
 	stepFactory func(*junk.Stream) ([]loop.Option, error)
 	prov        provider.Provider
 	defaultSpec models.Spec
@@ -189,18 +203,14 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 		h.SetSession(sess)
 	}
 
-	stream, err := f.mgr.Get(sess.ID())
-	if err != nil {
-		return nil, fmt.Errorf("engine: lookup stream for session %s: %w", sess.ID(), err)
-	}
 	// Bind the stream to compactCommand so the boundary info it
 	// writes survives junk.Stream.Save. Other handlers (role,
 	// thinking, analytics) don't need the stream.
 	if cc, ok := findHandler[*compactCommand](f.handlers); ok {
-		cc.SetStream(stream)
+		cc.SetStream(f.stream)
 	}
 
-	opts, err := f.stepFactory(stream)
+	opts, err := f.stepFactory(f.stream)
 	if err != nil {
 		return nil, fmt.Errorf("engine: build step options: %w", err)
 	}
@@ -242,6 +252,36 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 		agent.WithTracer(f.tracer),
 		agent.WithStep(step),
 	), nil
+}
+
+// SaveThread persists the thread backing the session. It is the
+// persistence half of the runTUIEngine lifecycle pump; the
+// lifecycle "done" event the engine emits (one per handled event
+// on success) triggers a save. Pre-bump, junk.Manager's worker
+// persisted on every turn; this restores that behavior. The save
+// is best-effort because failing to persist is not a fatal error
+// for an interactive TUI session — the user can retry by typing.
+//
+// This wraps junk.Stream.Save. In Task 4 of the kill-junk
+// migration, this method is replaced by a ledger.Repository-driven
+// journal append (see Task 4's plan).
+func (f *tuiEngineFactory) SaveThread() error {
+	if f.stream == nil {
+		return fmt.Errorf("save thread: stream not set")
+	}
+	return f.stream.Save()
+}
+
+// SetStream binds the *junk.Stream backing the session to the
+// factory. It is called once per session, from RunTUI, after
+// junkBackend.CreateSession resolves the stream. Build then uses
+// f.stream for the compact handler's SetStream and the
+// stepFactory; SaveThread uses it for persistence. This removes
+// the per-event mgr.Get(sess.ID()) lookup that Block 2's migration
+// discarded: the stream is resolved once per session, not once
+// per dequeued event.
+func (f *tuiEngineFactory) SetStream(stream *junk.Stream) {
+	f.stream = stream
 }
 
 // Close drains every pending per-turn step. Each step.Close closes
@@ -287,7 +327,6 @@ func runTUIEngine(
 	sess *session.Session,
 	tuiConduit *tui.TUI,
 	factory *tuiEngineFactory,
-	stream *junk.Stream,
 ) error {
 	// Bind slash handlers to the session BEFORE the TUI starts so
 	// slash commands (e.g. /role, /thinking) work on a fresh
@@ -296,9 +335,6 @@ func runTUIEngine(
 	// when the engine processes an inference event — so without
 	// this pre-bind, the user gets "no active session" on their
 	// first /role attempt.
-	if cc, ok := findHandler[*compactCommand](factory.handlers); ok {
-		cc.SetStream(stream)
-	}
 	for _, h := range factory.handlers {
 		h.SetSession(sess)
 	}
@@ -401,7 +437,7 @@ func runTUIEngine(
 			if !ok || le.Phase != "done" {
 				continue
 			}
-			if err := stream.Save(); err != nil {
+			if err := factory.SaveThread(); err != nil {
 				slog.Warn("save thread failed", "err", err)
 			}
 		}

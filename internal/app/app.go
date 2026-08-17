@@ -409,16 +409,20 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
 	})
 
-	// Look up the *junk.Stream backing the session. The stream is
-	// the persistence handle — runTUIEngine calls stream.Save()
-	// after every turn to restore the pre-bump junk.Manager save
-	// behavior.
+	// Look up the *junk.Stream backing the session and bind it to
+	// the factory. The stream is the persistence handle —
+	// runTUIEngine's persistence pump calls factory.SaveThread()
+	// (which delegates to stream.Save()) after every turn to
+	// restore the pre-bump junk.Manager save behavior. The stream
+	// is also bound to compactCommand by the factory's Build so
+	// the boundary info it writes persists.
 	stream, err := mgr.Get(tuiSess.ID())
 	if err != nil {
 		return fmt.Errorf("lookup TUI stream: %w", err)
 	}
+	factory.SetStream(stream)
 
-	return runTUIEngine(ctx, tuiSess, tuiImpl, factory, stream)
+	return runTUIEngine(ctx, tuiSess, tuiImpl, factory)
 }
 
 // RunHTTP initializes and starts the HTTP web UI application.
@@ -1357,13 +1361,18 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, sessionSeed, e
 	// to the session via SetSession so each /slash invocation sees
 	// the active session's metadata.
 	tuiFactory := &tuiEngineFactory{
-		mgr:         mgr,
 		stepFactory: stepFactory,
 		prov:        prov,
 		defaultSpec: defaultSpec,
 		tracer:      tracer,
 		slashReg:    slashReg,
 		handlers:    slashHandlers{rc, cc, tc, ac},
+		// stream is set by RunTUI after junkBackend.CreateSession
+		// resolves the *junk.Stream for the session. Build uses it
+		// for the compact handler's SetStream and the stepFactory;
+		// SaveThread uses it for persistence. In Task 4 of the
+		// kill-junk migration, this field is removed and persistence
+		// is driven by ledger.Repository instead.
 	}
 
 	return mgr, tuiFactory, seed, nil

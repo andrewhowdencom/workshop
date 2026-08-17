@@ -93,7 +93,7 @@ func newTestEngine(t *testing.T) (*junk.Manager, *tuiEngineFactory, *session.Ses
 	require.NotNil(t, sess, "session.New returned nil")
 
 	factory := &tuiEngineFactory{
-		mgr:         mgr,
+		stream:      stream,
 		stepFactory: func(stream *junk.Stream) ([]loop.Option, error) { return []loop.Option{}, nil },
 		prov:        prov,
 		defaultSpec: models.Spec{Name: "echo"},
