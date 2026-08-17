@@ -139,6 +139,35 @@ The web chat UI is available at `http://localhost:8080/` (or the configured addr
 go run ./cmd/workshop --thread <uuid>
 ```
 
+### Resume the most recent session in the current directory
+
+```bash
+go run ./cmd/workshop --resume
+```
+
+`--resume` reads a per-directory pointer file (under
+`$XDG_DATA_HOME/workshop/by-cwd/`) and attaches to the most recent
+session that ran in the current working directory. The pointer is
+written automatically each time the TUI exits cleanly, so after one
+`workshop` run in a given directory, subsequent invocations from
+that directory can be resumed with `--resume`.
+
+`--resume` and `--thread` are mutually exclusive. To bypass
+directory scoping (e.g. resume a session started in a different
+directory), use `--thread <uuid>` directly. If the pointer file
+references a thread whose JSON has been deleted, `--resume` errors
+with a message pointing at the pointer path so the file can be
+removed with `rm`.
+
+On TUI exit, a copy-pasteable hint is printed to stderr so the
+next `workshop` invocation can pick up where the previous one
+left off:
+
+```
+To resume this session:
+  workshop --resume
+```
+
 ### `workshop thread export`
 
 ```bash
@@ -439,6 +468,7 @@ cobra flags, because the names are dynamic.
 | `--all` | — | `false` | Walk all pages of `workshop thread list` in a single call; suppress the `--next` hint |
 | `--days` | — | `30` | Lookback period in days for `workshop thread analytics` (store-wide form) |
 | `--thread` | `WORKSHOP_THREAD` | — | Existing thread UUID to resume |
+| `--resume` | — | `false` | Resume the most recent session for the current working directory. Mutually exclusive with `--thread`. The pointer file is written automatically on TUI exit and lives at `$XDG_DATA_HOME/workshop/by-cwd/<sha256hex(cwd)>`. |
 | `--log-level` | `WORKSHOP_LOG_LEVEL` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `--http.addr` | `WORKSHOP_HTTP_ADDR` | `:8080` | TCP address for the HTTP server (http command only) |
 | `--pprof` | `WORKSHOP_PPROF` | `false` | Enable the pprof debug server |
