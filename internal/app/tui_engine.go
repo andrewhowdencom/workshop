@@ -76,6 +76,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"runtime"
 	"sync"
 
@@ -91,6 +92,8 @@ import (
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	slash "github.com/andrewhowdencom/ore/x/slash"
+
+	"github.com/andrehowdencom/workshop/internal/resume"
 )
 
 // slashHandler is the narrow interface the factory needs from
@@ -433,6 +436,24 @@ func runTUIEngine(
 	// through the session's step into the subscription channel.
 	<-pumpDone
 	<-lifecycleDone
+
+	// On clean exit, persist this session as the most recent for
+	// the cwd it ran in (so `workshop --resume` from the same
+	// directory picks it up) and print a copy-pasteable hint to
+	// stderr. The hint lands in the user's scrollback AFTER the
+	// TUI's alt screen has been torn down, which is exactly when
+	// they need it: they've just quit. The pointer file write is
+	// best-effort: failure is logged but does not change the exit
+	// code, because the user's primary intent (running workshop
+	// in this directory) succeeded.
+	if startErr == nil {
+		if cwd, _ := sess.GetMetadata("cwd"); cwd != "" {
+			if err := resume.Track(cwd, sess.ID()); err != nil {
+				slog.Warn("write resume pointer failed", "err", err)
+			}
+		}
+		fmt.Fprintln(os.Stderr, resume.FormatHint())
+	}
 
 	return startErr
 }
