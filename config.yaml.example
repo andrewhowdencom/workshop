@@ -70,6 +70,12 @@ store:
   dir: ""
 telemetry:
   traces:
-    endpoint: "http://localhost:4318"   # OTLP/HTTP endpoint; empty = disabled
+    # OTLP/HTTP endpoint including the signal path. The exporter does not
+    # append /v1/traces automatically, so include it explicitly. Jaeger
+    # all-in-one: "http://localhost:4318/v1/traces". Empty = disabled.
+    endpoint: "http://localhost:4318/v1/traces"
   metrics:
-    endpoint: "http://localhost:4318"   # OTLP/HTTP endpoint; empty = disabled
+    # OTLP/HTTP endpoint including the signal path. Prometheus 3.x:
+    # "http://localhost:9090/api/v1/otlp/v1/metrics" (requires
+    # --web.enable-otlp-receiver). Empty = disabled.
+    endpoint: "http://localhost:9090/api/v1/otlp/v1/metrics"
