@@ -100,20 +100,11 @@ import (
 // surface the factory uses on every Build.
 type slashHandler interface {
 	SetSession(sess *session.Session)
-}
-
-// findHandler returns the first handler in hs whose concrete type
-// is T. Used by the factory to call type-specific methods like
-// compactCommand.SetStream. Returns (handler, true) on a match;
-// (zero, false) if no handler of that type is registered.
-func findHandler[T slashHandler](hs slashHandlers) (T, bool) {
-	var zero T
-	for _, h := range hs {
-		if v, ok := h.(T); ok {
-			return v, true
-		}
-	}
-	return zero, false
+	// Close releases per-handler resources held across the session's
+	// lifetime. compactCommand (which holds an agent) implements
+	// this; the others accept it as a no-op. Task 5 adds the
+	// method so the factory can close handlers uniformly on shutdown.
+	Close() error
 }
 
 // slashHandlers is a slice of slashHandler, bound as a group on
@@ -201,13 +192,6 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	// intercept slash commands today and skips this.
 	for _, h := range f.handlers {
 		h.SetSession(sess)
-	}
-
-	// Bind the stream to compactCommand so the boundary info it
-	// writes survives junk.Stream.Save. Other handlers (role,
-	// thinking, analytics) don't need the stream.
-	if cc, ok := findHandler[*compactCommand](f.handlers); ok {
-		cc.SetStream(f.stream)
 	}
 
 	opts, err := f.stepFactory(f.stream)

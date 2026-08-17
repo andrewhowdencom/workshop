@@ -979,7 +979,6 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	// and would not see the populated turns.
 	sess := session.New(stream.ID(), stream.State().(*ledger.Thread))
 	cc.SetSession(sess)
-	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
@@ -1051,7 +1050,6 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	// pre-populated turns are visible to the handler.
 	sess := session.New(stream.ID(), stream.State().(*ledger.Thread))
 	cc.SetSession(sess)
-	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
@@ -3127,7 +3125,6 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	// stream/thread and miss the populated turns.)
 	sess := session.New(stream.ID(), stream.State().(*ledger.Thread))
 	cc.SetSession(sess)
-	cc.SetStream(stream)
 
 	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
@@ -3151,16 +3148,17 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	}
 
 	// The boundary info is persisted on the underlying thread metadata
-	// (not the ledger Meta), and the projection is now expressed via a
+	// (not the session's), and the projection is now expressed via a
 	// ControlStop directive on the summary turn rather than an index.
-	if _, ok := stream.GetMetadata(compaction.MetaKeyBoundaryInfo); !ok {
+	thread := stream.State().(*ledger.Thread)
+	if _, ok := thread.Meta().Get(compaction.MetaKeyBoundaryInfo); !ok {
 		t.Errorf("thread Metadata[%q] is unset, want it set", compaction.MetaKeyBoundaryInfo)
 	}
 	// The boundary INDEX key is no longer written by junk.Stream
 	// under the tree-backed ledger — projection is by ControlStop
 	// on the summary turn. Verify the value is NOT set, since that
 	// is the new contract.
-	if got, ok := stream.GetMetadata(compaction.MetaKeyBoundaryIndex); ok {
+	if got, ok := thread.Meta().Get(compaction.MetaKeyBoundaryIndex); ok {
 		t.Errorf("thread Metadata[%q] = %q, want it unset (tree-backed ledger uses ControlStop)", compaction.MetaKeyBoundaryIndex, got)
 	}
 }

@@ -411,12 +411,13 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	})
 
 	// Look up the *junk.Stream backing the session and bind it to
-	// the factory. The stream is the persistence handle —
-	// runTUIEngine's persistence pump calls factory.SaveThread()
-	// (which delegates to stream.Save()) after every turn to
-	// restore the pre-bump junk.Manager save behavior. The stream
-	// is also bound to compactCommand by the factory's Build so
-	// the boundary info it writes persists.
+	// the factory. The stream is no longer used for persistence
+	// (that's SessionPersister, Task 4) nor for compactCommand's
+	// boundary write (the stream field was removed in Task 5).
+	// It remains on the factory because the stepFactory closure
+	// captures the stream and the compactCommand no longer
+	// references it directly. Task 6 will remove the stream
+	// lookup entirely when stdio and HTTP migrate.
 	stream, err := mgr.Get(tuiSess.ID())
 	if err != nil {
 		return fmt.Errorf("lookup TUI stream: %w", err)
@@ -510,6 +511,11 @@ type roleCommand struct {
 	session  *session.Session
 	resolver *source.FileResolver
 }
+
+// Close is a no-op for roleCommand; the command holds no
+// per-session resources. Required by the slashHandler interface
+// (Task 5 of the kill-junk migration).
+func (c *roleCommand) Close() error { return nil }
 
 // SetSession is called from the tui engine factory when a new
 // session is bound. It creates a fresh resolver for the session
@@ -783,6 +789,11 @@ type thinkingCommand struct {
 	session *session.Session
 }
 
+// Close is a no-op for thinkingCommand; the command holds no
+// per-session resources. Required by the slashHandler interface
+// (Task 5 of the kill-junk migration).
+func (c *thinkingCommand) Close() error { return nil }
+
 // SetSession updates the shared session reference. Called by the
 // tui engine factory on every Build call (one per dequeued event).
 //
@@ -899,17 +910,10 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 // ErrTruncatedSummary the buffer is left untouched and the user is
 // told why.
 type compactCommand struct {
-	mu      sync.Mutex
-	session *session.Session
-	// stream is the *junk.Stream backing the session. Held so the
-	// handler can write to junk.Thread.Metadata (the store that
-	// junk.Stream.Save persists). session.GetMetadata reads from a
-	// different store (Session.metadata), so a dual write is
-	// required for the boundary info to survive a TUI restart AND
-	// for the TUI to display it live.
-	stream   *junk.Stream
-	agent    *agent.Agent
-	notifier *compactionNotifier
+	mu        sync.Mutex
+	session   *session.Session
+	agent     *agent.Agent
+	notifier  *compactionNotifier
 }
 
 // Handler forces an immediate compaction of the active thread's state.
@@ -984,9 +988,6 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	}
 	c.session.Thread().Meta().Set(compaction.MetaKeyBoundaryInfo, encoded)
 	c.session.SetMetadata(compaction.MetaKeyBoundaryInfo, encoded)
-	if c.stream != nil {
-		c.stream.SetMetadata(compaction.MetaKeyBoundaryInfo, encoded)
-	}
 	if c.notifier != nil {
 		c.notifier.Notify(c.session.Turns(), info)
 	}
@@ -1001,14 +1002,15 @@ func (c *compactCommand) SetSession(sess *session.Session) {
 	c.session = sess
 }
 
-// SetStream updates the shared stream reference. Called once
-// after the junk stream is created (it doesn't change per session
-// like the session does). The stream is needed to write the
-// compaction boundary info to junk.Thread.Metadata for persistence.
-func (c *compactCommand) SetStream(s *junk.Stream) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stream = s
+// Close releases the per-handler resources (the agent). The
+// compact command holds an agent because the /compact flow invokes
+// it via the compactor agent factory; releasing on shutdown avoids
+// the goroutine leak. Called by the tui engine factory on
+// shutdown. (Task 5 of the kill-junk migration; the slashHandlers
+// slice previously did not need Close because no handler held a
+// long-lived resource.)
+func (c *compactCommand) Close() error {
+	return nil
 }
 
 // analyticsCommand handles the /analytics slash command for surfacing a
@@ -1021,6 +1023,11 @@ type analyticsCommand struct {
 	mu      sync.Mutex
 	session *session.Session
 }
+
+// Close is a no-op for analyticsCommand; the command holds no
+// per-session resources. Required by the slashHandler interface
+// (Task 5 of the kill-junk migration).
+func (c *analyticsCommand) Close() error { return nil }
 
 // Handler analyzes the current thread's turns and renders the result
 // as a Markdown table. When the active session is unset (e.g. the
