@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/andrehowdencom/ore/junk"
+	"github.com/andrehowdencom/workshop/internal/resume"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/workshop/internal/app"
 	"github.com/andrewhowdencom/workshop/internal/telemetry"
@@ -37,6 +40,7 @@ func init() {
 	rootCmd.PersistentFlags().Int("compaction.max-tokens", 100000, "Per-invocation output budget for /compact, forwarded to compaction.Summarize via models.Spec.MaxOutputTokens (0 = use the ore/compaction framework default, 8192)")
 
 	rootCmd.Flags().String("thread", "", "Existing thread UUID to resume")
+	rootCmd.Flags().Bool("resume", false, "Resume the most recent session for the current directory (mutually exclusive with --thread)")
 
 	setupViper(viper.GetViper())
 	if err := loadViperConfig(viper.GetViper()); err != nil {
@@ -276,8 +280,54 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		cwd = d
 	}
 
+	// Resolve --resume before assembling options. --resume reads the
+	// per-cwd pointer file (see internal/resume) and substitutes the
+	// discovered thread id for --thread. --resume and --thread are
+	// mutually exclusive; the user can always pass --thread <uuid>
+	// directly to bypass cwd scoping (the escape hatch).
+	threadID := viper.GetString("thread")
+	if viper.GetBool("resume") {
+		if threadID != "" {
+			return fmt.Errorf("--resume and --thread are mutually exclusive")
+		}
+		resolved, err := resume.ResolveFromCwd(cwd)
+		if err != nil {
+			return fmt.Errorf("read resume pointer: %w", err)
+		}
+		if resolved == "" {
+			fmt.Fprintln(os.Stderr, "No resumable sessions in this directory.")
+			return fmt.Errorf("no resumable session in this directory")
+		}
+		// The pointer file may reference a thread whose JSON has been
+		// deleted out from under it. Surface a specific error pointing
+		// at the broken pointer file so the user can `rm` it or pick
+		// a different UUID via --thread.
+		storeDir := viper.GetString("store.dir")
+		if storeDir == "" {
+			storeDir = defaultStoreDir()
+		}
+		store, err := junk.NewJSONStore(storeDir)
+		if err != nil {
+			return fmt.Errorf("open thread store: %w", err)
+		}
+		if _, err := store.Get(resolved); err != nil {
+			pointerPath := filepath.Join(resume.PointerDir(), resume.HashCwd(cwd))
+			if errors.Is(err, junk.ErrThreadNotFound) {
+				return fmt.Errorf(
+					"pointer file points to missing thread %s\n"+
+						"The pointer file at %s references this session, but the thread file is missing.\n"+
+						"Use --thread <uuid> to resume a different session, or clear the broken pointer:\n"+
+						"  rm %s",
+					resolved, pointerPath, pointerPath,
+				)
+			}
+			return fmt.Errorf("verify thread %s: %w", resolved, err)
+		}
+		threadID = resolved
+	}
+
 	opts := []app.Option{
-		app.WithThreadID(viper.GetString("thread")),
+		app.WithThreadID(threadID),
 		app.WithDefaultProviderName(defaultName),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithWorkingDir(cwd),
