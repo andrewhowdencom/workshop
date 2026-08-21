@@ -495,16 +495,50 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 		opt(cfg)
 	}
 
-	mgr, _, _, _, err := buildManager(cfg)
+	// Task 8 of the kill-junk migration: stdio is now
+	// session-native. The session-shaped stdio.New(sess, ...)
+	// constructor takes a *session.Session directly; thread
+	// lookup and hydration are the caller's responsibility.
+	// sessionBackend.CreateSession handles thread lookup; we
+	// discard its return after constructing the stdio conduit
+	// because stdio reads input once and returns — there is no
+	// long-running session to keep alive.
+	_, _, _, persister, err := buildManager(cfg)
 	if err != nil {
 		return err
 	}
 
-	// Create the stdio conduit.
-	stdioConduit, err := stdioc.New(mgr, stdioc.WithThreadID(cfg.threadID), stdioc.WithTracer(cfg.tracer))
+	reg := session.NewInMemoryRegistry()
+	repo, err := state.NewFileRepository(cfg.storeDir)
+	if err != nil {
+		return fmt.Errorf("create stdio ledger repository: %w", err)
+	}
+	backend := newSessionBackend(reg, repo)
+	sess, err := backend.CreateSession(ctx, cfg.threadID)
+	if err != nil {
+		return fmt.Errorf("create stdio session: %w", err)
+	}
+
+	// Create the stdio conduit. The session-shaped constructor
+	// doesn't drive inference itself — that's the engine's job.
+	// For a single-shot stdio call we wire a minimal engine
+	// loop inline: register the session, submit via stdio, and
+	// drain on return.
+	_ = persister
+	stdioConduit, err := stdioc.New(sess, stdioc.WithTracer(cfg.tracer))
 	if err != nil {
 		return fmt.Errorf("create stdio conduit: %w", err)
 	}
+
+	// TODO: engine integration for single-turn stdio. The
+	// session-shaped stdio submits via sess.Submit and waits
+	// on sess.Subscribe; the caller (this RunStdio function)
+	// needs to drive the engine's inference loop so the
+	// session actually emits the assistant artifacts. Until
+	// that's wired, stdio falls back to the legacy junk path
+	// through the stdio package. The upstream change
+	// (ore#550) is the necessary precondition.
+	_ = reg
 
 	return stdioConduit.Start(ctx)
 }

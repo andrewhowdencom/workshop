@@ -24,8 +24,6 @@ github.com/andrewhowdencom/ore/x/conduit v0.2.0 h1:UWXxVRVl0VH93rtVgVYUZtj7lX9hP
 github.com/andrewhowdencom/ore/x/conduit v0.2.0/go.mod h1:83aDeFABkaP1x98A9jxkqIr3zN4XsiprPnpAxHGpPFw=
 github.com/andrewhowdencom/ore/x/conduit/http v0.9.0 h1:N4EvKRo5u/ZslzB6VQfK18ziwEI9Qs6qI603SQe/jco=
 github.com/andrewhowdencom/ore/x/conduit/http v0.9.0/go.mod h1:EDQPhOjFF/fuVW3l4O3kSsPPHov5Edf2WEKkIcTtzww=
-github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.7 h1:uySF1jYi/UnKx49LxcaH4ar1Zlbbm/4IgK6CUTS6V6Y=
-github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.7/go.mod h1:8C+GfErxR/hSkE76QGOYBOQDiSmpE1pC/IsNwjM5lms=
 github.com/andrewhowdencom/ore/x/conduit/tui v0.12.10 h1:kNqEgIr8AERRvLvXghVnVuZ+OomfbkhqB/9wMtEHywc=
 github.com/andrewhowdencom/ore/x/conduit/tui v0.12.10/go.mod h1:ql/K5Mle1ZsP3Pqvi/E0b9oLfCbQEIU5WhupdXr5gP8=
 github.com/andrewhowdencom/ore/x/export v1.0.0 h1:svH2RkykBj49uI/0ykhrdpczqW0uprBDIlQHs3fZlWs=
