@@ -121,4 +121,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/andrewhowdencom/ore/x/conduit/stdio => /home/andrewhowdencom/Development/ore-feat-stdio-session/x/conduit/stdio
+replace github.com/andrewhowdencom/ore/x/conduit/stdio => ../ore-feat-stdio-session/x/conduit/stdio

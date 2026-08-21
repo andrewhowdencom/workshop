@@ -334,3 +334,33 @@ Strictly sequential. Each commit depends on the previous (the build must be gree
 - [ ] Every commit's message follows the `Design:` / `Tradeoffs:` / `Justification:` format with a `Co-authored-by:` trailer (`${MODEL}@${HARNESS}.agent`).
 - [ ] Every commit leaves `task validate` clean.
 - [ ] Each commit is independently revertable; `git revert <commit>` produces a green build at the previous state.
+## Final Status (after merge)
+
+Seven commits landed on `feat/kill-junk-migrate-to-session-native`:
+
+| # | Commit | Purpose |
+|---|---|---|
+| 1 | `Seed session metadata at session creation` | Close the info bar bug. |
+| 2 | `Persist static keys to thread metadata via seedSession` | Mirror static keys into thread metadata for restart-survival. |
+| 3 | `Move *junk.Stream lookup into tuiEngineFactory` | Resolve the stream once per session, not once per event. |
+| 4 | `Persist per-turn via ledger.Repository journal append` | New `SessionPersister` in `internal/app/persist.go`. |
+| 5 | `Drop *junk.Stream field from slash handlers` | Slash commands no longer hold junk refs. |
+| 6 | `Replace junkBackend with session-native sessionBackend` | HTTP and TUI go through session-shaped `Backend`. |
+| 7 | `Document migration status: 6 of 8 commits, upstream PR filed` | State document + addendum. |
+| 8 | `Switch RunStdio to session-shaped stdio.New(sess)` | Upstream ore#550 lands; RunStdio drops junk.NewManager. |
+
+End state on workshop production code: **zero `junk.*` references** after the upstream PR merges and is consumed. The remaining `junk.*` references in the workspace are:
+
+- **Test fixtures** (~76 in `app_test.go`, ~7 in `tui_engine_test.go`) — test scaffolding that builds a junk manager with a mock provider. Mechanical rewrite; deferred.
+- **`cmd/workshop/thread.go` thread-listing CLI** (~36 refs) — uses `*junk.Thread` directly via `junk.Store.ListThreads()`. CLI-only; the TUI and HTTP paths are not affected. Deferred.
+
+Validation status:
+- `go test -race ./...` clean.
+- `task lint` clean.
+- `task build` clean.
+- TUI info bar shows `cwd`, `git_branch`, `thread_id`, `tui_pid`, `model` from session creation.
+- TUI and HTTP paths are session-native.
+- Per-turn journal append replaces the legacy snapshot save.
+- Stdio: switched to session-shaped (ore#550).
+
+Known TODO: `RunStdio`'s single-turn inference needs an engine-driven pump (parallel to `runTUIEngine`). The upstream PR enables this; the wiring lands in a follow-up.
