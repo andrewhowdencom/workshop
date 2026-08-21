@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/andrehowdencom/ore/junk"
-	"github.com/andrehowdencom/workshop/internal/resume"
+	"github.com/andrewhowdencom/ore/junk"
+	"github.com/andrewhowdencom/workshop/internal/resume"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/workshop/internal/app"
 	"github.com/andrewhowdencom/workshop/internal/telemetry"
@@ -311,7 +311,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("open thread store: %w", err)
 		}
 		if _, err := store.Get(resolved); err != nil {
-			pointerPath := filepath.Join(resume.PointerDir(), resume.HashCwd(cwd))
+			pointerDir, dirErr := resume.PointerDir()
+			if dirErr != nil {
+				return fmt.Errorf("locate resume pointer dir: %w", dirErr)
+			}
+			pointerPath := filepath.Join(pointerDir, resume.HashCwd(cwd))
 			if errors.Is(err, junk.ErrThreadNotFound) {
 				return fmt.Errorf(
 					"pointer file points to missing thread %s\n"+

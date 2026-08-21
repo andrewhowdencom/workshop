@@ -93,7 +93,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	slash "github.com/andrewhowdencom/ore/x/slash"
 
-	"github.com/andrehowdencom/workshop/internal/resume"
+	"github.com/andrewhowdencom/workshop/internal/resume"
 )
 
 // slashHandler is the narrow interface the factory needs from

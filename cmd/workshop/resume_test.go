@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/andrehowdencom/workshop/internal/resume"
+	"github.com/andrewhowdencom/workshop/internal/resume"
 )
 
 // mutexXDGRoot serializes tests that mutate xdg.DataHome.
