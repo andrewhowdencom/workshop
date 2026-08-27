@@ -2,10 +2,10 @@
 //
 // # Background
 //
-// As of ore v1.x the TUI conduit (x/conduit/tui) follows the
-// session-based contract documented in x/conduit/doc.go:
+// The TUI conduit (x/conduit/tui) follows the session-based contract
+// documented in x/conduit/doc.go:
 //
-//   - tui.New(sess *session.Session, opts ...) (was: tui.New(mgr *junk.Manager, ...))
+//   - tui.New(sess *session.Session, opts ...)
 //
 // The TUI is a "dumb pipe" in this contract: it accepts user input and
 // emits session.Event values on a buffered Events() channel that the
@@ -17,20 +17,10 @@
 //
 // # Why this file exists
 //
-// The previous bump-to-latest migration (commit 26ebace, "Bump all
-// direct deps to latest; adapt to new tui/http API") wired the TUI to
-// a *session.Session via the junkBackend adapter but left the TUI's
-// Events() channel unwired: the package docstring on
-// internal/app/backend.go explicitly noted that "the TUI's emitted
-// channel is not yet pumped into an inference engine, so TUI
-// submissions do not currently reach the manager's worker."
-//
-// That gap is closed here: tuiEngineFactory builds per-turn agents
-// whose emissions are bridged into the session, and runTUIEngine pumps
-// the TUI's outbound events through an engine.Engine. The HTTP and
-// stdio conduits are unchanged — stdio continues to use junk.Manager
-// directly (it predates the engine migration), and HTTP is
-// request-driven (no continuous event loop needed).
+// tuiEngineFactory builds per-turn agents whose emissions are bridged
+// into the session, and runTUIEngine pumps the TUI's outbound events
+// through an engine.Engine. The HTTP and stdio conduits each have
+// their own engine + session wiring; this file is TUI-specific.
 //
 // # Per-turn step, not session step
 //
@@ -41,13 +31,13 @@
 // step would auto-append, and the bridge forward would emit yet again.
 //
 // To avoid that, the factory builds the per-turn step WITHOUT
-// WithState — using the same loop.Options that junk.Manager's worker
-// would have applied (transforms, handlers, spec, tracer) — and
-// registers a synchronous OnEmit callback that forwards every
-// emission to the session's emitter. The OnEmit runs inline inside
-// EventBus.Emit, so by the time step.Turn returns the session's
-// bound state has appended the assistant turn. No double-append,
-// no race between the bridge and the pattern.
+// WithState — using the same loop.Options that the engine factory
+// will apply (transforms, handlers, spec, tracer) — and registers a
+// synchronous OnEmit callback that forwards every emission to the
+// session's emitter. The OnEmit runs inline inside EventBus.Emit, so
+// by the time step.Turn returns the session's bound state has
+// appended the assistant turn. No double-append, no race between the
+// bridge and the pattern.
 //
 // Synchronous forwarding is load-bearing. An asynchronous bridge
 // (Subscribe + goroutine) would race with the pattern's check of
@@ -57,19 +47,19 @@
 //
 // # Persistence
 //
-// Pre-bump, junk.Manager's worker persisted the thread on every turn.
-// Post-bump and pre-this-fix, nothing persisted. runTUIEngine restores
-// that behavior by calling stream.Save() on every LifecycleEvent
-// "done" the engine emits. Save is best-effort; failures are logged
-// at warn level.
+// runTUIEngine restores the pre-bump persistence behaviour by
+// subscribing to LifecycleEvent "done" and appending a journal
+// entry (SaveTurn + UpdateThreadTip) for the latest turn via the
+// supplied ledger.Repository. Persistence is best-effort: failures
+// are logged at warn level.
 //
-// # Slash commands (deferred)
+// # Slash commands
 //
-// Slash commands (junk.WithInterceptor was removed by ore v1.0) are
-// not yet wired in the TUI path. The slash registry's Intercept
-// method is exposed but the workshop's conduits still do not call it
-// before Submit. This is the same deferral called out in
-// internal/app/backend.go; this fix does not change that.
+// Slash interception happens at the session boundary via the
+// workshop's slash.Registry (ore/x/slash). Each event flowing
+// through the event pump is dispatched to slashReg.Intercept before
+// engine.Submit; matched commands are consumed (no inference
+// triggered) and notices are emitted on the session's emitter.
 package app
 
 import (
@@ -83,7 +73,7 @@ import (
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/engine"
-	"github.com/andrewhowdencom/ore/junk"
+	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"go.opentelemetry.io/otel/trace"
@@ -99,16 +89,14 @@ import (
 // slashHandler is the narrow interface the factory needs from
 // each slash command: the ability to bind to a session. The
 // slash.Handler interface (Handle) is implemented separately and
-// bound to slashReg in buildManager; this is just the session-bind
-// surface the factory uses on every Build.
+// bound to slashReg; this is just the session-bind surface the
+// factory uses on every Build.
 type slashHandler interface {
 	SetSession(sess *session.Session)
 }
 
 // findHandler returns the first handler in hs whose concrete type
-// is T. Used by the factory to call type-specific methods like
-// compactCommand.SetStream. Returns (handler, true) on a match;
-// (zero, false) if no handler of that type is registered.
+// is T. Used by the factory to call type-specific methods.
 func findHandler[T slashHandler](hs slashHandlers) (T, bool) {
 	var zero T
 	for _, h := range hs {
@@ -126,10 +114,10 @@ type slashHandlers []slashHandler
 // tuiEngineFactory is the per-session agent.Factory that builds
 // agents for the TUI's session-based inference path.
 //
-// The factory owns the dependencies the agent bundle needs (provider,
-// default spec, tracer) and the workshop's existing stepFactory so
+// The factory owns the dependencies the agent bundle needs
+// (provider, default spec, tracer) and the workshop's stepFactory so
 // the per-turn step carries the same transforms, handlers, and
-// metadata as the junk.Manager-driven worker did pre-bump.
+// metadata as a session-engine-driven worker would.
 //
 // Build is invoked once per dequeued event by engine.Engine. Each
 // call produces a fresh agent with a fresh loop.Step; the agent is
@@ -147,8 +135,7 @@ type slashHandlers []slashHandler
 // SetSession). The handlers live here rather than in a global so
 // their lifetime is tied to the TUI session's lifetime.
 type tuiEngineFactory struct {
-	mgr         *junk.Manager
-	stepFactory func(*junk.Stream) ([]loop.Option, error)
+	stepFactory func(*session.Session) ([]loop.Option, error)
 	prov        provider.Provider
 	defaultSpec models.Spec
 	tracer      trace.Tracer
@@ -163,10 +150,10 @@ type tuiEngineFactory struct {
 	pending []*loop.Step
 }
 
-// Build implements agent.Factory. It looks up the *junk.Stream backing
-// the session, calls the workshop's stepFactory to obtain the
-// configured loop.Options, and constructs a dedicated per-turn step
-// from those options.
+// Build implements agent.Factory. It binds slash handlers to the
+// session before any agent code runs, calls the workshop's
+// stepFactory to obtain the configured loop.Options, and
+// constructs a dedicated per-turn step from those options.
 //
 // The step is intentionally NOT state-bound (see the package
 // docstring on double-append avoidance). Instead, an OnEmit callback
@@ -192,18 +179,7 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 		h.SetSession(sess)
 	}
 
-	stream, err := f.mgr.Get(sess.ID())
-	if err != nil {
-		return nil, fmt.Errorf("engine: lookup stream for session %s: %w", sess.ID(), err)
-	}
-	// Bind the stream to compactCommand so the boundary info it
-	// writes survives junk.Stream.Save. Other handlers (role,
-	// thinking, analytics) don't need the stream.
-	if cc, ok := findHandler[*compactCommand](f.handlers); ok {
-		cc.SetStream(stream)
-	}
-
-	opts, err := f.stepFactory(stream)
+	opts, err := f.stepFactory(sess)
 	if err != nil {
 		return nil, fmt.Errorf("engine: build step options: %w", err)
 	}
@@ -251,7 +227,7 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 // its EventBus/FanOut, releasing the buffered events channel and
 // stopping the FanOut's run goroutine. With the synchronous OnEmit
 // design (see Build), every event has already been forwarded to
-// the session by the time step.Turn returns; Close is purely for
+// the session by the time step.Turn returned; Close is purely for
 // resource cleanup, not for waiting on in-flight bridges.
 //
 // Close is safe to call once; subsequent calls are no-ops because
@@ -290,7 +266,8 @@ func runTUIEngine(
 	sess *session.Session,
 	tuiConduit *tui.TUI,
 	factory *tuiEngineFactory,
-	stream *junk.Stream,
+	eng *engine.Engine,
+	repo ledger.Repository,
 ) error {
 	// Bind slash handlers to the session BEFORE the TUI starts so
 	// slash commands (e.g. /role, /thinking) work on a fresh
@@ -299,30 +276,9 @@ func runTUIEngine(
 	// when the engine processes an inference event — so without
 	// this pre-bind, the user gets "no active session" on their
 	// first /role attempt.
-	if cc, ok := findHandler[*compactCommand](factory.handlers); ok {
-		cc.SetStream(stream)
-	}
 	for _, h := range factory.handlers {
 		h.SetSession(sess)
 	}
-
-	reg := session.NewInMemoryRegistry()
-	if err := reg.Register(sess); err != nil {
-		return fmt.Errorf("register session: %w", err)
-	}
-
-	eng, err := engine.New(reg, factory)
-	if err != nil {
-		return fmt.Errorf("create engine: %w", err)
-	}
-	defer func() {
-		// eng.Close drains active mailboxes; a background context
-		// is used because the caller's ctx may already be
-		// cancelled at this point.
-		if err := eng.Close(context.Background()); err != nil {
-			slog.Warn("engine close", "err", err)
-		}
-	}()
 
 	// 1. Event pump: forward every session.Event from the TUI to
 	// engine.Submit. The TUI emits session.UserMessageEvent when
@@ -337,9 +293,7 @@ func runTUIEngine(
 	// commands are consumed (no inference triggered) and any
 	// notices (e.g. "Role: reviewer") are emitted on the
 	// session's emitter so the user sees the feedback. Unmatched
-	// events fall through unchanged. This is the ore v1.x
-	// replacement for the removed junk.WithInterceptor; the
-	// wiring lives in the application.
+	// events fall through unchanged.
 	//
 	// tuiConduit.Events() returns nil until tuiConduit.Start()
 	// initializes t.events (see x/conduit/tui/tui.go:333). The
@@ -385,12 +339,14 @@ func runTUIEngine(
 		}
 	}()
 
-	// 2. Persistence pump: best-effort save after every lifecycle
-	// "done" event the engine emits (one per handled event on
-	// success). Pre-bump, junk.Manager's worker persisted on every
-	// turn; this restores that behavior. The save is best-effort
-	// because failing to persist is not a fatal error for an
-	// interactive TUI session — the user can retry by typing.
+	// 2. Persistence pump: best-effort journal append after every
+	// lifecycle "done" event the engine emits (one per handled
+	// event on success). Pre-bump, junk.Manager's worker persisted
+	// the entire thread on every turn; this restores that
+	// behaviour via per-turn SaveTurn + UpdateThreadTip journal
+	// entries. The save is best-effort because failing to persist
+	// is not a fatal error for an interactive TUI session — the
+	// user can retry by typing.
 	//
 	// The subscription is closed when sess.Close is called below,
 	// which lets the goroutine drain. Without that, the channel
@@ -404,8 +360,27 @@ func runTUIEngine(
 			if !ok || le.Phase != "done" {
 				continue
 			}
-			if err := stream.Save(); err != nil {
-				slog.Warn("save thread failed", "err", err)
+			thread := sess.Thread()
+			tip := thread.CurrentTip
+			if tip == "" {
+				continue
+			}
+			// AllTurns returns every turn in the thread
+			// (including ones with TraversalControl = skip).
+			// The latest turn is the one whose ID matches
+			// CurrentTip — the engine advances the tip on
+			// every successful turn via step.Turn.
+			turns := thread.AllTurns()
+			if len(turns) == 0 {
+				continue
+			}
+			latest := turns[len(turns)-1]
+			if err := repo.SaveTurn(ctx, sess.ID(), &latest); err != nil {
+				slog.Warn("save turn failed", "err", err)
+				continue
+			}
+			if err := repo.UpdateThreadTip(ctx, sess.ID(), tip); err != nil {
+				slog.Warn("update thread tip failed", "err", err)
 			}
 		}
 	}()

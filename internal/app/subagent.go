@@ -7,16 +7,16 @@ package app
 // The helpers here implement Path B from .plans/add-declarative-subagents.md:
 // a fresh tool.Registry per sub-agent invocation, re-using the parent's
 // (Tool, ToolFunc) closures so behavior (filesystem reads, bash runs,
-// git_commit attribution) operates against the parent's stream.
+// git_commit attribution) operates against the parent's session.
 
 import (
 	"fmt"
 
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/cognitive"
-	"github.com/andrewhowdencom/ore/junk"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
+	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/tool"
 	osubagent "github.com/andrewhowdencom/ore/x/subagent"
 	"github.com/andrewhowdencom/ore/x/provider/anthropic"
@@ -45,14 +45,14 @@ type toolPair struct {
 // sub-agent's per-call registry advertises and handles the same tools
 // the parent has.
 //
-// All tool handlers here close over `stream` (the parent's active
-// conversation), so sub-agent tool calls see the same parent state:
+// All tool handlers here close over `sess` (the parent's active
+// session), so sub-agent tool calls see the same parent state:
 // filesystem operations affect the parent's worktree, bash runs in
 // the parent's working directory, git commits attribute via the
-// parent's stream.
+// parent's session.
 func registerWorkshopTools(
 	registry tool.Registry,
-	stream *junk.Stream,
+	sess *session.Session,
 	defaultProvider ProviderConfig,
 ) (map[string]toolPair, error) {
 	pairs := make(map[string]toolPair)
@@ -90,13 +90,13 @@ func registerWorkshopTools(
 	}
 
 	// Workshop-specific: workspace + git.
-	if err := raw("workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(stream)); err != nil {
+	if err := raw("workspace_create", "Create a new git worktree for isolated development.", createWorkspaceSchema, makeWorkspaceCreateHandler(sess)); err != nil {
 		return nil, err
 	}
-	if err := raw("workspace_destroy", "Remove the git worktree created in this junk.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(stream)); err != nil {
+	if err := raw("workspace_destroy", "Remove the git worktree created in this session.", destroyWorkspaceSchema, makeWorkspaceDestroyHandler(sess)); err != nil {
 		return nil, err
 	}
-	if err := raw("git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(stream, defaultProvider)); err != nil {
+	if err := raw("git_commit", "Commit staged changes with automatic co-author attribution.", gitCommitSchema, makeGitCommitHandler(sess, defaultProvider)); err != nil {
 		return nil, err
 	}
 

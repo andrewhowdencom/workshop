@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,7 +12,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/andrewhowdencom/ore/junk"
+	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/workshop/internal/resume"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/workshop/internal/app"
@@ -298,25 +297,26 @@ func runRoot(cmd *cobra.Command, args []string) error {
 			fmt.Fprintln(os.Stderr, "No resumable sessions in this directory.")
 			return fmt.Errorf("no resumable session in this directory")
 		}
-		// The pointer file may reference a thread whose JSON has been
-		// deleted out from under it. Surface a specific error pointing
-		// at the broken pointer file so the user can `rm` it or pick
-		// a different UUID via --thread.
+		// The pointer file may reference a thread whose journal has
+		// been deleted out from under it. Surface a specific error
+		// pointing at the broken pointer file so the user can `rm` it
+		// or pick a different UUID via --thread.
 		storeDir := viper.GetString("store.dir")
 		if storeDir == "" {
 			storeDir = defaultStoreDir()
 		}
-		store, err := junk.NewJSONStore(storeDir)
+		repo, err := ledger.NewFileRepository(storeDir)
 		if err != nil {
 			return fmt.Errorf("open thread store: %w", err)
 		}
-		if _, err := store.Get(resolved); err != nil {
+		turns, _, err := repo.HydrateThread(context.Background(), resolved)
+		if err != nil || len(turns) == 0 {
 			pointerDir, dirErr := resume.PointerDir()
 			if dirErr != nil {
 				return fmt.Errorf("locate resume pointer dir: %w", dirErr)
 			}
 			pointerPath := filepath.Join(pointerDir, resume.HashCwd(cwd))
-			if errors.Is(err, junk.ErrThreadNotFound) {
+			if err != nil || len(turns) == 0 {
 				return fmt.Errorf(
 					"pointer file points to missing thread %s\n"+
 						"The pointer file at %s references this session, but the thread file is missing.\n"+
