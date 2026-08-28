@@ -29,7 +29,8 @@ import (
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
-	"github.com/andrewhowdencom/ore/junk"
+	"github.com/andrewhowdencom/ore/engine"
+	"github.com/andrewhowdencom/ore/ledger"
 	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
@@ -38,8 +39,9 @@ import (
 	"github.com/andrewhowdencom/ore/tool"
 
 	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
-	"go.opentelemetry.io/otel/trace/noop"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/andrewhowdencom/ore/x/analytics"
 	"github.com/andrewhowdencom/ore/x/compaction"
@@ -292,22 +294,25 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	notifier := &compactionNotifier{}
 	cfg.compactionNotifier = notifier
 
-	mgr, factory, err := buildManager(cfg)
+	setup, err := setupSession(cfg)
 	if err != nil {
 		return err
 	}
 
-	// Create a *session.Session for the TUI. The session-based TUI
-	// contract requires a session; we proxy a fresh session through
-	// the junkBackend adapter so thread state lives in the manager.
-	tuiBackend := newJunkBackend(mgr)
-	tuiSess, err := tuiBackend.CreateSession(ctx, cfg.threadID)
-	if err != nil {
-		return fmt.Errorf("create TUI session: %w", err)
+	// Construct the active session. TUI always creates a fresh
+	// session (TUI never attaches to an existing threadID — the
+	// `--thread` flag selects the threaded entrypoint used by
+	// stdio, not TUI).
+	sess := setup.newSession()
+	if err := setup.registry.Register(sess); err != nil {
+		return fmt.Errorf("register session: %w", err)
 	}
+	setup.seedMetadata(sess)
 
-	// Create the TUI conduit.
-	tuiConduit, err := tui.New(tuiSess,
+	// Build the TUI conduit. The session-based TUI contract
+	// requires a *session.Session; the engine + factory do the
+	// inference behind the scenes.
+	tuiConduit, err := tui.New(sess,
 		tui.WithName("ws"),
 		tui.WithTracer(cfg.tracer),
 		tui.WithStatusZones(statusZoneMapping),
@@ -329,16 +334,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
 	})
 
-	// Look up the *junk.Stream backing the session. The stream is
-	// the persistence handle — runTUIEngine calls stream.Save()
-	// after every turn to restore the pre-bump junk.Manager save
-	// behavior.
-	stream, err := mgr.Get(tuiSess.ID())
-	if err != nil {
-		return fmt.Errorf("lookup TUI stream: %w", err)
-	}
-
-	return runTUIEngine(ctx, tuiSess, tuiImpl, factory, stream)
+	return runTUIEngine(ctx, sess, tuiImpl, setup.factory, setup.engine, setup.repo)
 }
 
 // RunHTTP initializes and starts the HTTP web UI application.
@@ -352,15 +348,16 @@ func RunHTTP(ctx context.Context, opts ...Option) error {
 		cfg.httpAddr = ":8080"
 	}
 
-	mgr, _, err := buildManager(cfg)
+	setup, err := setupSession(cfg)
 	if err != nil {
 		return err
 	}
 
 	// Create the HTTP conduit with web UI enabled. The HTTP
-	// conduit now consumes a Backend interface (ore v1.3.0);
-	// junkBackend adapts *junk.Manager onto that surface.
-	httpConduit, err := httpc.New(newJunkBackend(mgr),
+	// conduit consumes a Backend interface; sessionBackend
+	// adapts the registry/repo/engine onto that surface.
+	httpConduit, err := httpc.New(
+		newSessionBackend(setup.registry, setup.repo, setup.engine),
 		httpc.WithUI(),
 		httpc.WithName("workshop"),
 		httpc.WithAddr(cfg.httpAddr),
@@ -380,13 +377,32 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 		opt(cfg)
 	}
 
-	mgr, _, err := buildManager(cfg)
+	setup, err := setupSession(cfg)
 	if err != nil {
 		return err
 	}
 
-	// Create the stdio conduit.
-	stdioConduit, err := stdioc.New(mgr, stdioc.WithThreadID(cfg.threadID), stdioc.WithTracer(cfg.tracer))
+	// Construct or attach a session.
+	var sess *session.Session
+	if cfg.threadID != "" {
+		sess, err = setup.attachSession(ctx, cfg.threadID)
+		if err != nil {
+			return fmt.Errorf("attach session: %w", err)
+		}
+	} else {
+		sess = setup.newSession()
+	}
+	if err := setup.registry.Register(sess); err != nil {
+		return fmt.Errorf("register session: %w", err)
+	}
+	setup.seedMetadata(sess)
+
+	// Create the stdio conduit. Stdio is session-shaped in ore#550
+	// (verified at ore/x/conduit/stdio/stdio.go:80): it accepts a
+	// *session.Session directly, no manager adapter.
+	stdioConduit, err := stdioc.New(sess,
+		stdioc.WithTracer(cfg.tracer),
+	)
 	if err != nil {
 		return fmt.Errorf("create stdio conduit: %w", err)
 	}
@@ -434,12 +450,12 @@ type roleCommand struct {
 //
 // session-based design: the slash handler reads and writes through
 // the *session.Session directly. Pre-bump the handler held a
-// *junk.Stream, but the post-bump TUI conduit is session-based and
+// The TUI conduit is session-based;
 // slashReg.Intercept threads the session through; making the handler
 // session-only keeps the data flow uniform across conduits.
 //
 // Persistence note: the handler writes to both
-// sess.Thread().Metadata (which junk.Stream.Save persists) and
+// sess.Thread().Metadata (which the journal does not persist) and
 // sess.SetMetadata (which drives the live TUI status zone via
 // PropertiesEvent and seeds this resolver on reload). Writing to
 // only one of the two stores would either lose persistence across
@@ -473,7 +489,7 @@ func (c *roleCommand) Resolver() *source.FileResolver {
 // PropertiesEvent for live status updates. The dual-write is
 // load-bearing:
 //
-//   - sess.Thread().Metadata is what junk.Stream.Save writes to
+//   - sess.Thread().Metadata is no longer journaled;
 //     disk. Without this write, /role would reset across TUI
 //     restarts.
 //   - sess.SetMetadata drives the TUI status zone via
@@ -734,7 +750,7 @@ func (c *thinkingCommand) currentThinkingLevel() models.ThinkingLevel {
 // writeLevel persists the active thinking level in two places and
 // emits a PropertiesEvent for live status updates. The dual-write
 // rationale matches roleCommand.writeRole: thread.Metadata for
-// persistence (junk.Stream.Save), session.metadata for live status
+// persistence (per-turn journal appends), session.metadata for live status
 // (PropertiesEvent).
 //
 // The caller MUST hold c.mu. writeLevel does not lock because the
@@ -810,20 +826,13 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 // compaction is non-destructive and explicitly invoked. The handler
 // calls compaction.Summarize to obtain a single RoleSystem turn
 // carrying both the LLM-facing summary and the artifact.Compaction
-// metadata, then appends it to the stream via AppendTurn. On
+// metadata, then appends it to the session via Submit. On
 // ErrTruncatedSummary the buffer is left untouched and the user is
 // told why.
 type compactCommand struct {
 	mu      sync.Mutex
 	session *session.Session
-	// stream is the *junk.Stream backing the session. Held so the
-	// handler can write to junk.Thread.Metadata (the store that
-	// junk.Stream.Save persists). session.GetMetadata reads from a
-	// different store (Session.metadata), so a dual write is
-	// required for the boundary info to survive a TUI restart AND
-	// for the TUI to display it live.
-	stream   *junk.Stream
-	agent    *agent.Agent
+	agent   *agent.Agent
 	notifier *compactionNotifier
 }
 
@@ -841,7 +850,7 @@ type compactCommand struct {
 // call here — persistence is the responsibility of the runTUIEngine
 // lifecycle pump, which saves on every LifecycleEvent "done" emitted
 // by the engine. The pre-bump handler called stream.Save() inline;
-// that was a junk.Manager-era convenience and is no longer needed
+// that was a pre-migration convenience and is no longer needed
 // here.
 func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
@@ -887,7 +896,7 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	// is load-bearing, mirroring roleCommand.writeRole and
 	// thinkingCommand.writeLevel:
 	//
-	//   - thread.Metadata is what junk.Stream.Save persists to
+	//   - thread.Metadata is not journaled in the new model;
 	//     disk. Without this, /compact's effect would not survive
 	//     a TUI restart.
 	//   - session.SetMetadata drives the TUI's readBoundaryFromSession
@@ -899,9 +908,6 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	}
 	c.session.Thread().Meta().Set(compaction.MetaKeyBoundaryInfo, encoded)
 	c.session.SetMetadata(compaction.MetaKeyBoundaryInfo, encoded)
-	if c.stream != nil {
-		c.stream.SetMetadata(compaction.MetaKeyBoundaryInfo, encoded)
-	}
 	if c.notifier != nil {
 		c.notifier.Notify(c.session.Turns(), info)
 	}
@@ -914,16 +920,6 @@ func (c *compactCommand) SetSession(sess *session.Session) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.session = sess
-}
-
-// SetStream updates the shared stream reference. Called once
-// after the junk stream is created (it doesn't change per session
-// like the session does). The stream is needed to write the
-// compaction boundary info to junk.Thread.Metadata for persistence.
-func (c *compactCommand) SetStream(s *junk.Stream) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.stream = s
 }
 
 // analyticsCommand handles the /analytics slash command for surfacing a
@@ -1001,28 +997,78 @@ func (s *workshopSandbox) WorkingDirectory() string {
 	return ""
 }
 
-// buildManager creates the shared session manager from configuration.
-// It returns the *junk.Manager (used by stdio and HTTP conduits, plus
-// the bulk of the test suite) alongside a *tuiEngineFactory used by
-// the TUI conduit's session-based inference path. Callers that do
-// not need the TUI factory (stdio, HTTP, and the existing test
-// suite) discard the second return value.
-func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
-	// Resolve tracer (noop fallback for tests that don't use WithTracer).
+// sessionSetup is the shared wiring that RunTUI, RunHTTP, and
+// RunStdio all build on top of. It holds the durable store, the
+// active-session registry, the engine that drives inference, and the
+// slash registry + handlers that intercept slash events before they
+// reach the engine.
+//
+// Setup is cheap. Each Run* function constructs one of these per
+// process invocation; the registry is in-memory; the engine only
+// spawns goroutines when Submit is called (so unused setups cost
+// essentially nothing).
+type sessionSetup struct {
+	cfg  *config
+	repo ledger.Repository
+	// registry holds active *session.Session values for the lifetime
+	// of the process. Conduits register the session they drive; the
+	// engine resolves it via Get on every Submit.
+	registry session.Registry
+	// engine drives inference via the factory below. Constructed
+	// once per process so every conduit shares the same per-session
+	// mailbox.
+	engine  *engine.Engine
+	// factory is shared between conduits; TUI uses the slash handler
+	// bindings in Build, stdio and HTTP don't drive slash through
+	// this factory (they surface slash via their own conduits or
+	// not at all), so the bindings are dormant for them.
+	factory *tuiEngineFactory
+	// slashReg is invoked by runTUIEngine on every TUI event
+	// before Submit. Stdio and HTTP don't currently route events
+	// through slashReg.
+	slashReg slash.Registry
+	// handlers are the slash command implementations. They are
+	// session-bound by the factory on every Build (TUI) or not at
+	// all (stdio, HTTP).
+	handlers slashHandlers
+	// defaultSpec is the per-turn model spec captured by the
+	// factory's stepFactory closure.
+	defaultSpec models.Spec
+	// meter is the configured OpenTelemetry meter (or noop fallback)
+	// forwarded into the factory's telemetry.OnEmit hook.
+	meter metric.Meter
+}
+
+// setupSession constructs the shared wiring for one process
+// invocation: it opens the ledger-backed durable store, compiles
+// the named providers, builds the slash command handlers and
+// registry, and instantiates the engine that drives inference.
+//
+// Callers (RunTUI, RunHTTP, RunStdio) then construct or attach a
+// session against the registry and pass it to their conduit.
+//
+// setupSession deliberately does NOT call NewManager/WithDefaultMetadata
+// equivalents — there is no longer a central session orchestrator.
+// Each Run* function constructs its own.
+func setupSession(cfg *config) (*sessionSetup, error) {
 	tracer := cfg.tracer
 	if tracer == nil {
-		tracer = noop.NewTracerProvider().Tracer("")
+		tracer = tracenoop.NewTracerProvider().Tracer("")
+	}
+	meter := cfg.meter
+	if meter == nil {
+		meter = metricnoop.NewMeterProvider().Meter("")
 	}
 
-	// Create thread store.
-	// Keep this fallback in sync with cmd/workshop/defaultStoreDir().
+	// Open the ledger-backed durable store. Keep this fallback in
+	// sync with cmd/workshop/defaultStoreDir().
 	storeDir := cfg.storeDir
 	if storeDir == "" {
 		storeDir = filepath.Join(xdg.DataHome, "workshop", "threads")
 	}
-	store, err := junk.NewJSONStore(storeDir)
+	repo, err := ledger.NewFileRepository(storeDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create JSON store: %w", err)
+		return nil, fmt.Errorf("create ledger repo: %w", err)
 	}
 
 	// Build the providers: validate every defined named provider,
@@ -1031,7 +1077,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 	// when unset).
 	compiled, err := compileProviders(cfg, tracer)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	prov := compiled[cfg.defaultProviderName]
 	compactionName := cfg.compaction.Provider
@@ -1039,25 +1085,16 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		compactionName = cfg.defaultProviderName
 	}
 	if _, ok := compiled[compactionName]; !ok {
-		return nil, nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
+		return nil, fmt.Errorf("compaction.provider %q is not defined in providers: section (defined: %s)", compactionName, definedProviderNamesAsCompiledKeys(compiled))
 	}
 	compactionProv := compiled[compactionName]
 
-	// Build the compact command handler. Compaction is explicit-only
-	// (the /compact slash command); there is no automatic trigger.
-	// The handler is always wired with an agent, so /compact is
-	// always reachable when this manager runs. When MaxTokens is
-	// <= 0, MaxOutputTokens is 0, which the ore/compaction package
-	// treats as "use framework default" (8192).
+	// Build the compaction agent. The handler uses it to drive
+	// single-shot summary turns.
 	ccSpec := models.Spec{
 		Name:            cfg.providers[compactionName].Model,
 		MaxOutputTokens: int64(cfg.compaction.MaxTokens),
 	}
-
-	// The compaction agent carries the compactor's provider + spec +
-	// a SingleShot cognitive pattern. compaction.Summarize wires it
-	// up to drive one inference turn; the agent's lifecycle is owned
-	// by this manager and shared across /compact invocations.
 	ccAgent := agent.New(
 		"compactor",
 		agent.WithProvider(compactionProv),
@@ -1065,26 +1102,16 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		agent.WithPattern(&cognitive.SingleShot{}),
 	)
 
-	// Build the default model spec carried by every loop invocation.
-	// Model identity, sampling params, and output budget live on the
-	// spec in ore v0.12; per-thread overrides flow through stream
-	// metadata (Stream.Spec). The spec is captured by the step
-	// factory closure below.
 	defaultSpec := buildDefaultSpec(cfg.defaultProviderConfig())
 
-	// Create role command handler.
+	// Slash command handlers. The role, thinking, and analytics
+	// handlers read from session metadata; the compact handler
+	// additionally owns a compaction agent.
 	rc := &roleCommand{rdir: role.Dir()}
-
-	// Create compact command handler.
 	cc := &compactCommand{agent: ccAgent, notifier: cfg.compactionNotifier}
-
-	// Create thinking-level command handler.
 	tc := &thinkingCommand{}
-
-	// Create analytics command handler.
 	ac := &analyticsCommand{}
 
-	// Create slash command registry.
 	slashReg := slash.NewRegistry()
 	slashReg.Bind("role", "Show the current role and available roles, or switch to one by name", rc.Handler)
 	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
@@ -1092,18 +1119,13 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 	slashReg.Bind("analytics", "Show per-(kind, source) byte and count breakdown for this thread", ac.Handler)
 	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
 
-	// Step factory: inject system prompt and guardrails as transforms.
-	//
-	// stepFactory is invoked by junk.Manager.Create/Attach for every
-	// stream. The slash handlers (rc, cc, tc, ac) used to be bound
-	// here via SetStream; that wiring moved out. For the TUI path
-	// the tuiEngineFactory binds handlers to the session via
-	// SetSession on every Build. For stdio (which does not
-	// intercept slash commands today) the handlers stay unbound,
-	// which is fine — their state is only consulted when the
-	// slash interceptor invokes them, and stdio has no
-	// interceptor.
-	stepFactory := func(stream *junk.Stream) ([]loop.Option, error) {
+	// stepFactory: inject system prompt and guardrails as
+	// transforms. The factory is invoked once per dequeued event
+	// by the engine (via Build → stepFactory). The slash handlers
+	// are bound to the session by Build before the step runs;
+	// stdio doesn't intercept slash commands and skips the
+	// bindings implicitly (no Build runs for stdio events).
+	stepFactory := func(sess *session.Session) ([]loop.Option, error) {
 		// Set up progressive skill discovery. Built-in skills are
 		// authoritative on name collision — passed first so the framework's
 		// defaults (ore's writing-skills) and workshop's own sub-agent
@@ -1119,8 +1141,7 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		}
 		skillsToolkit := skills.NewToolkit(discoverers...)
 
-		// Build the composable system prompt transform.
-		sp, err := makeSystemPromptTransform(cfg, stream, skillsToolkit, rc.Resolver())
+		sp, err := makeSystemPromptTransform(cfg, sess, skillsToolkit, rc.Resolver())
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -1136,52 +1157,28 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 			return nil, fmt.Errorf("create guardrails transform: %w", err)
 		}
 
-		// Create tool registry with filesystem and bash functions.
 		registry := tool.NewRegistry()
 
-		// Construct the workshop sandbox once and share it between the
-		// parent's registry and the per-sub-agent registries built
-		// below, so sub-agent tool calls resolve against the same
-		// active worktree.
-		wsSandbox := &workshopSandbox{name: "workshop", mr: stream}
+		wsSandbox := &workshopSandbox{name: "workshop", mr: sess}
 
-		// Register the workshop sandbox as the default. It resolves relative
-		// paths against the active git worktree and provides the worktree
-		// directory as the default working directory for command execution.
 		if sbr, ok := registry.(tool.SandboxRegistry); ok {
 			sbr.SetDefaultSandbox(wsSandbox)
 		}
 
-		// Register skills toolkit tools into the registry.
 		if err := skillsToolkit.Register(registry); err != nil {
 			return nil, fmt.Errorf("register skills toolkit: %w", err)
 		}
 
-		// Register the workshop's built-in tools. The returned pairs
-		// map is reused below to wire the same closures into each
-		// sub-agent's per-call registry, so sub-agents inherit the
-		// workshop's full tool set at v1 (Path B in
-		// .plans/add-declarative-subagents.md).
-		parentPairs, err := registerWorkshopTools(registry, stream, cfg.defaultProviderConfig())
+		parentPairs, err := registerWorkshopTools(registry, sess, cfg.defaultProviderConfig())
 		if err != nil {
 			return nil, fmt.Errorf("register workshop tools: %w", err)
 		}
 
-		// Sub-agents: each definition becomes a tool backed by a fresh
-		// *agent.Agent per invocation via x/subagent.AsTool. Loaded
-		// per stream (parallel to skill discovery) so newly-added
-		// sub-agent files are picked up between sessions without
-		// restart.
 		subs, err := subagent.ListSubagentDefinitions(subagent.Dir(), nil)
 		if err != nil {
 			return nil, fmt.Errorf("list subagents: %w", err)
 		}
 
-		// Build a name set of all currently-registered tools so
-		// sub-agent filenames that collide with any registered tool
-		// (built-in or skills toolkit) cause stepFactory to fail
-		// loudly rather than silently overwriting a real tool with
-		// a sub-agent wrapper.
 		registered := make(map[string]bool, len(parentPairs))
 		for _, t := range registry.Tools() {
 			registered[t.Name] = true
@@ -1205,14 +1202,9 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 
 		invokeOpts := buildInvokeOptions(cfg, registry.Tools())
 
-		tel := telemetry.New(cfg.meter)
+		tel := telemetry.New(meter)
 
 		return []loop.Option{
-			// compaction.NewTransform projects the LLM-facing view
-			// through the latest artifact.Compaction in the buffer. It
-			// must sit between the system prompt (which prepends the
-			// persona) and guardrails (which append safety rules on top),
-			// so the summary stands in for everything older than itself.
 			loop.WithTransforms(sp, compaction.NewTransform(), gr),
 			loop.WithHandlers(xtool.NewHandler(registry, xtool.WithTracer(tracer)), usage.New()),
 			loop.WithInvokeOptions(invokeOpts...),
@@ -1222,7 +1214,78 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		}, nil
 	}
 
-	// Compute static metadata for all streams.
+	handlers := slashHandlers{rc, cc, tc, ac}
+	factory := &tuiEngineFactory{
+		stepFactory: stepFactory,
+		prov:        prov,
+		defaultSpec: defaultSpec,
+		tracer:      tracer,
+		slashReg:    slashReg,
+		handlers:    handlers,
+	}
+
+	registry := session.NewInMemoryRegistry()
+	eng, err := engine.New(registry, factory)
+	if err != nil {
+		return nil, fmt.Errorf("create engine: %w", err)
+	}
+
+	return &sessionSetup{
+		cfg:        cfg,
+		repo:       repo,
+		registry:   registry,
+		engine:     eng,
+		factory:    factory,
+		slashReg:   slashReg,
+		handlers:   handlers,
+		defaultSpec: defaultSpec,
+		meter:      meter,
+	}, nil
+}
+
+// newSession constructs a fresh ephemeral *session.Session with a
+// new UUID and an empty ledger thread. The caller is responsible
+// for registering the session in s.registry before driving it.
+func (s *sessionSetup) newSession() *session.Session {
+	id := generateThreadID()
+	thread := ledger.NewThread()
+	return session.New(id, thread)
+}
+
+// attachSession hydrates a thread from the durable store by ID and
+// constructs a *session.Session wrapping it. Returns an error when
+// the thread cannot be hydrated (the underlying HydrateThread
+// reports the cause).
+func (s *sessionSetup) attachSession(ctx context.Context, threadID string) (*session.Session, error) {
+	turns, tip, err := s.repo.HydrateThread(ctx, threadID)
+	if err != nil {
+		return nil, fmt.Errorf("hydrate thread %s: %w", threadID, err)
+	}
+	thread := ledger.NewThread()
+	for _, t := range turns {
+		thread.SaveTurn(t)
+	}
+	thread.SetCurrentTip(tip)
+	return session.New(threadID, thread), nil
+}
+
+// seedMetadata writes the five static info-bar keys into the
+// session's live metadata store. These power the TUI status zone
+// (read via sess.AllMetadata()) and the slash handlers' session
+// resolvers; they are emitted on every SetMetadata call as a
+// PropertiesEvent.
+//
+// Thread metadata (sess.Thread().Meta()) is intentionally NOT
+// seeded here. The ledger's per-turn journal does not capture
+// thread metadata, so a seed there would be misleading; slash
+// handlers that dual-write to thread metadata (e.g. roleCommand)
+// write on demand.
+//
+// The five keys: thread_id, cwd (with home-prefix shortened to ~),
+// git_branch (or "(not in git repo)"), workshop.role (only if
+// already set on the session or via cfg.role), tui.pid, and model
+// (from defaultSpec.Name).
+func (s *sessionSetup) seedMetadata(sess *session.Session) {
 	cwd, _ := os.Getwd()
 	shortCwd := cwd
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
@@ -1234,60 +1297,25 @@ func buildManager(cfg *config) (*junk.Manager, *tuiEngineFactory, error) {
 		branch = "(not in git repo)"
 	}
 
-	defaultMeta := func(stream *junk.Stream) map[string]string {
-		defaults := map[string]string{
-			"thread_id":  stream.ID(),
-			"cwd":        shortCwd,
-			"git_branch": branch,
-		}
-		role := ""
-		if r, ok := stream.GetMetadata("workshop.role"); ok {
-			role = r
-		} else if cfg.role != "" {
-			role = cfg.role
-		}
-		if role != "" {
-			defaults["workshop.role"] = role
-		}
-		defaults["tui.pid"] = strconv.Itoa(os.Getpid())
-		return defaults
+	sess.SetMetadata("thread_id", sess.ID())
+	sess.SetMetadata("cwd", shortCwd)
+	sess.SetMetadata("git_branch", branch)
+
+	role := ""
+	if r, ok := sess.GetMetadata("workshop.role"); ok {
+		role = r
+	} else if s.cfg.role != "" {
+		role = s.cfg.role
+	}
+	if role != "" {
+		sess.SetMetadata("workshop.role", role)
 	}
 
-	// Wrap the ReAct processor. Compaction in ore v0.12 is explicit-only
-	// (the /compact slash command); there is no automatic pre-turn
-	// trigger, so the processor is the framework ReAct processor with
-	// no extra wrapping. The processor receives the per-turn spec from
-	// the session manager (built from Stream.Spec, which itself reads
-	// the per-thread metadata); we forward it to the ReAct pattern as-is.
-	processor := func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return cognitive.NewTurnProcessor(cognitive.ReActFactory, tracer)(ctx, step, st, prov, spec)
+	sess.SetMetadata("tui.pid", strconv.Itoa(os.Getpid()))
+
+	if s.defaultSpec.Name != "" {
+		sess.SetMetadata("model", s.defaultSpec.Name)
 	}
-
-	// Create session manager.
-	mgr := junk.NewManager(store, prov, stepFactory, processor, junk.WithDefaultMetadata(defaultMeta))
-
-	// Build the TUI engine factory. The factory is only consumed
-	// by RunTUI; RunStdio and RunHTTP discard it. The factory
-	// reuses the stepFactory closure so the per-turn step carries
-	// the same transforms, handlers, spec, tracer, and on-emit
-	// callbacks as the junk.Manager-driven worker did pre-bump.
-	//
-	// The factory also owns the slash registry and the slash
-	// handlers. runTUIEngine uses slashReg.Intercept to fire slash
-	// commands before each Submit; factory.Build binds handlers
-	// to the session via SetSession so each /slash invocation sees
-	// the active session's metadata.
-	tuiFactory := &tuiEngineFactory{
-		mgr:         mgr,
-		stepFactory: stepFactory,
-		prov:        prov,
-		defaultSpec: defaultSpec,
-		tracer:      tracer,
-		slashReg:    slashReg,
-		handlers:    slashHandlers{rc, cc, tc, ac},
-	}
-
-	return mgr, tuiFactory, nil
 }
 
 // makeSystemPromptTransform builds the composable system prompt transform for

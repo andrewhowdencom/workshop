@@ -4,11 +4,11 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v1.3.0
+	github.com/andrewhowdencom/ore v1.3.1
 	github.com/andrewhowdencom/ore/x/analytics v0.2.6
 	github.com/andrewhowdencom/ore/x/compaction v0.5.1
 	github.com/andrewhowdencom/ore/x/conduit/http v0.9.0
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.7
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.8
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.10
 	github.com/andrewhowdencom/ore/x/export v1.0.0
 	github.com/andrewhowdencom/ore/x/provider/openai v0.6.5
@@ -79,7 +79,7 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

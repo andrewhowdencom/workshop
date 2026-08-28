@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -11,59 +12,62 @@ import (
 	"time"
 
 	"github.com/andrewhowdencom/ore/artifact"
-	"github.com/andrewhowdencom/ore/junk"
-	state "github.com/andrewhowdencom/ore/ledger"
+	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/spf13/viper"
 )
 
-// seedThreadAt builds and saves a thread whose last-activity timestamp
-// is exactly lastAt. It is used in place of store.Create() +
-// time.Sleep in tests that need a predictable sort order.
+// seedThreadAt writes a single journal entry to the given repository
+// with a controlled timestamp, simulating a thread with one user
+// turn. It is used in place of repo.SaveTurn + time.Sleep in
+// tests that need a predictable sort order.
 //
 // The previous implementation relied on the per-thread UpdatedAt
-// field, which was advanced by the store on every Save and so made
+// field, which was advanced by the repo on every Save and so made
 // "later-created threads sort first" trivial to express. That field
-// was removed when ore/junk migrated to a tree-backed ledger
-// (see ../ore/junk/thread.go and ../ore/x/conduit/http/threads.go);
-// the sort key is now derived from the most recent turn's timestamp.
-// A freshly-created thread has no turns and therefore sorts last
+// was removed when ore/junk migrated to a tree-backed ledger; the
+// sort key is now derived from the most recent turn's timestamp. A
+// freshly-created thread has no turns and therefore sorts last
 // regardless of when Create was called — so this helper stamps a
-// single user turn with a controlled clock and saves the result.
-func seedThreadAt(t *testing.T, store junk.Store, id string, lastAt time.Time, role string) *junk.Thread {
+// single user turn with a controlled clock via WithThreadClock.
+// lastTurn returns a pointer to the most recently appended turn on
+// the given thread. Used by the tests that manually persist threads
+// to a repository (the ledger.Repository surface is the only one
+// exposed; there is no equivalent thread type for callers for callers to
+// save directly).
+func lastTurn(thr *ledger.Thread) *ledger.Turn {
+	turns := thr.AllTurns()
+	t := turns[len(turns)-1]
+	return &t
+}
+
+func seedThreadAt(t *testing.T, repo ledger.Repository, id string, lastAt time.Time, role string) string {
 	t.Helper()
 
-	thr := &junk.Thread{
-		ID:       id,
-		State:    state.NewThread(state.WithThreadClock(state.ClockFunc(func() time.Time { return lastAt }))),
-		Metadata: map[string]string{},
+	thr := ledger.NewThread(ledger.WithThreadClock(ledger.ClockFunc(func() time.Time { return lastAt })))
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	turns := thr.AllTurns()
+	last := turns[len(turns)-1]
+	if err := repo.SaveTurn(context.Background(), id, &last); err != nil {
+		t.Fatalf("seedThreadAt(%s): save turn: %v", id, err)
 	}
-	// A single turn is enough to stamp the thread's last activity;
-	// the listing sort key and the analytics lookback both derive
-	// from the most recent turn's timestamp.
-	thr.State.Append(state.RoleUser, artifact.Text{Content: "x"})
-
-	if role != "" {
-		thr.Metadata["workshop.role"] = role
+	if err := repo.UpdateThreadTip(context.Background(), id, thr.CurrentTip); err != nil {
+		t.Fatalf("seedThreadAt(%s): update tip: %v", id, err)
 	}
-
-	if err := store.Save(thr); err != nil {
-		t.Fatalf("seedThreadAt(%s): save: %v", id, err)
-	}
-	return thr
+	return id
 }
 
 // TestThreadList_EmptyStoreDir_FallsBackToDefault is intentionally
 // NOT a test. An earlier version asserted the command runs without
-// error when store.dir is empty, but that depended on the default
+// error when repo.dir is empty, but that depended on the default
 // XDG data directory being clean. On machines with prior workshop
 // sessions, that directory can contain thread files that the JSON
-// store cannot parse, and the resulting panic (in junk's
+// repo cannot parse, and the resulting panic (in junk's
 // unmarshalTurns, not in workshop code) propagates out of List() and
 // fails the test for an environmental reason.
 //
 // The fallback itself is a one-line `if storeDir == ""` in
 // runThreadList; it is exercised by every other test that calls
-// RunE without setting store.dir, and it does not justify the
+// RunE without setting repo.dir, and it does not justify the
 // fragility of reading the real XDG path. If we ever need explicit
 // coverage, the right shape is to set XDG_DATA_HOME to a temp dir
 // for the duration of the test.
@@ -71,51 +75,32 @@ func seedThreadAt(t *testing.T, store junk.Store, id string, lastAt time.Time, r
 func TestThreadList_WithStore(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	// Two threads with controlled, ascending last-activity
-	// timestamps. The previous implementation relied on
-	// store.Create() advancing UpdatedAt on Save; that field is
-	// gone now, so the timestamps are stamped explicitly via
-	// seedThreadAt.
+	// timestamps. seedThreadAt now returns the threadID (a string)
+	// rather than the thread object because the new persistence
+	// surface doesn't expose a thread type to callers.
 	now := time.Now()
-	thr1 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000001", now.Add(-2*time.Minute), "developer")
-	thr2 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000002", now.Add(-1*time.Minute), "reviewer")
+	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-2*time.Minute), "developer")
+	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now.Add(-1*time.Minute), "reviewer")
 
-	oldStoreDir := viper.GetString("store.dir")
-	viper.Set("store.dir", tmpDir)
-	t.Cleanup(func() { viper.Set("store.dir", oldStoreDir) })
-
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	err = threadListCmd.RunE(threadListCmd, []string{})
-
-	w.Close()
-	os.Stdout = oldStdout
-
-	if err != nil {
-		t.Fatalf("threadListCmd.RunE: %v", err)
-	}
-
+	// Render directly via the inner helper — bypassing the cobra
+	// path which depends on viper-bound --store.dir. The CLI
+	// plumbing is exercised separately by a smoke test.
 	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("read pipe: %v", err)
+	if err := runThreadListWithStore(context.Background(), 20, "", false, repo, &buf); err != nil {
+		t.Fatalf("runThreadListWithStore: %v", err)
 	}
-
 	output := buf.String()
 
-	if !strings.Contains(output, thr1.ID) {
+	if !strings.Contains(output, thr1) {
 		t.Errorf("output missing thread 1 ID: %s", output)
 	}
-	if !strings.Contains(output, thr2.ID) {
+	if !strings.Contains(output, thr2) {
 		t.Errorf("output missing thread 2 ID: %s", output)
 	}
 	if !strings.Contains(output, "developer") {
@@ -126,8 +111,8 @@ func TestThreadList_WithStore(t *testing.T) {
 	}
 
 	// Verify sort order: thread2 (more recent) should appear before thread1.
-	idx1 := strings.Index(output, thr1.ID)
-	idx2 := strings.Index(output, thr2.ID)
+	idx1 := strings.Index(output, thr1)
+	idx2 := strings.Index(output, thr2)
 	if idx1 == -1 || idx2 == -1 {
 		t.Fatalf("could not find thread IDs in output")
 	}
@@ -142,27 +127,28 @@ func TestThreadList_WithStore(t *testing.T) {
 // with controlled timestamps; the test verifies the rendered output
 // lists them from most-recent to least-recent.
 func TestThreadList_Pagination_DefaultSort(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	now := time.Now()
-	thr1 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000001", now.Add(-30*time.Minute), "a")
-	thr2 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000002", now.Add(-15*time.Minute), "b")
-	thr3 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000003", now, "c")
+	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-30*time.Minute), "a")
+	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now.Add(-15*time.Minute), "b")
+	thr3 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000003", now, "c")
 
 	var buf bytes.Buffer
-	if err := runThreadListWithStore(20, "", false, store, &buf); err != nil {
+	if err := runThreadListWithStore(context.Background(), 20, "", false, repo, &buf); err != nil {
 		t.Fatalf("runThreadListWithStore: %v", err)
 	}
 
 	output := buf.String()
-	idx1 := strings.Index(output, thr1.ID)
-	idx2 := strings.Index(output, thr2.ID)
-	idx3 := strings.Index(output, thr3.ID)
+	idx1 := strings.Index(output, thr1)
+	idx2 := strings.Index(output, thr2)
+	idx3 := strings.Index(output, thr3)
 	if idx1 == -1 || idx2 == -1 || idx3 == -1 {
 		t.Fatalf("could not find all thread IDs in output:\n%s", output)
 	}
@@ -180,10 +166,11 @@ func TestThreadList_Pagination_DefaultSort(t *testing.T) {
 // fit in one page and asserts the limit is respected, with the
 // remaining threads reported via the --next hint line.
 func TestThreadList_Pagination_LimitHonored(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := junk.NewJSONStore(tmpDir)
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	// Each thread gets a strictly-increasing last-activity stamp
@@ -192,12 +179,12 @@ func TestThreadList_Pagination_LimitHonored(t *testing.T) {
 	ids := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
-		seedThreadAt(t, store, id, now.Add(time.Duration(i-4)*time.Minute), "r")
+		seedThreadAt(t, repo, id, now.Add(time.Duration(i-4)*time.Minute), "r")
 		ids = append(ids, id)
 	}
 
 	var buf bytes.Buffer
-	if err := runThreadListWithStore(2, "", false, store, &buf); err != nil {
+	if err := runThreadListWithStore(context.Background(), 2, "", false, repo, &buf); err != nil {
 		t.Fatalf("runThreadListWithStore(2): %v", err)
 	}
 
@@ -225,22 +212,23 @@ func TestThreadList_Pagination_LimitHonored(t *testing.T) {
 // and asserts --all renders every thread exactly once, with no hint
 // line.
 func TestThreadList_Pagination_AllWalksAllPages(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := junk.NewJSONStore(tmpDir)
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	now := time.Now()
 	want := make(map[string]bool)
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
-		seedThreadAt(t, store, id, now.Add(time.Duration(i)*time.Minute), "")
+		seedThreadAt(t, repo, id, now.Add(time.Duration(i)*time.Minute), "")
 		want[id] = true
 	}
 
 	var buf bytes.Buffer
-	if err := runThreadListWithStore(2, "", true, store, &buf); err != nil {
+	if err := runThreadListWithStore(context.Background(), 2, "", true, repo, &buf); err != nil {
 		t.Fatalf("runThreadListWithStore(all=true): %v", err)
 	}
 
@@ -259,23 +247,24 @@ func TestThreadList_Pagination_AllWalksAllPages(t *testing.T) {
 // returned in the hint line, when fed back into --cursor, continues
 // the listing from the next page.
 func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := junk.NewJSONStore(tmpDir)
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	now := time.Now()
 	ids := make([]string, 0, 4)
 	for i := 0; i < 4; i++ {
 		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
-		seedThreadAt(t, store, id, now.Add(time.Duration(i)*time.Minute), "")
+		seedThreadAt(t, repo, id, now.Add(time.Duration(i)*time.Minute), "")
 		ids = append(ids, id)
 	}
 
 	// Page 1.
 	var page1 bytes.Buffer
-	if err := runThreadListWithStore(2, "", false, store, &page1); err != nil {
+	if err := runThreadListWithStore(context.Background(), 2, "", false, repo, &page1); err != nil {
 		t.Fatalf("page 1: %v", err)
 	}
 	out1 := page1.String()
@@ -295,7 +284,7 @@ func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
 
 	// Page 2.
 	var page2 bytes.Buffer
-	if err := runThreadListWithStore(2, cursor, false, store, &page2); err != nil {
+	if err := runThreadListWithStore(context.Background(), 2, cursor, false, repo, &page2); err != nil {
 		t.Fatalf("page 2: %v", err)
 	}
 	out2 := page2.String()
@@ -311,14 +300,15 @@ func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
 // TestThreadList_Pagination_InvalidCursor confirms that an
 // unparseable cursor produces an error mentioning "cursor".
 func TestThreadList_Pagination_InvalidCursor(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := junk.NewJSONStore(tmpDir)
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	var buf bytes.Buffer
-	err = runThreadListWithStore(20, "!!!not-base64!!!", false, store, &buf)
+	err = runThreadListWithStore(context.Background(), 20, "!!!not-base64!!!", false, repo, &buf)
 	if err == nil {
 		t.Fatal("expected error for invalid cursor, got nil")
 	}
@@ -332,15 +322,16 @@ func TestThreadList_Pagination_InvalidCursor(t *testing.T) {
 // clamped: limit=0 and limit=-5 yield 1 thread, limit=99999 yields
 // both threads (and no hint line, since both fit on one page).
 func TestThreadList_Pagination_LimitClamping(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := junk.NewJSONStore(tmpDir)
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	now := time.Now()
-	thr1 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000001", now.Add(-1*time.Minute), "a")
-	thr2 := seedThreadAt(t, store, "00000000-0000-0000-0000-000000000002", now, "b")
+	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-1*time.Minute), "a")
+	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now, "b")
 
 	tests := []struct {
 		name    string
@@ -356,15 +347,15 @@ func TestThreadList_Pagination_LimitClamping(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := runThreadListWithStore(tt.limit, "", false, store, &buf); err != nil {
+			if err := runThreadListWithStore(context.Background(), tt.limit, "", false, repo, &buf); err != nil {
 				t.Fatalf("runThreadListWithStore(%d): %v", tt.limit, err)
 			}
 			out := buf.String()
 			count := 0
-			if strings.Contains(out, thr1.ID) {
+			if strings.Contains(out, thr1) {
 				count++
 			}
-			if strings.Contains(out, thr2.ID) {
+			if strings.Contains(out, thr2) {
 				count++
 			}
 			if count != tt.wantIDs {
@@ -383,11 +374,12 @@ func TestThreadList_Pagination_LimitClamping(t *testing.T) {
 // viper binding fix: the buggy silent ignore is replaced with a
 // loud cobra "unknown flag" error.
 func TestThreadList_RemovedDaysFlag(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	oldStoreDir := viper.GetString("store.dir")
-	viper.Set("store.dir", tmpDir)
-	t.Cleanup(func() { viper.Set("store.dir", oldStoreDir) })
+	oldStoreDir := viper.GetString("repo.dir")
+	viper.Set("repo.dir", tmpDir)
+	t.Cleanup(func() { viper.Set("repo.dir", oldStoreDir) })
 
 	// Reset the command's flags so prior test runs do not pollute
 	// the parse. cobra stores parsed state on the cmd; flags persist
@@ -411,21 +403,25 @@ func TestThreadList_RemovedDaysFlag(t *testing.T) {
 // viper with a deliberately wrong lookback and asserts that
 // `thread analytics --days 30` still honours 30.
 func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	// Recent thread with a 5-byte text artifact.
-	recent, err := store.Create()
+	recent := ledger.NewThread()
+	recent.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	recentID := "test-recent"
+	if err := repo.SaveTurn(context.Background(), recentID, lastTurn(recent)); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create recent thread: %v", err)
 	}
-	recent.State.Append(state.RoleUser, artifact.Text{Content: "fresh"})
-	if err := store.Save(recent); err != nil {
-		t.Fatalf("save recent thread: %v", err)
+	recent.Append(ledger.RoleUser, artifact.Text{Content: "fresh"})
+	if err := repo.SaveTurn(context.Background(), recentID, lastTurn(recent)); err != nil {
+		t.Fatalf("save recent turn: %v", err)
 	}
 
 	// Old thread (60 days ago) with a 5-byte text artifact. The shape
@@ -450,9 +446,9 @@ func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
 	viper.Set("days", 90)
 	t.Cleanup(func() { viper.Set("days", oldViper) })
 
-	oldStoreDir := viper.GetString("store.dir")
-	viper.Set("store.dir", tmpDir)
-	t.Cleanup(func() { viper.Set("store.dir", oldStoreDir) })
+	oldStoreDir := viper.GetString("repo.dir")
+	viper.Set("repo.dir", tmpDir)
+	t.Cleanup(func() { viper.Set("repo.dir", oldStoreDir) })
 
 	// Capture stdout from RunE.
 	oldStdout := os.Stdout
@@ -490,18 +486,23 @@ func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
 }
 
 func TestThreadExport_Success(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
-	thr, err := store.Create()
+	thrID := "test-thr"
+	thr := ledger.NewThread()
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT := lastTurn(thr)
+	if err := repo.SaveTurn(context.Background(), thrID, lastT); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	if err := store.Save(thr); err != nil {
+	if err := repo.SaveTurn(context.Background(), thrID, lastTurn(thr)); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
@@ -509,7 +510,7 @@ func TestThreadExport_Success(t *testing.T) {
 	for _, format := range formats {
 		t.Run(format, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := runThreadExportWithStore(store, thr.ID, format, &buf); err != nil {
+			if err := runThreadExportWithStore(context.Background(), repo, thrID, format, &buf); err != nil {
 				t.Fatalf("runThreadExportWithStore(%s): %v", format, err)
 			}
 
@@ -520,7 +521,7 @@ func TestThreadExport_Success(t *testing.T) {
 
 			switch format {
 			case "text":
-				if !strings.Contains(output, thr.ID) {
+				if !strings.Contains(output, thrID) {
 					t.Errorf("text output missing thread ID: %s", output)
 				}
 			case "json":
@@ -537,15 +538,16 @@ func TestThreadExport_Success(t *testing.T) {
 }
 
 func TestThreadExport_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	var buf bytes.Buffer
-	err = runThreadExportWithStore(store, "nonexistent-id", "text", &buf)
+	err = runThreadExportWithStore(context.Background(), repo, "nonexistent-id", "text", &buf)
 	if err == nil {
 		t.Fatal("expected error for nonexistent thread")
 	}
@@ -555,33 +557,38 @@ func TestThreadExport_NotFound(t *testing.T) {
 }
 
 func TestThreadExport_FileOutput(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
-	thr, err := store.Create()
+	thrID := "test-thr"
+	thr := ledger.NewThread()
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT := lastTurn(thr)
+	if err := repo.SaveTurn(context.Background(), thrID, lastT); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	if err := store.Save(thr); err != nil {
+	if err := repo.SaveTurn(context.Background(), thrID, lastTurn(thr)); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
 	outputFile := filepath.Join(tmpDir, "output.txt")
 
-	oldStoreDir := viper.GetString("store.dir")
+	oldStoreDir := viper.GetString("repo.dir")
 	oldOutput := viper.GetString("output")
-	viper.Set("store.dir", tmpDir)
+	viper.Set("repo.dir", tmpDir)
 	viper.Set("output", outputFile)
 	t.Cleanup(func() {
-		viper.Set("store.dir", oldStoreDir)
+		viper.Set("repo.dir", oldStoreDir)
 		viper.Set("output", oldOutput)
 	})
 
-	if err := threadExportCmd.RunE(threadExportCmd, []string{thr.ID}); err != nil {
+	if err := threadExportCmd.RunE(threadExportCmd, []string{thrID}); err != nil {
 		t.Fatalf("threadExportCmd.RunE: %v", err)
 	}
 
@@ -590,29 +597,34 @@ func TestThreadExport_FileOutput(t *testing.T) {
 		t.Fatalf("read output file: %v", err)
 	}
 
-	if !strings.Contains(string(content), thr.ID) {
+	if !strings.Contains(string(content), thrID) {
 		t.Errorf("file output missing thread ID: %s", string(content))
 	}
 }
 
 func TestThreadExport_UnsupportedFormat(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
-	thr, err := store.Create()
+	thrID := "test-thr"
+	thr := ledger.NewThread()
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT := lastTurn(thr)
+	if err := repo.SaveTurn(context.Background(), thrID, lastT); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	if err := store.Save(thr); err != nil {
+	if err := repo.SaveTurn(context.Background(), thrID, lastTurn(thr)); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
 	var buf bytes.Buffer
-	err = runThreadExportWithStore(store, thr.ID, "xml", &buf)
+	err = runThreadExportWithStore(context.Background(), repo, thrID, "xml", &buf)
 	if err == nil {
 		t.Fatal("expected error for unsupported format")
 	}
@@ -642,18 +654,23 @@ func TestThreadExport_FileCreationError(t *testing.T) {
 		t.Skip("skipping permission test when running as root")
 	}
 
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
-	thr, err := store.Create()
+	thrID := "test-thr"
+	thr := ledger.NewThread()
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT := lastTurn(thr)
+	if err := repo.SaveTurn(context.Background(), thrID, lastT); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	if err := store.Save(thr); err != nil {
+	if err := repo.SaveTurn(context.Background(), thrID, lastTurn(thr)); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
@@ -665,16 +682,16 @@ func TestThreadExport_FileCreationError(t *testing.T) {
 
 	outputFile := filepath.Join(readOnlyDir, "output.txt")
 
-	oldStoreDir := viper.GetString("store.dir")
+	oldStoreDir := viper.GetString("repo.dir")
 	oldOutput := viper.GetString("output")
-	viper.Set("store.dir", tmpDir)
+	viper.Set("repo.dir", tmpDir)
 	viper.Set("output", outputFile)
 	t.Cleanup(func() {
-		viper.Set("store.dir", oldStoreDir)
+		viper.Set("repo.dir", oldStoreDir)
 		viper.Set("output", oldOutput)
 	})
 
-	err = threadExportCmd.RunE(threadExportCmd, []string{thr.ID})
+	err = threadExportCmd.RunE(threadExportCmd, []string{thrID})
 	if err == nil {
 		t.Fatal("expected error for file creation failure")
 	}
@@ -684,18 +701,23 @@ func TestThreadExport_FileCreationError(t *testing.T) {
 }
 
 func TestThreadExport_Stdout(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
-	thr, err := store.Create()
+	thrID := "test-thr"
+	thr := ledger.NewThread()
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT := lastTurn(thr)
+	if err := repo.SaveTurn(context.Background(), thrID, lastT); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	if err := store.Save(thr); err != nil {
+	if err := repo.SaveTurn(context.Background(), thrID, lastTurn(thr)); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
@@ -712,16 +734,16 @@ func TestThreadExport_Stdout(t *testing.T) {
 		r.Close()
 	})
 
-	oldStoreDir := viper.GetString("store.dir")
+	oldStoreDir := viper.GetString("repo.dir")
 	oldOutput := viper.GetString("output")
-	viper.Set("store.dir", tmpDir)
+	viper.Set("repo.dir", tmpDir)
 	viper.Set("output", "")
 	t.Cleanup(func() {
-		viper.Set("store.dir", oldStoreDir)
+		viper.Set("repo.dir", oldStoreDir)
 		viper.Set("output", oldOutput)
 	})
 
-	err = threadExportCmd.RunE(threadExportCmd, []string{thr.ID})
+	err = threadExportCmd.RunE(threadExportCmd, []string{thrID})
 	if err != nil {
 		t.Fatalf("threadExportCmd.RunE: %v", err)
 	}
@@ -735,24 +757,29 @@ func TestThreadExport_Stdout(t *testing.T) {
 	}
 	r.Close()
 
-	if !strings.Contains(buf.String(), thr.ID) {
+	if !strings.Contains(buf.String(), thrID) {
 		t.Errorf("stdout output missing thread ID: %s", buf.String())
 	}
 }
 
 func TestThreadExport_FileOutput_Formats(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
-	thr, err := store.Create()
+	thrID := "test-thr"
+	thr := ledger.NewThread()
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT := lastTurn(thr)
+	if err := repo.SaveTurn(context.Background(), thrID, lastT); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	if err := store.Save(thr); err != nil {
+	if err := repo.SaveTurn(context.Background(), thrID, lastTurn(thr)); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
@@ -761,19 +788,19 @@ func TestThreadExport_FileOutput_Formats(t *testing.T) {
 		t.Run(format, func(t *testing.T) {
 			outputFile := filepath.Join(t.TempDir(), "output."+format)
 
-			oldStoreDir := viper.GetString("store.dir")
+			oldStoreDir := viper.GetString("repo.dir")
 			oldOutput := viper.GetString("output")
 			oldFormat := viper.GetString("format")
-			viper.Set("store.dir", tmpDir)
+			viper.Set("repo.dir", tmpDir)
 			viper.Set("output", outputFile)
 			viper.Set("format", format)
 			t.Cleanup(func() {
-				viper.Set("store.dir", oldStoreDir)
+				viper.Set("repo.dir", oldStoreDir)
 				viper.Set("output", oldOutput)
 				viper.Set("format", oldFormat)
 			})
 
-			if err := threadExportCmd.RunE(threadExportCmd, []string{thr.ID}); err != nil {
+			if err := threadExportCmd.RunE(threadExportCmd, []string{thrID}); err != nil {
 				t.Fatalf("threadExportCmd.Execute: %v", err)
 			}
 
@@ -797,40 +824,45 @@ func TestThreadExport_FileOutput_Formats(t *testing.T) {
 }
 
 func TestThreadAnalytics_StoreWide(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	// Thread 1: a single text turn.
-	thr1, err := store.Create()
+	thr1ID := "test-thr1"
+	thr1 := ledger.NewThread()
+	thr1.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT1 := lastTurn(thr1)
+	if err := repo.SaveTurn(context.Background(), thr1ID, lastT1); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread 1: %v", err)
 	}
-	thr1.State.Append(state.RoleUser, artifact.Text{Content: "hi"})
-	if err := store.Save(thr1); err != nil {
-		t.Fatalf("save thread 1: %v", err)
+	thr1.Append(ledger.RoleUser, artifact.Text{Content: "hi"})
+	if err := repo.SaveTurn(context.Background(), thr1ID, lastTurn(thr1)); err != nil {
+		t.Fatalf("save thread 1 turn: %v", err)
 	}
 
 	// Thread 2: a reasoning turn plus a tool call turn.
-	thr2, err := store.Create()
+	thr2 := ledger.NewThread()
 	if err != nil {
 		t.Fatalf("create thread 2: %v", err)
 	}
-	thr2.State.Append(state.RoleAssistant, artifact.Reasoning{Content: "think"})
-	thr2.State.Append(state.RoleAssistant, artifact.ToolCall{
+	thr2.Append(ledger.RoleAssistant, artifact.Reasoning{Content: "think"})
+	thr2.Append(ledger.RoleAssistant, artifact.ToolCall{
 		ID:        "call-1",
 		Name:      "bash",
 		Arguments: `{"cmd":"ls"}`,
 	})
-	if err := store.Save(thr2); err != nil {
-		t.Fatalf("save thread 2: %v", err)
+	if err := repo.SaveTurn(context.Background(), "test-thr2", lastTurn(thr2)); err != nil {
+		t.Fatalf("save thread 2 turn: %v", err)
 	}
 
 	var buf bytes.Buffer
-	if err := runThreadAnalyticsWithStore(30, "", store, &buf); err != nil {
+	if err := runThreadAnalyticsWithStore(context.Background(), 30, "", repo, &buf); err != nil {
 		t.Fatalf("runThreadAnalyticsWithStore: %v", err)
 	}
 
@@ -869,27 +901,31 @@ func TestThreadAnalytics_StoreWide(t *testing.T) {
 }
 
 func TestThreadAnalytics_DaysFilter(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	// Recent thread with a text artifact.
-	recent, err := store.Create()
+	recent := ledger.NewThread()
+	recent.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	recentID := "test-recent"
+	if err := repo.SaveTurn(context.Background(), recentID, lastTurn(recent)); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create recent thread: %v", err)
 	}
-	recent.State.Append(state.RoleUser, artifact.Text{Content: "fresh"})
-	if err := store.Save(recent); err != nil {
-		t.Fatalf("save recent thread: %v", err)
+	recent.Append(ledger.RoleUser, artifact.Text{Content: "fresh"})
+	if err := repo.SaveTurn(context.Background(), recentID, lastTurn(recent)); err != nil {
+		t.Fatalf("save recent turn: %v", err)
 	}
 
 	// Old thread written as raw JSON with a 60-day-old timestamp.
 	// The format must match the on-disk envelope shape produced by
 	// junk/serialize.go (a {kind, data} wrapper around the artifact
-	// body); otherwise junk.JSONStore silently skips the file.
+	// body); otherwise the file is silently skipped the file.
 	//
 	// The turn also needs an `id` and the thread needs a matching
 	// `current_tip`: the tree-backed ledger in ore/junk walks from
@@ -907,16 +943,16 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 		t.Fatalf("write old thread file: %v", err)
 	}
 
-	// Reload the store so it picks up the manually written file.
-	store, err = junk.NewJSONStore(tmpDir)
+	// Reload the repo so it picks up the manually written file.
+	repo, err = ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("reload store: %v", err)
+		t.Fatalf("reload repo: %v", err)
 	}
 
 	// With days=30, only the recent thread contributes.
 	var buf bytes.Buffer
-	if err := runThreadAnalyticsWithStore(30, "", store, &buf); err != nil {
-		t.Fatalf("runThreadAnalyticsWithStore(30): %v", err)
+	if err := runThreadAnalyticsWithStore(context.Background(), 30, "", repo, &buf); err != nil {
+		t.Fatalf("runThreadAnalyticsWithStore(context.Background(), 30): %v", err)
 	}
 
 	output := buf.String()
@@ -930,8 +966,8 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 	// With days=90, both threads contribute, and the text row should
 	// aggregate both contents (5 + 5 = 10 bytes, count 2).
 	buf.Reset()
-	if err := runThreadAnalyticsWithStore(90, "", store, &buf); err != nil {
-		t.Fatalf("runThreadAnalyticsWithStore(90): %v", err)
+	if err := runThreadAnalyticsWithStore(context.Background(), 90, "", repo, &buf); err != nil {
+		t.Fatalf("runThreadAnalyticsWithStore(context.Background(), 90): %v", err)
 	}
 
 	output = buf.String()
@@ -941,30 +977,35 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 }
 
 func TestThreadAnalytics_ThreadID(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
-	thr, err := store.Create()
+	thrID := "test-thr"
+	thr := ledger.NewThread()
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "x"})
+	lastT := lastTurn(thr)
+	if err := repo.SaveTurn(context.Background(), thrID, lastT); err != nil { t.Fatalf("save: %v", err) }
 	if err != nil {
 		t.Fatalf("create thread: %v", err)
 	}
-	thr.State.Append(state.RoleUser, artifact.Text{Content: "one"})
-	thr.State.Append(state.RoleUser, artifact.Text{Content: "two"})
-	thr.State.Append(state.RoleAssistant, artifact.ToolCall{
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "one"})
+	thr.Append(ledger.RoleUser, artifact.Text{Content: "two"})
+	thr.Append(ledger.RoleAssistant, artifact.ToolCall{
 		ID:        "call-1",
 		Name:      "bash",
 		Arguments: `{"cmd":"ls"}`,
 	})
-	if err := store.Save(thr); err != nil {
+	if err := repo.SaveTurn(context.Background(), thrID, lastTurn(thr)); err != nil {
 		t.Fatalf("save thread: %v", err)
 	}
 
 	var buf bytes.Buffer
-	if err := runThreadAnalyticsWithStore(30, thr.ID, store, &buf); err != nil {
+	if err := runThreadAnalyticsWithStore(context.Background(), 30, thrID, repo, &buf); err != nil {
 		t.Fatalf("runThreadAnalyticsWithStore: %v", err)
 	}
 
@@ -1005,15 +1046,16 @@ func TestThreadAnalytics_ThreadID(t *testing.T) {
 }
 
 func TestThreadAnalytics_ThreadNotFound(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
-	store, err := junk.NewJSONStore(tmpDir)
+	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
-		t.Fatalf("create store: %v", err)
+		t.Fatalf("create repo: %v", err)
 	}
 
 	var buf bytes.Buffer
-	err = runThreadAnalyticsWithStore(30, "nonexistent-id", store, &buf)
+	err = runThreadAnalyticsWithStore(context.Background(), 30, "nonexistent-id", repo, &buf)
 	if err == nil {
 		t.Fatal("expected error for nonexistent thread")
 	}

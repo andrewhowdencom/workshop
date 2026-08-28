@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/andrewhowdencom/ore/junk"
 	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/x/analytics"
 	"github.com/andrewhowdencom/ore/x/export"
@@ -20,11 +20,9 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Pagination parameters for `thread list`. Inlined here because the
-// `ore/junk` package split `DefaultPageSize`/`MaxPageSize`/`Paginate` out
-// when `session` was renamed to `junk`; the cursor format is small and
-// stdlib-only, so duplicating it is simpler than depending on the
-// private helper inside `x/conduit/http`.
+// Pagination parameters for `thread list`. The cursor format is small
+// and stdlib-only, so duplicating it is simpler than depending on a
+// private helper.
 const (
 	defaultPageSize = 20
 	maxPageSize     = 100
@@ -42,12 +40,7 @@ var errInvalidCursor = errors.New("invalid pagination cursor")
 // id asc) order.
 //
 // LastAt is the timestamp of the most recent turn in the previous page's
-// last thread (or the zero time for empty threads). The previous wire
-// format carried UpdatedAt per-thread; that field was removed when
-// ore/junk moved thread state to a tree-backed ledger (see
-// ../ore/junk/thread.go and the http conduit's matching migration in
-// ../ore/x/conduit/http/threads.go). The cursor field name was renamed
-// in lockstep.
+// last thread (or the zero time for empty threads).
 type threadCursor struct {
 	Version int       `json:"v"`
 	LastAt  time.Time `json:"l"`
@@ -86,19 +79,23 @@ func decodeThreadCursor(s string) (threadCursor, error) {
 	return c, nil
 }
 
+// listEntry couples a thread's durable identifier with the hydrated
+// ledger.Thread. The CLI listing hydrates the full set on entry,
+// then sorts and paginates the result.
+type listEntry struct {
+	id     string
+	thread *ledger.Thread
+}
+
 // lastActivity returns the timestamp of the most recent turn in the
 // thread. Empty threads return the zero time. The returned time is the
 // conversation's "last activity" — used as the sort key for the
 // thread listing.
-//
-// Replaces the previous per-thread UpdatedAt field, which was removed
-// from the wire format when ore/junk migrated to a tree-backed ledger
-// (see ../ore/junk/thread.go and ../ore/x/conduit/http/threads.go).
-func lastActivity(t *junk.Thread) time.Time {
-	if t == nil || t.State == nil {
+func lastActivity(t *ledger.Thread) time.Time {
+	if t == nil {
 		return time.Time{}
 	}
-	turns := t.State.AllTurns()
+	turns := t.AllTurns()
 	if len(turns) == 0 {
 		return time.Time{}
 	}
@@ -112,7 +109,7 @@ func lastActivity(t *junk.Thread) time.Time {
 // Returns errInvalidCursor when the cursor cannot be decoded. The input
 // slice is sorted in place; the returned page is a sub-slice of the
 // input.
-func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*junk.Thread, nextCursor string, err error) {
+func paginateThreads(entries []listEntry, limit int, cursor string) (page []listEntry, nextCursor string, err error) {
 	if limit < 1 {
 		limit = 1
 	}
@@ -120,7 +117,7 @@ func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*
 		limit = maxPageSize
 	}
 
-	slices.SortFunc(threads, compareThreads)
+	slices.SortFunc(entries, compareEntries)
 
 	start := 0
 	if cursor != "" {
@@ -128,9 +125,9 @@ func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*
 		if err != nil {
 			return nil, "", err
 		}
-		start = len(threads) // default: no items after cursor
-		for i, t := range threads {
-			if threadIsAfterCursor(t, c) {
+		start = len(entries) // default: no items after cursor
+		for i, e := range entries {
+			if entryIsAfterCursor(e, c) {
 				start = i
 				break
 			}
@@ -138,18 +135,18 @@ func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*
 	}
 
 	end := start + limit
-	if end > len(threads) {
-		end = len(threads)
+	if end > len(entries) {
+		end = len(entries)
 	}
 
-	page = threads[start:end]
+	page = entries[start:end]
 
-	if end < len(threads) {
-		last := threads[end-1]
+	if end < len(entries) {
+		last := entries[end-1]
 		next, encErr := (threadCursor{
 			Version: threadCursorVersion,
-			LastAt:  lastActivity(last),
-			ID:      last.ID,
+			LastAt:  lastActivity(last.thread),
+			ID:      last.id,
 		}).encode()
 		if encErr != nil {
 			return nil, "", encErr
@@ -160,14 +157,14 @@ func paginateThreads(threads []*junk.Thread, limit int, cursor string) (page []*
 	return page, nextCursor, nil
 }
 
-// compareThreads orders threads by (last activity desc, id asc). The id
+// compareEntries orders threads by (last activity desc, id asc). The id
 // tiebreaker is required for deterministic pagination across threads
 // that share a timestamp. Empty threads (zero last activity) sort last.
-func compareThreads(a, b *junk.Thread) int {
-	aAt := lastActivity(a)
-	bAt := lastActivity(b)
+func compareEntries(a, b listEntry) int {
+	aAt := lastActivity(a.thread)
+	bAt := lastActivity(b.thread)
 	if aAt.Equal(bAt) {
-		return strings.Compare(a.ID, b.ID)
+		return strings.Compare(a.id, b.id)
 	}
 	if aAt.IsZero() {
 		return 1 // a is empty; b first
@@ -181,11 +178,11 @@ func compareThreads(a, b *junk.Thread) int {
 	return 1
 }
 
-// threadIsAfterCursor reports whether t sorts strictly after the cursor
+// entryIsAfterCursor reports whether e sorts strictly after the cursor
 // position in (last activity desc, id asc) order. Items equal to the
 // cursor are NOT considered "after"; the cursor is exclusive.
-func threadIsAfterCursor(t *junk.Thread, c threadCursor) bool {
-	tAt := lastActivity(t)
+func entryIsAfterCursor(e listEntry, c threadCursor) bool {
+	tAt := lastActivity(e.thread)
 	if tAt.IsZero() {
 		// Empty threads never sort after a real cursor.
 		return false
@@ -197,7 +194,7 @@ func threadIsAfterCursor(t *junk.Thread, c threadCursor) bool {
 	if tAt.Before(c.LastAt) {
 		return true
 	}
-	if tAt.Equal(c.LastAt) && t.ID > c.ID {
+	if tAt.Equal(c.LastAt) && e.id > c.ID {
 		return true
 	}
 	return false
@@ -279,12 +276,12 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read --all: %w", err)
 	}
 
-	store, err := junk.NewJSONStore(storeDir)
+	repo, err := ledger.NewFileRepository(storeDir)
 	if err != nil {
-		return fmt.Errorf("create JSON store: %w", err)
+		return fmt.Errorf("create ledger repo: %w", err)
 	}
 
-	return runThreadListWithStore(limit, cursor, all, store, os.Stdout)
+	return runThreadListWithStore(cmd.Context(), limit, cursor, all, repo, os.Stdout)
 }
 
 // runThreadListWithStore renders a single page of threads (or all
@@ -297,21 +294,15 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 // entry point. limit is the page size (clamped by paginateThreads);
 // cursor is the opaque pagination cursor from a previous call (empty
 // for the first page); all walks the cursor to exhaustion and
-// suppresses the hint. The store is read once into a slice; the
+// suppresses the hint. The repository is read once into a slice; the
 // helper sorts in place and returns sub-slices, so memory cost is
 // O(N) full-thread reads on the first call and O(limit) per
-// subsequent page in --all mode (because paginateThreads is re-called
-// on the same underlying slice, which the caller is responsible for
-// keeping populated).
+// subsequent page in --all mode.
 //
 // The table has three columns: ID, LAST ACTIVITY, ROLE. The "LAST
-// ACTIVITY" column is the timestamp of the most recent turn (see
-// lastActivity). The previous CREATED column was dropped alongside
-// the per-thread CreatedAt field in the same ore/junk wire-format
-// change that removed UpdatedAt; the conversation's temporal data
-// now lives entirely in the turn history.
-func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store, w io.Writer) error {
-	threads, err := store.List()
+// ACTIVITY" column is the timestamp of the most recent turn.
+func runThreadListWithStore(ctx context.Context, limit int, cursor string, all bool, repo ledger.Repository, w io.Writer) error {
+	entries, err := hydrateAllThreads(ctx, repo)
 	if err != nil {
 		return fmt.Errorf("list threads: %w", err)
 	}
@@ -321,7 +312,7 @@ func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store
 
 	current := cursor
 	for {
-		page, next, err := paginateThreads(threads, limit, current)
+		page, next, err := paginateThreads(entries, limit, current)
 		if err != nil {
 			if errors.Is(err, errInvalidCursor) {
 				return fmt.Errorf("invalid --cursor: %w", err)
@@ -329,14 +320,14 @@ func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store
 			return fmt.Errorf("paginate threads: %w", err)
 		}
 
-		for _, thr := range page {
-			role := thr.Metadata["workshop.role"]
-			at := lastActivity(thr)
+		for _, e := range page {
+			role, _ := e.thread.Meta().Get("workshop.role")
+			at := lastActivity(e.thread)
 			last := ""
 			if !at.IsZero() {
 				last = at.Format("2006-01-02 15:04")
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", thr.ID, last, role)
+			fmt.Fprintf(tw, "%s\t%s\t%s\n", e.id, last, role)
 		}
 
 		if all {
@@ -359,15 +350,53 @@ func runThreadListWithStore(limit int, cursor string, all bool, store junk.Store
 	return tw.Flush()
 }
 
+// hydrateAllThreads lists every thread ID in the repo and hydrates
+// each one. Threads that fail to hydrate are silently skipped
+// (matching the prior List behavior which tolerated unreadable files).
+func hydrateAllThreads(ctx context.Context, repo ledger.Repository) ([]listEntry, error) {
+	ids, err := repo.ListThreadIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]listEntry, 0, len(ids))
+	for _, id := range ids {
+		thread, err := hydrateOne(ctx, repo, id)
+		if err != nil || thread == nil {
+			continue
+		}
+		entries = append(entries, listEntry{id: id, thread: thread})
+	}
+	return entries, nil
+}
+
+// hydrateOne reconstructs a *ledger.Thread from the repo's journal
+// for the given id. Returns (nil, nil) when the journal has no
+// entries (the equivalent of the no-sentinel "not found" check).
+func hydrateOne(ctx context.Context, repo ledger.Repository, id string) (*ledger.Thread, error) {
+	turns, tip, err := repo.HydrateThread(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(turns) == 0 && tip == "" {
+		return nil, nil
+	}
+	thread := ledger.NewThread()
+	for _, t := range turns {
+		thread.SaveTurn(t)
+	}
+	thread.SetCurrentTip(tip)
+	return thread, nil
+}
+
 func runThreadExport(cmd *cobra.Command, args []string) error {
 	storeDir := viper.GetString("store.dir")
 	if storeDir == "" {
 		storeDir = defaultStoreDir()
 	}
 
-	store, err := junk.NewJSONStore(storeDir)
+	repo, err := ledger.NewFileRepository(storeDir)
 	if err != nil {
-		return fmt.Errorf("create JSON store: %w", err)
+		return fmt.Errorf("create ledger repo: %w", err)
 	}
 
 	format := viper.GetString("format")
@@ -383,18 +412,21 @@ func runThreadExport(cmd *cobra.Command, args []string) error {
 		w = f
 	}
 
-	return runThreadExportWithStore(store, args[0], format, w)
+	return runThreadExportWithStore(cmd.Context(), repo, args[0], format, w)
 }
 
-func runThreadExportWithStore(store junk.Store, id, format string, w io.Writer) error {
-	thread, err := store.Get(id)
-	if errors.Is(err, junk.ErrThreadNotFound) {
-		return fmt.Errorf("thread not found: %s", id)
-	} else if err != nil {
+// runThreadExportWithStore hydrates the named thread and renders it
+// in the requested format.
+func runThreadExportWithStore(ctx context.Context, repo ledger.Repository, id, format string, w io.Writer) error {
+	thread, err := hydrateOne(ctx, repo, id)
+	if err != nil {
 		return fmt.Errorf("get thread: %w", err)
 	}
+	if thread == nil {
+		return fmt.Errorf("thread not found: %s", id)
+	}
 
-	t := exportThread(thread)
+	t := exportThread(id, thread)
 	switch format {
 	case "text":
 		return export.Text(w, t)
@@ -407,14 +439,23 @@ func runThreadExportWithStore(store junk.Store, id, format string, w io.Writer) 
 	}
 }
 
-// exportThread lifts the data the exporters need from a *junk.Thread
-// into an export.Thread value. The exporters take the value type to
-// avoid pulling junk into x/export.
-func exportThread(thread *junk.Thread) export.Thread {
+// exportThread lifts the data the exporters need from a hydrated
+// *ledger.Thread into an export.Thread value. The exporters take
+// the value type to avoid pulling ledger into x/export.
+func exportThread(id string, thread *ledger.Thread) export.Thread {
+	// Build a flat metadata map from the thread's Meta accessor.
+	// The thread only exposes Get/Set; we read the keys we know
+	// matter for exporters (currently just "workshop.role"). Any
+	// other keys on the thread are dropped here — the exporters
+	// only surface what the session set explicitly.
+	md := map[string]string{}
+	if role, ok := thread.Meta().Get("workshop.role"); ok {
+		md["workshop.role"] = role
+	}
 	return export.Thread{
-		ID:       thread.ID,
-		Metadata: thread.Metadata,
-		Turns:    thread.State.Turns(),
+		ID:       id,
+		Metadata: md,
+		Turns:    thread.Turns(),
 	}
 }
 
@@ -424,9 +465,9 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 		storeDir = defaultStoreDir()
 	}
 
-	store, err := junk.NewJSONStore(storeDir)
+	repo, err := ledger.NewFileRepository(storeDir)
 	if err != nil {
-		return fmt.Errorf("create JSON store: %w", err)
+		return fmt.Errorf("create ledger repo: %w", err)
 	}
 
 	id := ""
@@ -444,11 +485,12 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read --days: %w", err)
 	}
 
-	return runThreadAnalyticsWithStore(days, id, store, os.Stdout)
+	return runThreadAnalyticsWithStore(cmd.Context(), days, id, repo, os.Stdout)
 }
 
 // runThreadAnalyticsWithStore aggregates per-(kind, source)
-// statistics from the given store and writes a tabwriter table to w.
+// statistics from the given repository and writes a tabwriter
+// table to w.
 //
 // The output table has four columns: KIND, SOURCE, COUNT, BYTES.
 // SOURCE is the originating tool name for tool_call and tool_result
@@ -460,22 +502,24 @@ func runThreadAnalytics(cmd *cobra.Command, args []string) error {
 // (matched against the thread's last-activity timestamp; see
 // lastActivity).
 //
-// This function is read-only by construction: it never calls store.Save
-// or store.Create, and only reads from the store via List / Get.
-func runThreadAnalyticsWithStore(days int, id string, store junk.Store, w io.Writer) error {
+// This function is read-only by construction: it never calls
+// repo.Save* or repo.Update*, and only reads via ListThreadIDs /
+// HydrateThread.
+func runThreadAnalyticsWithStore(ctx context.Context, days int, id string, repo ledger.Repository, w io.Writer) error {
 	var stats []analytics.Stats
 	if id != "" {
-		thread, err := store.Get(id)
-		if errors.Is(err, junk.ErrThreadNotFound) {
-			return fmt.Errorf("thread not found: %s", id)
-		} else if err != nil {
+		thread, err := hydrateOne(ctx, repo, id)
+		if err != nil {
 			return fmt.Errorf("get thread: %w", err)
 		}
-		// Single-thread mode: pass the thread directly. The thread's
-		// State IS the turn-list source; we hand the *ledger.Thread
-		// to AnalyzeThread, which does the whole-scope
-		// tool_call/tool_result join within those turns.
-		stats = analytics.AnalyzeThread(thread.State)
+		if thread == nil {
+			return fmt.Errorf("thread not found: %s", id)
+		}
+		// Single-thread mode: pass the thread directly. The thread
+		// IS the turn-list source; we hand the *ledger.Thread to
+		// AnalyzeThread, which does the whole-scope tool_call/
+		// tool_result join within those turns.
+		stats = analytics.AnalyzeThread(thread)
 	} else {
 		cutoff := time.Now().AddDate(0, 0, -days)
 		// Multi-thread mode: enumerate threads, filter by
@@ -485,16 +529,16 @@ func runThreadAnalyticsWithStore(days int, id string, store junk.Store, w io.Wri
 		// threads, which is the right semantic for a
 		// recency-filtered aggregate.
 		loadFn := func() ([]ledger.Turn, error) {
-			threads, err := store.List()
+			entries, err := hydrateAllThreads(ctx, repo)
 			if err != nil {
 				return nil, err
 			}
 			var all []ledger.Turn
-			for _, thr := range threads {
-				if thr == nil || thr.State == nil {
+			for _, e := range entries {
+				if e.thread == nil {
 					continue
 				}
-				at := lastActivity(thr)
+				at := lastActivity(e.thread)
 				// Empty threads (no turns) and threads with last
 				// activity before the cutoff are both excluded. A
 				// thread whose last activity equals the cutoff
@@ -504,7 +548,7 @@ func runThreadAnalyticsWithStore(days int, id string, store junk.Store, w io.Wri
 				if at.IsZero() || at.Before(cutoff) {
 					continue
 				}
-				all = append(all, thr.State.Turns()...)
+				all = append(all, e.thread.Turns()...)
 			}
 			return all, nil
 		}
