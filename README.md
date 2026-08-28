@@ -29,6 +29,16 @@ The binary lands in `$GOBIN` (default `$(go env GOPATH)/bin`). Add that to your 
 | `workshop thread list` | List persistent threads (paginated, sorted by recency) |
 | `workshop thread export <id>` | Export a thread to stdout or a file (--format text, json, html; --output file) |
 
+> **Note on the on-disk thread format (post-`drop-junk-package` migration):**
+> Threads are persisted as append-only JSONL journals at
+> `$XDG_DATA_HOME/workshop/threads/<uuid>.jsonl` (one entry per line,
+> four transaction types: `add_turn`, `update_tip`, `update_control`,
+> `update_parent`). The previous whole-thread snapshot format
+> (`<uuid>.json`) is no longer written or read. Pre-migration stores
+> are unreadable by the current binary; rebuild from your provider
+> or restore from backup. Role metadata is session-live, not
+> journaled — set `/role` again on restore.
+
 Role files (e.g. `ideation.md`, `build.md`) are loaded from
 `$XDG_DATA_HOME/workshop/roles/` (fallback: `~/.local/share/workshop/roles/`).
 
