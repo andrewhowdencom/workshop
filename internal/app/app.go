@@ -450,12 +450,12 @@ type roleCommand struct {
 //
 // session-based design: the slash handler reads and writes through
 // the *session.Session directly. Pre-bump the handler held a
-// *junk.Stream, but the post-bump TUI conduit is session-based and
+// The TUI conduit is session-based;
 // slashReg.Intercept threads the session through; making the handler
 // session-only keeps the data flow uniform across conduits.
 //
 // Persistence note: the handler writes to both
-// sess.Thread().Metadata (which junk.Stream.Save persists) and
+// sess.Thread().Metadata (which the journal does not persist) and
 // sess.SetMetadata (which drives the live TUI status zone via
 // PropertiesEvent and seeds this resolver on reload). Writing to
 // only one of the two stores would either lose persistence across
@@ -489,7 +489,7 @@ func (c *roleCommand) Resolver() *source.FileResolver {
 // PropertiesEvent for live status updates. The dual-write is
 // load-bearing:
 //
-//   - sess.Thread().Metadata is what junk.Stream.Save writes to
+//   - sess.Thread().Metadata is no longer journaled;
 //     disk. Without this write, /role would reset across TUI
 //     restarts.
 //   - sess.SetMetadata drives the TUI status zone via
@@ -750,7 +750,7 @@ func (c *thinkingCommand) currentThinkingLevel() models.ThinkingLevel {
 // writeLevel persists the active thinking level in two places and
 // emits a PropertiesEvent for live status updates. The dual-write
 // rationale matches roleCommand.writeRole: thread.Metadata for
-// persistence (junk.Stream.Save), session.metadata for live status
+// persistence (per-turn journal appends), session.metadata for live status
 // (PropertiesEvent).
 //
 // The caller MUST hold c.mu. writeLevel does not lock because the
@@ -850,7 +850,7 @@ type compactCommand struct {
 // call here — persistence is the responsibility of the runTUIEngine
 // lifecycle pump, which saves on every LifecycleEvent "done" emitted
 // by the engine. The pre-bump handler called stream.Save() inline;
-// that was a junk.Manager-era convenience and is no longer needed
+// that was a pre-migration convenience and is no longer needed
 // here.
 func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
@@ -896,7 +896,7 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	// is load-bearing, mirroring roleCommand.writeRole and
 	// thinkingCommand.writeLevel:
 	//
-	//   - thread.Metadata is what junk.Stream.Save persists to
+	//   - thread.Metadata is not journaled in the new model;
 	//     disk. Without this, /compact's effect would not survive
 	//     a TUI restart.
 	//   - session.SetMetadata drives the TUI's readBoundaryFromSession

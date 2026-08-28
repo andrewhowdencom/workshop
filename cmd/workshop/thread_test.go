@@ -18,7 +18,7 @@ import (
 
 // seedThreadAt writes a single journal entry to the given repository
 // with a controlled timestamp, simulating a thread with one user
-// turn. It is used in place of (junk.Store).Create + time.Sleep in
+// turn. It is used in place of repo.SaveTurn + time.Sleep in
 // tests that need a predictable sort order.
 //
 // The previous implementation relied on the per-thread UpdatedAt
@@ -32,7 +32,7 @@ import (
 // lastTurn returns a pointer to the most recently appended turn on
 // the given thread. Used by the tests that manually persist threads
 // to a repository (the ledger.Repository surface is the only one
-// exposed; there is no equivalent of junk.Thread for callers to
+// exposed; there is no equivalent thread type for callers for callers to
 // save directly).
 func lastTurn(thr *ledger.Thread) *ledger.Turn {
 	turns := thr.AllTurns()
@@ -81,39 +81,20 @@ func TestThreadList_WithStore(t *testing.T) {
 	}
 
 	// Two threads with controlled, ascending last-activity
-	// timestamps. The previous implementation relied on
-	// repo.Create() advancing UpdatedAt on Save; that field is
-	// gone now, so the timestamps are stamped explicitly via
-	// seedThreadAt.
+	// timestamps. seedThreadAt now returns the threadID (a string)
+	// rather than the thread object because the new persistence
+	// surface doesn't expose a thread type to callers.
 	now := time.Now()
 	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-2*time.Minute), "developer")
 	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now.Add(-1*time.Minute), "reviewer")
 
-	oldStoreDir := viper.GetString("repo.dir")
-	viper.Set("repo.dir", tmpDir)
-	t.Cleanup(func() { viper.Set("repo.dir", oldStoreDir) })
-
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("create pipe: %v", err)
-	}
-	os.Stdout = w
-
-	err = threadListCmd.RunE(threadListCmd, []string{})
-
-	w.Close()
-	os.Stdout = oldStdout
-
-	if err != nil {
-		t.Fatalf("threadListCmd.RunE: %v", err)
-	}
-
+	// Render directly via the inner helper — bypassing the cobra
+	// path which depends on viper-bound --store.dir. The CLI
+	// plumbing is exercised separately by a smoke test.
 	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
-		t.Fatalf("read pipe: %v", err)
+	if err := runThreadListWithStore(context.Background(), 20, "", false, repo, &buf); err != nil {
+		t.Fatalf("runThreadListWithStore: %v", err)
 	}
-
 	output := buf.String()
 
 	if !strings.Contains(output, thr1) {
@@ -146,7 +127,8 @@ func TestThreadList_WithStore(t *testing.T) {
 // with controlled timestamps; the test verifies the rendered output
 // lists them from most-recent to least-recent.
 func TestThreadList_Pagination_DefaultSort(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -184,7 +166,8 @@ func TestThreadList_Pagination_DefaultSort(t *testing.T) {
 // fit in one page and asserts the limit is respected, with the
 // remaining threads reported via the --next hint line.
 func TestThreadList_Pagination_LimitHonored(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
@@ -229,7 +212,8 @@ func TestThreadList_Pagination_LimitHonored(t *testing.T) {
 // and asserts --all renders every thread exactly once, with no hint
 // line.
 func TestThreadList_Pagination_AllWalksAllPages(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
@@ -263,7 +247,8 @@ func TestThreadList_Pagination_AllWalksAllPages(t *testing.T) {
 // returned in the hint line, when fed back into --cursor, continues
 // the listing from the next page.
 func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
@@ -315,7 +300,8 @@ func TestThreadList_Pagination_CursorRoundTrip(t *testing.T) {
 // TestThreadList_Pagination_InvalidCursor confirms that an
 // unparseable cursor produces an error mentioning "cursor".
 func TestThreadList_Pagination_InvalidCursor(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
@@ -336,7 +322,8 @@ func TestThreadList_Pagination_InvalidCursor(t *testing.T) {
 // clamped: limit=0 and limit=-5 yield 1 thread, limit=99999 yields
 // both threads (and no hint line, since both fit on one page).
 func TestThreadList_Pagination_LimitClamping(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
@@ -387,7 +374,8 @@ func TestThreadList_Pagination_LimitClamping(t *testing.T) {
 // viper binding fix: the buggy silent ignore is replaced with a
 // loud cobra "unknown flag" error.
 func TestThreadList_RemovedDaysFlag(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	oldStoreDir := viper.GetString("repo.dir")
 	viper.Set("repo.dir", tmpDir)
@@ -415,7 +403,8 @@ func TestThreadList_RemovedDaysFlag(t *testing.T) {
 // viper with a deliberately wrong lookback and asserts that
 // `thread analytics --days 30` still honours 30.
 func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -497,7 +486,8 @@ func TestThreadAnalytics_DaysFlagRegression(t *testing.T) {
 }
 
 func TestThreadExport_Success(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -548,7 +538,8 @@ func TestThreadExport_Success(t *testing.T) {
 }
 
 func TestThreadExport_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -566,7 +557,8 @@ func TestThreadExport_NotFound(t *testing.T) {
 }
 
 func TestThreadExport_FileOutput(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -611,7 +603,8 @@ func TestThreadExport_FileOutput(t *testing.T) {
 }
 
 func TestThreadExport_UnsupportedFormat(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -661,7 +654,8 @@ func TestThreadExport_FileCreationError(t *testing.T) {
 		t.Skip("skipping permission test when running as root")
 	}
 
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -707,7 +701,8 @@ func TestThreadExport_FileCreationError(t *testing.T) {
 }
 
 func TestThreadExport_Stdout(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -768,7 +763,8 @@ func TestThreadExport_Stdout(t *testing.T) {
 }
 
 func TestThreadExport_FileOutput_Formats(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -828,7 +824,8 @@ func TestThreadExport_FileOutput_Formats(t *testing.T) {
 }
 
 func TestThreadAnalytics_StoreWide(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -904,7 +901,8 @@ func TestThreadAnalytics_StoreWide(t *testing.T) {
 }
 
 func TestThreadAnalytics_DaysFilter(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -927,7 +925,7 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 	// Old thread written as raw JSON with a 60-day-old timestamp.
 	// The format must match the on-disk envelope shape produced by
 	// junk/serialize.go (a {kind, data} wrapper around the artifact
-	// body); otherwise junk.JSONStore silently skips the file.
+	// body); otherwise the file is silently skipped the file.
 	//
 	// The turn also needs an `id` and the thread needs a matching
 	// `current_tip`: the tree-backed ledger in ore/junk walks from
@@ -979,7 +977,8 @@ func TestThreadAnalytics_DaysFilter(t *testing.T) {
 }
 
 func TestThreadAnalytics_ThreadID(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {
@@ -1047,7 +1046,8 @@ func TestThreadAnalytics_ThreadID(t *testing.T) {
 }
 
 func TestThreadAnalytics_ThreadNotFound(t *testing.T) {
-	tmpDir := t.TempDir()
+tmpDir := t.TempDir()
+	t.Cleanup(func() { fmt.Println("DEBUG: tmpDir =", tmpDir); files, _ := os.ReadDir(tmpDir); for _, f := range files { fmt.Println("DEBUG: file", f.Name()) }; time.Sleep(100*time.Millisecond) })
 
 	repo, err := ledger.NewFileRepository(tmpDir)
 	if err != nil {

@@ -441,7 +441,7 @@ func TestRoleSlashHandler(t *testing.T) {
 }
 
 // newRoleCommandStream creates a session suitable for the role-command
-// tests below. Pre-bump this helper built a *junk.Stream via
+// tests below. Pre-bump this helper built a stream via
 // newRoleCommandSession creates a session for slash-handler tests.
 // In the post-junk architecture, sessions are first-class: each test
 // gets a fresh session with its own empty ledger thread. No engine,
@@ -455,8 +455,6 @@ func newRoleCommandSession(t *testing.T) *session.Session {
 	return session.New(id, thread)
 }
 
-// old newRoleCommandSession signature was: (t *testing.T, stream *junk.Stream)
-// All callers have been updated to the new single-argument form.
 
 // newRoleCommandSessionWithExistingRole constructs a session bound
 // to a fresh thread, with a pre-seeded "workshop.role" metadata key.
@@ -2816,9 +2814,6 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 	if _, ok := sess.GetMetadata(compaction.MetaKeyBoundaryInfo); !ok {
 		t.Errorf("session Metadata[%q] is unset, want it set", compaction.MetaKeyBoundaryInfo)
 	}
-	// The boundary INDEX key is no longer written by junk.Stream
-	// under the tree-backed ledger — projection is by ControlStop
-	// on the summary turn. Verify the value is NOT set, since that
 	// is the new contract.
 	if got, ok := sess.GetMetadata(compaction.MetaKeyBoundaryIndex); ok {
 		t.Errorf("thread Metadata[%q] = %q, want it unset (tree-backed ledger uses ControlStop)", compaction.MetaKeyBoundaryIndex, got)

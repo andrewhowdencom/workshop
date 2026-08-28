@@ -341,7 +341,7 @@ func runTUIEngine(
 
 	// 2. Persistence pump: best-effort journal append after every
 	// lifecycle "done" event the engine emits (one per handled
-	// event on success). Pre-bump, junk.Manager's worker persisted
+	// event on success). Pre-migration, the manager worker persisted
 	// the entire thread on every turn; this restores that
 	// behaviour via per-turn SaveTurn + UpdateThreadTip journal
 	// entries. The save is best-effort because failing to persist

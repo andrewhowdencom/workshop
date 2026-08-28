@@ -371,7 +371,7 @@ func hydrateAllThreads(ctx context.Context, repo ledger.Repository) ([]listEntry
 
 // hydrateOne reconstructs a *ledger.Thread from the repo's journal
 // for the given id. Returns (nil, nil) when the journal has no
-// entries (the equivalent of junk.ErrThreadNotFound).
+// entries (the equivalent of the no-sentinel "not found" check).
 func hydrateOne(ctx context.Context, repo ledger.Repository, id string) (*ledger.Thread, error) {
 	turns, tip, err := repo.HydrateThread(ctx, id)
 	if err != nil {
