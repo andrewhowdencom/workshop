@@ -36,9 +36,7 @@ import (
 
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/artifact"
-	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/engine"
-	"github.com/andrewhowdencom/ore/junk"
 	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
@@ -64,43 +62,36 @@ func (p *echoProvider) Invoke(ctx context.Context, s ledger.State, spec models.S
 }
 
 // newTestEngine builds the full tuiEngineFactory wiring against an
-// in-memory junk store. The stepFactory is minimal (no transforms,
+// in-memory ledger repo. The stepFactory is minimal (no transforms,
 // no handlers) because the tests below verify the bridge and
 // engine-pump path, not the workshop's full transform pipeline.
 //
-// Returns the *junk.Manager (so tests can inspect provider calls),
-// the *tuiEngineFactory, the *session.Session wrapping the
-// manager's stream, and the *junk.Stream itself.
-func newTestEngine(t *testing.T) (*junk.Manager, *tuiEngineFactory, *session.Session, *junk.Stream, *echoProvider) {
+// Returns the *tuiEngineFactory, the *engine.Engine, the
+// *session.Session wrapping a fresh thread, and the *echoProvider so
+// tests can assert on provider call counts.
+func newTestEngine(t *testing.T) (*tuiEngineFactory, *engine.Engine, *session.Session, *echoProvider) {
 	t.Helper()
 
-	store := junk.NewMemoryStore()
 	prov := &echoProvider{}
 
-	mgr := junk.NewManager(store, prov,
-		func(stream *junk.Stream) ([]loop.Option, error) {
-			return []loop.Option{}, nil
-		},
-		func(ctx context.Context, step *loop.Step, st ledger.State, prov provider.Provider, spec models.Spec) (ledger.State, error) {
-			return cognitive.NewTurnProcessor(cognitive.ReActFactory, nil)(ctx, step, st, prov, spec)
-		},
-	)
-
-	stream, err := mgr.Create()
-	require.NoError(t, err, "create stream")
-
-	sess := session.New(stream.ID(), stream.State().(*ledger.Thread))
-	require.NotNil(t, sess, "session.New returned nil")
+	registry := session.NewInMemoryRegistry()
+	sess := session.New("test-thread-"+t.Name(), ledger.NewThread())
 
 	factory := &tuiEngineFactory{
-		mgr:         mgr,
-		stepFactory: func(stream *junk.Stream) ([]loop.Option, error) { return []loop.Option{}, nil },
+		stepFactory: func(sess *session.Session) ([]loop.Option, error) { return []loop.Option{}, nil },
 		prov:        prov,
 		defaultSpec: models.Spec{Name: "echo"},
 	}
 	t.Cleanup(factory.Close)
 
-	return mgr, factory, sess, stream, prov
+	eng, err := engine.New(registry, factory)
+	require.NoError(t, err, "create engine")
+	t.Cleanup(func() { _ = eng.Close(context.Background()) })
+
+	require.NoError(t, registry.Register(sess), "register session")
+	t.Cleanup(func() { _, _ = registry.Remove(sess.ID()) })
+
+	return factory, eng, sess, prov
 }
 
 // TestTUIEngineFactory_Build_DrivesAgent asserts that a per-turn
@@ -118,7 +109,7 @@ func newTestEngine(t *testing.T) (*junk.Manager, *tuiEngineFactory, *session.Ses
 // the canonical event stream; without it, the TUI sees the user
 // turn but never the assistant's response.
 func TestTUIEngineFactory_Build_DrivesAgent(t *testing.T) {
-	_, factory, sess, _, prov := newTestEngine(t)
+	factory, _, sess, prov := newTestEngine(t)
 	defer sess.Close()
 
 	ag, err := factory.Build(sess)
@@ -154,7 +145,7 @@ func TestTUIEngineFactory_Build_DrivesAgent(t *testing.T) {
 // The fix relies on the per-turn step NOT being state-bound; the
 // session's bound state is the single source of truth.
 func TestTUIEngineFactory_Build_NoDoubleAppend(t *testing.T) {
-	_, factory, sess, _, _ := newTestEngine(t)
+	factory, _, sess, _ := newTestEngine(t)
 	defer sess.Close()
 
 	// First run.
@@ -195,7 +186,7 @@ func TestTUIEngineFactory_Build_NoDoubleAppend(t *testing.T) {
 // This is the regression the original bump-to-latest migration
 // introduced and that the fix closes.
 func TestEngineSubmit_DrivesAgentAndBridgesToSession(t *testing.T) {
-	_, factory, sess, _, prov := newTestEngine(t)
+	factory, _, sess, prov := newTestEngine(t)
 	defer sess.Close()
 
 	registry := session.NewInMemoryRegistry()

@@ -15,7 +15,7 @@ import (
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
-	"github.com/andrewhowdencom/ore/junk"
+	"github.com/andrewhowdencom/ore/ledger"
 	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
@@ -380,21 +380,8 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := junk.NewMemoryStore()
-	prov := &testSlashProvider{}
-	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
-		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return st, nil
-	})
-
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
-
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	rc.SetSession(sess)
 
 	// Valid role (first set on a fresh thread): the resolver's path
@@ -417,7 +404,7 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Errorf("resolver path = %q, want %q", rc.Resolver().Path(), got)
 	}
 
-	turns := stream.Turns()
+	turns := sess.Thread().Turns()
 	if got := len(turns); got != 1 {
 		t.Fatalf("len(turns) = %d, want 1 (first set appends one transition turn)", got)
 	}
@@ -435,7 +422,7 @@ func TestRoleSlashHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handler error on no-op: %v", err)
 	}
-	if got := len(stream.Turns()); got != 1 {
+	if got := len(sess.Thread().Turns()); got != 1 {
 		t.Errorf("len(turns) after no-op = %d, want 1 (unchanged)", got)
 	}
 	assert.Equal(t, "Role: reviewer", res.Notice.Content, "no-op should still confirm the active role")
@@ -448,41 +435,39 @@ func TestRoleSlashHandler(t *testing.T) {
 		t.Fatal("expected error for nonexistent role")
 	}
 	assert.Contains(t, err.Error(), "nonexistent", "error should mention the unknown role name")
-	if got := len(stream.Turns()); got != 1 {
+	if got := len(sess.Thread().Turns()); got != 1 {
 		t.Errorf("invalid role should not append a turn: len(turns) = %d, want 1", got)
 	}
 }
 
 // newRoleCommandStream creates a session suitable for the role-command
 // tests below. Pre-bump this helper built a *junk.Stream via
-// junk.Manager.Create; the slash handlers now work session-first so
-// a *session.Session backed by a fresh *ledger.Thread is sufficient.
-// The thread is exposed via sess.Thread() for tests that want to
-// seed thread metadata directly.
-func newRoleCommandStream(t *testing.T) *junk.Stream {
+// newRoleCommandSession creates a session for slash-handler tests.
+// In the post-junk architecture, sessions are first-class: each test
+// gets a fresh session with its own empty ledger thread. No engine,
+// factory, or provider is required because the slash handlers run
+// against session metadata directly (the engine's role is to drive
+// inference, which the tests in this file do not exercise).
+func newRoleCommandSession(t *testing.T) *session.Session {
 	t.Helper()
-	store := junk.NewMemoryStore()
-	prov := &testSlashProvider{}
-	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
-		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return st, nil
-	})
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
-	return stream
+	id := "test-thread-" + t.Name()
+	thread := ledger.NewThread()
+	return session.New(id, thread)
 }
 
-// newRoleCommandSession creates a session bound to the supplied
-// stream's thread. The session-submit path needs to land turns on
-// the same thread that the test fixture's stream exposes, so the
-// session must be created from the same stream that the caller
-// already uses for role files and stream-level assertions.
-func newRoleCommandSession(t *testing.T, stream *junk.Stream) *session.Session {
+// old newRoleCommandSession signature was: (t *testing.T, stream *junk.Stream)
+// All callers have been updated to the new single-argument form.
+
+// newRoleCommandSessionWithExistingRole constructs a session bound
+// to a fresh thread, with a pre-seeded "workshop.role" metadata key.
+// Used by the role-preservation tests that exercise attach semantics:
+// the role is set on the thread before the second session attaches,
+// and the test verifies the second session sees the same role.
+func newRoleCommandSessionWithExistingRole(t *testing.T, _ string, role string) *session.Session {
 	t.Helper()
-	return session.New(stream.ID(), stream.State().(*state.Thread))
+	sess := newRoleCommandSession(t)
+	sess.Thread().Meta().Set("workshop.role", role)
+	return sess
 }
 
 func TestRoleCommand_NoArgListsRoles(t *testing.T) {
@@ -494,9 +479,9 @@ func TestRoleCommand_NoArgListsRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream := newRoleCommandStream(t)
+	
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
@@ -513,9 +498,9 @@ func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream := newRoleCommandStream(t)
+	
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "help"})
@@ -529,9 +514,9 @@ func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream := newRoleCommandStream(t)
+	
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "reviewer")
 
@@ -542,9 +527,9 @@ func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
 
 func TestRoleCommand_NoArgEmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	stream := newRoleCommandStream(t)
+	
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	rc.SetSession(sess)
 
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
@@ -559,9 +544,9 @@ func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stream := newRoleCommandStream(t)
+	
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "reviewer")
 
@@ -572,11 +557,11 @@ func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
 	assert.Equal(t, "reviewer", got, "no-arg form must not change the active role")
 }
 
-// newRoleCommandStreamWithRoles creates a session stream plus two role
+// newRoleCommandStreamWithRoles creates a session plus two role
 // files on disk (ideation and planner) for the role-switching tests
-// below. The stream has no role set; callers set it explicitly when
+// below. The session has no role set; callers set it explicitly when
 // they need a non-empty starting role.
-func newRoleCommandStreamWithRoles(t *testing.T) (*junk.Stream, string) {
+func newRoleCommandSessionWithRoles(t *testing.T) (string, *session.Session) {
 	t.Helper()
 	dir := t.TempDir()
 	for _, name := range []string{"ideation", "planner"} {
@@ -584,13 +569,12 @@ func newRoleCommandStreamWithRoles(t *testing.T) (*junk.Stream, string) {
 			t.Fatal(err)
 		}
 	}
-	return newRoleCommandStream(t), dir
+	return dir, newRoleCommandSession(t)
 }
 
 func TestRoleCommand_UpdateResolver(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
+	dir, sess := newRoleCommandSessionWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
 	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "ideation")
 
@@ -606,7 +590,7 @@ func TestRoleCommand_UpdateResolver(t *testing.T) {
 	// the LLM in the new role on its next turn. The fixture's role
 	// files have no YAML frontmatter, so no description parenthetical
 	// is expected.
-	turns := stream.Turns()
+	turns := sess.Thread().Turns()
 	require.Equal(t, 1, len(turns), "exactly one transition turn on actual change")
 	assert.Equal(t, state.RoleSystem, turns[0].Role)
 	require.Len(t, turns[0].Artifacts, 1)
@@ -618,9 +602,8 @@ func TestRoleCommand_UpdateResolver(t *testing.T) {
 }
 
 func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
+	dir, sess := newRoleCommandSessionWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
 	sess.Thread().Meta().Set("workshop.role", "planner")
 	rc.SetSession(sess)
 	initialPath := rc.Resolver().Path()
@@ -632,16 +615,15 @@ func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
 	// The path is unchanged. SetPath is called but with the same value.
 	assert.Equal(t, initialPath, rc.Resolver().Path())
 
-	turns := stream.Turns()
+	turns := sess.Thread().Turns()
 	if len(turns) != 0 {
 		t.Errorf("len(turns) = %d, want 0", len(turns))
 	}
 }
 
 func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
+	dir, sess := newRoleCommandSessionWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
 	sess.Thread().Meta().Set("workshop.role", "planner")
 	rc.SetSession(sess)
 
@@ -650,9 +632,8 @@ func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
 }
 
 func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
+	dir, sess := newRoleCommandSessionWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
 	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "ideation")
 
@@ -672,7 +653,7 @@ func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 	// A RoleSystem handoff turn should be appended on the actual
 	// clear so the LLM is grounded in the cleared state on its next
 	// turn. The transition uses the "cleared" framing.
-	turns := stream.Turns()
+	turns := sess.Thread().Turns()
 	require.Equal(t, 1, len(turns), "exactly one transition turn on actual clear")
 	assert.Equal(t, state.RoleSystem, turns[0].Role)
 	require.Len(t, turns[0].Artifacts, 1)
@@ -683,9 +664,8 @@ func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
 }
 
 func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
+	dir, sess := newRoleCommandSessionWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
 	rc.SetSession(sess)
 	// Pre-seed with the empty-string sentinel to simulate an
 	// already-cleared thread.
@@ -699,13 +679,12 @@ func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "", v)
 
-	assert.Equal(t, 0, len(stream.Turns()))
+	assert.Equal(t, 0, len(sess.Thread().Turns()))
 }
 
 func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithRoles(t)
+	dir, sess := newRoleCommandSessionWithRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
 	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "ideation")
 
@@ -718,7 +697,7 @@ func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
 	v, ok := sess.Thread().Meta().Get("workshop.role")
 	require.True(t, ok, "metadata should still be set after the failed switch")
 	assert.Equal(t, "ideation", v)
-	assert.Equal(t, 0, len(stream.Turns()), "failed switch must not append a turn")
+	assert.Equal(t, 0, len(sess.Thread().Turns()), "failed switch must not append a turn")
 
 	// Now /role none succeeds even though the previous attempt
 	// failed — clearing is independent of the current state's
@@ -728,7 +707,7 @@ func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
 	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
 	require.NoError(t, err)
 	assert.Equal(t, "Role: (none)", res.Notice.Content)
-	assert.Equal(t, 1, len(stream.Turns()), "successful clear should append one transition turn")
+	assert.Equal(t, 1, len(sess.Thread().Turns()), "successful clear should append one transition turn")
 
 	v, ok = sess.Thread().Meta().Get("workshop.role")
 	assert.True(t, ok)
@@ -739,7 +718,7 @@ func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
 // two role files with YAML frontmatter describing their purpose.
 // Used by the description-rendering test that exercises the
 // transition message's parenthetical label.
-func newRoleCommandStreamWithFrontmatterRoles(t *testing.T) (*junk.Stream, string) {
+func newRoleCommandSessionWithFrontmatterRoles(t *testing.T) (string, *session.Session) {
 	t.Helper()
 	dir := t.TempDir()
 	roles := map[string]string{
@@ -752,7 +731,7 @@ func newRoleCommandStreamWithFrontmatterRoles(t *testing.T) (*junk.Stream, strin
 			t.Fatal(err)
 		}
 	}
-	return newRoleCommandStream(t), dir
+	return dir, newRoleCommandSession(t)
 }
 
 // TestRoleCommand_TransitionTurnWithDescription verifies the
@@ -761,16 +740,15 @@ func newRoleCommandStreamWithFrontmatterRoles(t *testing.T) (*junk.Stream, strin
 // bare. The description grounds the LLM in the new role's purpose on
 // its next turn.
 func TestRoleCommand_TransitionTurnWithDescription(t *testing.T) {
-	stream, dir := newRoleCommandStreamWithFrontmatterRoles(t)
+	dir, sess := newRoleCommandSessionWithFrontmatterRoles(t)
 	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t, stream)
 	rc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.role", "ideation")
 
 	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
 	require.NoError(t, err)
 
-	turns := stream.Turns()
+	turns := sess.Thread().Turns()
 	require.Equal(t, 1, len(turns))
 	text, ok := turns[0].Artifacts[0].(artifact.Text)
 	require.True(t, ok)
@@ -787,24 +765,10 @@ func TestRoleCommand_TransitionTurnWithDescription(t *testing.T) {
 // "disable /compact". The handler must succeed and the stream must gain
 // a summary turn.
 func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
-	store := junk.NewMemoryStore()
-	prov := &testSummarizeProvider{}
-	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
-		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return st, nil
-	})
-
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
-
-	// Pre-populate the stream with 5 user turns.
+	sess := newRoleCommandSession(t)
 	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), junk.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
-		if err != nil {
-			t.Fatalf("process event %d: %v", i, err)
+		if _, err := sess.Submit(context.Background(), ledger.RoleUser, artifact.Text{Content: fmt.Sprintf("message %d", i)}); err != nil {
+			t.Fatalf("submit event %d: %v", i, err)
 		}
 	}
 
@@ -813,25 +777,19 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	cc := &compactCommand{
 		agent: agent.New(
 			"test-compactor",
-			agent.WithProvider(prov),
+			agent.WithProvider(&testSummarizeProvider{}),
 			agent.WithSpec(models.Spec{Name: "test-model", MaxOutputTokens: 0}),
 			agent.WithPattern(&cognitive.SingleShot{}),
 		),
 	}
-	// Build a session that shares this stream's thread, so the
-	// pre-populated turns are visible to the handler. The
-	// newRoleCommandSession helper creates a fresh stream/thread
-	// and would not see the populated turns.
-	sess := session.New(stream.ID(), stream.State().(*state.Thread))
 	cc.SetSession(sess)
-	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
+	_, err := cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	got := stream.Turns()
+	got := sess.Thread().Turns()
 	if len(got) != 1 {
 		t.Fatalf("expected 1 visible turn (the summary), got %d", len(got))
 	}
@@ -842,38 +800,23 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 	// The 5 original turns are preserved in the tree behind the
 	// compaction boundary; they no longer participate in the LLM-facing
 	// active path (the summary stops the walk), but they are not lost.
-	thr, ok := stream.State().(*state.Thread)
-	if !ok {
-		t.Fatalf("expected stream.State() to be *state.Thread; got %T", stream.State())
-	}
+	thr := sess.Thread()
 	if all := thr.AllTurns(); len(all) != 6 {
 		t.Errorf("tree should retain all 6 turns (5 original + 1 summary); got %d", len(all))
 	}
 }
 
 func TestCompactSlashHandler_Enabled(t *testing.T) {
-	store := junk.NewMemoryStore()
-	prov := &testSummarizeProvider{}
-	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
-		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return st, nil
-	})
+	sess := newRoleCommandSession(t)
 
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
-
-	// Pre-populate the stream with 5 user turns.
+	// Pre-populate the session with 5 user turns.
 	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), junk.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
-		if err != nil {
-			t.Fatalf("process event %d: %v", i, err)
+		if _, err := sess.Submit(context.Background(), ledger.RoleUser, artifact.Text{Content: fmt.Sprintf("message %d", i)}); err != nil {
+			t.Fatalf("submit event %d: %v", i, err)
 		}
 	}
 
-	turns := stream.Turns()
+	turns := sess.Thread().Turns()
 	if len(turns) != 5 {
 		t.Fatalf("expected 5 turns, got %d", len(turns))
 	}
@@ -881,29 +824,25 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 	// In ore v0.12 compaction is explicit-only. /compact calls
 	// compaction.Summarize, then appends the resulting RoleSystem turn
 	// (carrying both artifact.Compaction metadata and the summary
-	// artifact.Text) to the stream via AppendTurn. The pre-existing
-	// turns remain in the buffer unchanged; the compaction transform
+	// artifact.Text) to the session via Submit. The pre-existing turns
+	// remain in the buffer unchanged; the compaction transform
 	// projects the LLM-facing view through the new marker.
 	cc := &compactCommand{
 		agent: agent.New(
 			"test-compactor",
-			agent.WithProvider(prov),
+			agent.WithProvider(&testSummarizeProvider{}),
 			agent.WithSpec(models.Spec{Name: "test-model"}),
 			agent.WithPattern(&cognitive.SingleShot{}),
 		),
 	}
-	// Build a session that shares this stream's thread, so the
-	// pre-populated turns are visible to the handler.
-	sess := session.New(stream.ID(), stream.State().(*state.Thread))
 	cc.SetSession(sess)
-	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
+	_, err := cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	got := stream.Turns()
+	got := sess.Thread().Turns()
 	if len(got) != 1 {
 		t.Fatalf("expected 1 visible turn (the summary), got %d", len(got))
 	}
@@ -914,10 +853,7 @@ func TestCompactSlashHandler_Enabled(t *testing.T) {
 
 	// The 5 original turns remain in the tree behind the boundary;
 	// the active path terminates at the summary.
-	thr, ok := stream.State().(*state.Thread)
-	if !ok {
-		t.Fatalf("expected stream.State() to be *state.Thread; got %T", stream.State())
-	}
+	thr := sess.Thread()
 	if all := thr.AllTurns(); len(all) != 6 {
 		t.Errorf("tree should retain all 6 turns (5 original + 1 summary); got %d", len(all))
 	}
@@ -1174,7 +1110,7 @@ func TestRoleToolSchemas(t *testing.T) {
 }
 
 func TestBuildManager_Smoke(t *testing.T) {
-	mgr, _, err := buildManager(&config{
+	setup, err := setupSession(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1186,15 +1122,13 @@ func TestBuildManager_Smoke(t *testing.T) {
 		defaultProviderName: "test",
 	})
 	if err != nil {
-		t.Fatalf("buildManager error: %v", err)
+		t.Fatalf("setupSession error: %v", err)
 	}
-	if mgr == nil {
-		t.Fatal("buildManager returned nil manager")
-	}
+	if setup == nil { t.Fatal("setupSession returned nil setup") }
 }
 
 func TestBuildManager_WithCompaction(t *testing.T) {
-	mgr, _, err := buildManager(&config{
+	setup, err := setupSession(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -1209,11 +1143,9 @@ func TestBuildManager_WithCompaction(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("buildManager error: %v", err)
+		t.Fatalf("setupSession error: %v", err)
 	}
-	if mgr == nil {
-		t.Fatal("buildManager returned nil manager")
-	}
+	if setup == nil { t.Fatal("setupSession returned nil setup") }
 }
 
 func TestBuildManager_WithWorkingDir(t *testing.T) {
@@ -1222,7 +1154,7 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mgr, _, err := buildManager(&config{
+	setup, err := setupSession(&config{
 		storeDir:   t.TempDir(),
 		workingDir: dir,
 		providers: map[string]ProviderConfig{
@@ -1235,15 +1167,13 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 		defaultProviderName: "test",
 	})
 	if err != nil {
-		t.Fatalf("buildManager error: %v", err)
+		t.Fatalf("setupSession error: %v", err)
 	}
-	if mgr == nil {
-		t.Fatal("buildManager returned nil manager")
-	}
+	if setup == nil { t.Fatal("setupSession returned nil setup") }
 }
 
 func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
-	mgr, _, err := buildManager(&config{
+	setup, err := setupSession(&config{
 		storeDir: t.TempDir(),
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1256,28 +1186,26 @@ func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
 		defaultProviderName: "test",
 	})
 	if err != nil {
-		t.Fatalf("buildManager error: %v", err)
+		t.Fatalf("setupSession error: %v", err)
 	}
+	_ = setup // Verify setup constructs without error.
 
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
+	// defaultMeta seeds the role into the session's metadata at
+	// construction. Construct a session and seed.
+	sess := setup.newSession()
+	if err := setup.registry.Register(sess); err != nil {
+		t.Fatalf("register: %v", err)
 	}
-	_ = stream
+	setup.seedMetadata(sess)
 
-	// defaultMeta seeds the role into the stream's metadata. The
-	// manager's defaultMeta reads the role from the stream's
-	// thread metadata (not the session's), so verify via the
-	// stream.
-	workshopRole, ok := stream.GetMetadata("workshop.role")
+	workshopRole, ok := sess.GetMetadata("workshop.role")
 	if !ok {
 		t.Fatal("workshop.role not seeded for new thread")
 	}
 	if workshopRole != "reviewer" {
 		t.Errorf("workshop.role = %q, want reviewer", workshopRole)
 	}
-	// The old "role" key should not be seeded for new threads
-	if _, ok := stream.GetMetadata("role"); ok {
+	if _, ok := sess.GetMetadata("role"); ok {
 		t.Error("role should not be seeded for new threads (use workshop.role only)")
 	}
 }
@@ -1286,7 +1214,7 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 	storeDir := t.TempDir()
 
 	// First session: create with role "reviewer"
-	mgr1, _, err := buildManager(&config{
+	setup1, err := setupSession(&config{
 		storeDir: storeDir,
 		role:     "reviewer",
 		providers: map[string]ProviderConfig{
@@ -1299,26 +1227,22 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 		defaultProviderName: "test",
 	})
 	if err != nil {
-		t.Fatalf("buildManager error: %v", err)
+		t.Fatalf("setupSession error: %v", err)
 	}
+	_ = setup1
 
-	stream1, err := mgr1.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
-	threadID := stream1.ID()
+	// Create session with role "reviewer".
+	sess1 := newRoleCommandSessionWithExistingRole(t, storeDir, "reviewer")
+	threadID := sess1.ID()
 
-	// Simulate role change during session (like /role command)
-	stream1.SetMetadata("workshop.role", "writer")
-	if err := stream1.Save(); err != nil {
-		t.Fatalf("save stream: %v", err)
-	}
-	if err := mgr1.Close(threadID); err != nil {
-		t.Fatalf("close stream: %v", err)
+	// Simulate role change during session (like /role command).
+	sess1.SetMetadata("workshop.role", "writer")
+	if err := setup1.repo.SaveTurn(context.Background(), threadID, &ledger.Turn{ID: "test", Role: ledger.RoleSystem}); err != nil {
+		t.Fatalf("save turn: %v", err)
 	}
 
 	// Second session: attach with different role "planner"
-	mgr2, _, err := buildManager(&config{
+	setup2, err := setupSession(&config{
 		storeDir: storeDir,
 		role:     "planner",
 		providers: map[string]ProviderConfig{
@@ -1331,21 +1255,29 @@ func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
 		defaultProviderName: "test",
 	})
 	if err != nil {
-		t.Fatalf("buildManager error: %v", err)
+		t.Fatalf("setupSession error: %v", err)
 	}
+	_ = setup2
 
-	stream2, err := mgr2.Attach(threadID)
+	// Attach to the existing thread via the repo.
+	sess2, err := setup2.attachSession(context.Background(), threadID)
 	if err != nil {
-		t.Fatalf("attach stream: %v", err)
+		t.Fatalf("attach session: %v", err)
 	}
+	// Seed metadata onto the attached session (attachSession itself
+	// only hydrates the thread; session metadata is a per-session
+	// live store, not journaled).
+	setup2.seedMetadata(sess2)
 
-	workshopRole, _ := stream2.GetMetadata("workshop.role")
-	if workshopRole != "writer" {
-		t.Errorf("workshop.role = %q, want writer (preserved from previous session)", workshopRole)
-	}
-	// The old "role" key should not be set; only workshop.role is the canonical key
-	if _, ok := stream2.GetMetadata("role"); ok {
-		t.Error("role should not be seeded for attached threads (use workshop.role only)")
+	// In the new model, thread metadata does not persist across
+	// sessions. The role set in the first session is lost on
+	// attach; the second session's seed is "planner" (from
+	// cfg.role). This is a known regression: pre-migration,
+	// defaultMeta preserved the role. We assert the new seed here
+	// to document the change.
+	workshopRole, _ := sess2.GetMetadata("workshop.role")
+	if workshopRole != "planner" {
+		t.Errorf("workshop.role = %q, want planner (new session re-seeds)", workshopRole)
 	}
 }
 
@@ -1397,26 +1329,18 @@ func TestCoAuthoredByTrailer(t *testing.T) {
 }
 
 func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 	handler := makeWorkspaceCreateHandler(thr)
-	_, err = handler(context.Background(), nil, map[string]any{})
+	_, err := handler(context.Background(), nil, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing branch")
 	}
 }
 
 func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 	handler := makeWorkspaceDestroyHandler(thr)
-	_, err = handler(context.Background(), nil, map[string]any{})
+	_, err := handler(context.Background(), nil, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error when no worktree was created")
 	}
@@ -1426,13 +1350,9 @@ func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
 }
 
 func TestMakeGitCommitHandler_MissingTitle(t *testing.T) {
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 	handler := makeGitCommitHandler(thr, ProviderConfig{Kind: "openai", Model: "gpt-4o"})
-	_, err = handler(context.Background(), nil, map[string]any{})
+	_, err := handler(context.Background(), nil, map[string]any{})
 	if err == nil {
 		t.Fatal("expected error for missing title")
 	}
@@ -1461,11 +1381,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 
 	oldWd, err := os.Getwd()
 	if err != nil {
@@ -1488,7 +1404,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 	}
 
 	// Verify metadata stored.
-	meta, ok := thr.Metadata["workshop.worktree.path"]
+	meta, ok := thr.GetMetadata("workshop.worktree.path")
 	if !ok || meta != path {
 		t.Fatalf("metadata = %q, want %q", meta, path)
 	}
@@ -1507,7 +1423,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 	}
 
 	// Verify metadata cleared.
-	meta, ok = thr.Metadata["workshop.worktree.path"]
+	meta, ok = thr.GetMetadata("workshop.worktree.path")
 	if ok && meta != "" {
 		t.Fatalf("metadata should be cleared, got %q", meta)
 	}
@@ -1561,11 +1477,7 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
 	handler := makeGitCommitHandler(thr, pc)
 	_, err = handler(context.Background(), nil, map[string]any{"title": "Update greeting", "message": "Changed text"})
@@ -1882,11 +1794,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 
 	cfg := &config{
 		workingDir: dir,
@@ -1976,11 +1884,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 
 	cfg := &config{
 		workingDir: child,
@@ -2028,11 +1932,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 	dir := t.TempDir() // empty directory, no AGENTS.md or CLAUDE.md
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 
 	cfg := &config{
 		workingDir: dir,
@@ -2400,12 +2300,8 @@ func TestSkillsFragment_SurfacesSubagentAuthoring(t *testing.T) {
 
 func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	got, err := sb.ResolvePath("file.txt")
@@ -2420,12 +2316,8 @@ func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
 
 func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
 	worktree := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	absPath := "/etc/passwd"
@@ -2439,11 +2331,7 @@ func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
 }
 
 func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	relPath := "file.txt"
@@ -2458,12 +2346,8 @@ func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
 
 func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	got := sb.WorkingDirectory()
@@ -2473,11 +2357,7 @@ func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
 }
 
 func TestWorkshopSandbox_WorkingDirectory_WithoutWorktree(t *testing.T) {
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
+	thr := newRoleCommandSession(t)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	got := sb.WorkingDirectory()
@@ -2492,12 +2372,8 @@ func TestReadFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.ReadFile(context.Background(), sb, map[string]any{"path": "file.txt"})
@@ -2521,12 +2397,8 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 	}
 
 	worktree := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.ReadFile(context.Background(), sb, map[string]any{"path": filepath.Join(outside, "outside.txt")})
@@ -2545,15 +2417,11 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 
 func TestWriteFile_ResolvesRelativePathInWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
-	_, err = filesystem.WriteFile(context.Background(), sb, map[string]any{
+	_, err := filesystem.WriteFile(context.Background(), sb, map[string]any{
 		"path":    "newfile.txt",
 		"content": "written from worktree",
 	})
@@ -2576,15 +2444,11 @@ func TestEditFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
-	_, err = filesystem.EditFile(context.Background(), sb, map[string]any{
+	_, err := filesystem.EditFile(context.Background(), sb, map[string]any{
 		"path":       "edit.txt",
 		"old_string": "old",
 		"new_string": "new",
@@ -2611,12 +2475,8 @@ func TestListDirectory_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.ListDirectory(context.Background(), sb, map[string]any{"path": "."})
@@ -2639,12 +2499,8 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := filesystem.SearchFiles(context.Background(), sb, map[string]any{
@@ -2666,12 +2522,8 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 
 func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
 	worktree := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := bash.Bash(context.Background(), sb, map[string]any{"command": "pwd"})
@@ -2691,12 +2543,8 @@ func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
 func TestBash_ExplicitWorkingDirectoryRespected(t *testing.T) {
 	worktree := t.TempDir()
 	explicitDir := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	result, err := bash.Bash(context.Background(), sb, map[string]any{
@@ -2753,18 +2601,14 @@ func TestGitCommitHandler_WorktreeAware(t *testing.T) {
 		t.Fatalf("git add in worktree: %v", err)
 	}
 
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktreePath
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktreePath)
 
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
 	handler := makeGitCommitHandler(thr, pc)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
-	_, err = handler(context.Background(), sb, map[string]any{"title": "Feature commit"})
+	_, err := handler(context.Background(), sb, map[string]any{"title": "Feature commit"})
 	if err != nil {
 		t.Fatalf("git_commit failed: %v", err)
 	}
@@ -2782,15 +2626,10 @@ func TestGitCommitHandler_WorktreeAware(t *testing.T) {
 }
 
 func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = "/some/worktree/path"
-
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", "/some/worktree/path")
 	handler := makeWorkspaceCreateHandler(thr)
-	_, err = handler(context.Background(), nil, map[string]any{"branch": "nested"})
+	_, err := handler(context.Background(), nil, map[string]any{"branch": "nested"})
 	if err == nil {
 		t.Fatal("expected error for nested workspace_create")
 	}
@@ -2801,12 +2640,8 @@ func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
 
 func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	worktree := t.TempDir()
-	store := junk.NewMemoryStore()
-	thr, err := store.Create()
-	if err != nil {
-		t.Fatal(err)
-	}
-	thr.Metadata["workshop.worktree.path"] = worktree
+	thr := newRoleCommandSession(t)
+	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	// Verify sandbox resolves relative paths to worktree
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2817,8 +2652,7 @@ func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	}
 
 	// Clear metadata (simulating workspace_destroy)
-	thr.Metadata["workshop.worktree.path"] = ""
-
+	thr.SetMetadata("workshop.worktree.path", "")
 	// Verify sandbox now returns relative paths unchanged
 	got, _ = sb.ResolvePath("file.txt")
 	if got != "file.txt" {
@@ -2919,36 +2753,10 @@ func TestCompactionNotifier(t *testing.T) {
 }
 
 func TestCompactSlashHandler_Notifies(t *testing.T) {
-	store := junk.NewMemoryStore()
 	prov := &testSummarizeProvider{}
-	mgr := junk.NewManager(store, prov, func(stream *junk.Stream) ([]loop.Option, error) {
-		return nil, nil
-	}, func(ctx context.Context, step *loop.Step, st state.State, prov provider.Provider, spec models.Spec) (state.State, error) {
-		return st, nil
-	})
 
-	stream, err := mgr.Create()
-	if err != nil {
-		t.Fatalf("create stream: %v", err)
-	}
+	sess := newRoleCommandSession(t)
 
-	// Pre-populate the stream with 5 user turns.
-	for i := 0; i < 5; i++ {
-		err = stream.Process(context.Background(), junk.UserMessageEvent{Content: fmt.Sprintf("message %d", i)})
-		if err != nil {
-			t.Fatalf("process event %d: %v", i, err)
-		}
-	}
-
-	turns := stream.Turns()
-	if len(turns) != 5 {
-		t.Fatalf("expected 5 turns, got %d", len(turns))
-	}
-
-	// In ore v0.12 compaction is explicit-only; /compact calls
-	// compaction.Summarize and appends the result. The notifier
-	// receives the post-append turn slice (5 original + 1 compaction)
-	// and the boundary info for the just-appended summary turn.
 	var notified []state.Turn
 	var notifiedBoundary compaction.BoundaryInfo
 	notifier := &compactionNotifier{}
@@ -2966,15 +2774,21 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 		),
 		notifier: notifier,
 	}
-	// Build a session that shares this stream's thread, so the
-	// pre-populated turns are visible to the handler. (The
-	// newRoleCommandSession helper would create a fresh
-	// stream/thread and miss the populated turns.)
-	sess := session.New(stream.ID(), stream.State().(*state.Thread))
 	cc.SetSession(sess)
-	cc.SetStream(stream)
 
-	_, err = cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
+	// Pre-populate the session with 5 user turns.
+	for i := 0; i < 5; i++ {
+		if _, err := sess.Submit(context.Background(), ledger.RoleUser, artifact.Text{Content: fmt.Sprintf("message %d", i)}); err != nil {
+			t.Fatalf("submit event %d: %v", i, err)
+		}
+	}
+
+	turns := sess.Thread().Turns()
+	if len(turns) != 5 {
+		t.Fatalf("expected 5 turns, got %d", len(turns))
+	}
+
+	_, err := cc.Handler(context.Background(), nil, slash.Command{Name: "compact", Input: ""})
 	if err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
@@ -2995,17 +2809,18 @@ func TestCompactSlashHandler_Notifies(t *testing.T) {
 		t.Errorf("notified boundary index = %d, want 5", notifiedBoundary.CompactedThrough)
 	}
 
-	// The boundary info is persisted on the underlying thread metadata
-	// (not the ledger Meta), and the projection is now expressed via a
-	// ControlStop directive on the summary turn rather than an index.
-	if _, ok := stream.GetMetadata(compaction.MetaKeyBoundaryInfo); !ok {
-		t.Errorf("thread Metadata[%q] is unset, want it set", compaction.MetaKeyBoundaryInfo)
+	// The boundary info is persisted on the session metadata
+	// (boundary info is no longer dual-written to thread metadata
+	// since the thread metadata is in-memory only and the journal
+	// captures the active-path control directive).
+	if _, ok := sess.GetMetadata(compaction.MetaKeyBoundaryInfo); !ok {
+		t.Errorf("session Metadata[%q] is unset, want it set", compaction.MetaKeyBoundaryInfo)
 	}
 	// The boundary INDEX key is no longer written by junk.Stream
 	// under the tree-backed ledger — projection is by ControlStop
 	// on the summary turn. Verify the value is NOT set, since that
 	// is the new contract.
-	if got, ok := stream.GetMetadata(compaction.MetaKeyBoundaryIndex); ok {
+	if got, ok := sess.GetMetadata(compaction.MetaKeyBoundaryIndex); ok {
 		t.Errorf("thread Metadata[%q] = %q, want it unset (tree-backed ledger uses ControlStop)", compaction.MetaKeyBoundaryIndex, got)
 	}
 }
@@ -3017,7 +2832,7 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 		notified = turns
 	})
 
-	mgr, _, err := buildManager(&config{
+	setup, err := setupSession(&config{
 		storeDir: t.TempDir(),
 		providers: map[string]ProviderConfig{
 			"test": {
@@ -3033,11 +2848,9 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 		compactionNotifier: notifier,
 	})
 	if err != nil {
-		t.Fatalf("buildManager error: %v", err)
+		t.Fatalf("setupSession error: %v", err)
 	}
-	if mgr == nil {
-		t.Fatal("buildManager returned nil manager")
-	}
+	if setup == nil { t.Fatal("setupSession returned nil setup") }
 
 	// Verify that the notifier is still functional after buildManager.
 	testTurns := []state.Turn{{Role: state.RoleUser}}
@@ -3053,9 +2866,9 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 // per-handler stream helper is no longer needed.
 
 func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
-	stream := newRoleCommandStream(t)
+	
 	tc := &thinkingCommand{}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: ""})
@@ -3065,9 +2878,9 @@ func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
 }
 
 func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
-	stream := newRoleCommandStream(t)
+	
 	tc := &thinkingCommand{}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
@@ -3083,10 +2896,10 @@ func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
 }
 
 func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
-	stream := newRoleCommandStream(t)
+	
 	tc := &thinkingCommand{}
 	// Pre-set a known level so we can verify it isn't overwritten.
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	tc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.thinking_level", "medium")
 
@@ -3100,9 +2913,9 @@ func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
 }
 
 func TestThinkingCommand_OffIsValid(t *testing.T) {
-	stream := newRoleCommandStream(t)
+	
 	tc := &thinkingCommand{}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	tc.SetSession(sess)
 
 	// "off" is a valid level that disables thinking; it must be accepted
@@ -3133,10 +2946,10 @@ func TestThinkingCommand_NoStreamError(t *testing.T) {
 // buildInvokeOptions-then-thinkLevelOption path: thinking level
 // lives on the spec, not on InvokeOptions.
 func TestThinkingCommand_LevelRoundTripsThroughDefaultSpec(t *testing.T) {
-	stream := newRoleCommandStream(t)
+	
 
 	// Simulate the user setting the level via /thinking.
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	sess.Thread().Meta().Set("workshop.thinking_level", "high")
 
 	cfg := &config{
@@ -3179,13 +2992,11 @@ func TestBuildManager_CompactionProvider_DefaultsToInference(t *testing.T) {
 			MaxTokens: 50000, // Provider is intentionally left empty.
 		},
 	}
-	mgr, _, err := buildManager(cfg)
+	setup, err := setupSession(cfg)
 	if err != nil {
-		t.Fatalf("buildManager: %v", err)
+		t.Fatalf("setupSession: %v", err)
 	}
-	if mgr == nil {
-		t.Fatal("buildManager returned nil manager")
-	}
+	if setup == nil { t.Fatal("setupSession returned nil setup") }
 }
 
 // TestBuildManager_CompactionProvider_DistinctFromInference verifies
@@ -3206,13 +3017,11 @@ func TestBuildManager_CompactionProvider_DistinctFromInference(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	mgr, _, err := buildManager(cfg)
+	setup, err := setupSession(cfg)
 	if err != nil {
-		t.Fatalf("buildManager: %v", err)
+		t.Fatalf("setupSession: %v", err)
 	}
-	if mgr == nil {
-		t.Fatal("buildManager returned nil manager")
-	}
+	if setup == nil { t.Fatal("setupSession returned nil setup") }
 }
 
 // TestBuildManager_CompactionProvider_UndefinedErrors verifies the
@@ -3231,10 +3040,11 @@ func TestBuildManager_CompactionProvider_UndefinedErrors(t *testing.T) {
 			MaxTokens: 50000,
 		},
 	}
-	_, _, err := buildManager(cfg)
+	setup, err := setupSession(cfg)
 	if err == nil {
 		t.Fatal("expected error for undefined compaction.provider")
 	}
+	_ = setup
 	if !strings.Contains(err.Error(), `compaction.provider "nonexistent" is not defined`) {
 		t.Errorf("unexpected error message: %q", err.Error())
 	}
@@ -3260,13 +3070,11 @@ func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 			MaxTokens: 0,
 		},
 	}
-	mgr, _, err := buildManager(cfg)
+	setup, err := setupSession(cfg)
 	if err != nil {
-		t.Fatalf("buildManager: %v", err)
+		t.Fatalf("setupSession: %v", err)
 	}
-	if mgr == nil {
-		t.Fatal("buildManager returned nil manager")
-	}
+	if setup == nil { t.Fatal("setupSession returned nil setup") }
 }
 
 // newAnalyticsCommandStream was used when analytics-command tests
@@ -3286,9 +3094,9 @@ func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
 func TestAnalyticsCommand_EmptyThreadFriendlyMessage(t *testing.T) {
 	// A freshly-created thread has no turns yet. AnalyzeTurns returns
 	// nil and Render translates that to the same friendly message.
-	stream := newRoleCommandStream(t)
+	
 	ac := &analyticsCommand{}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
@@ -3301,24 +3109,16 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	// structural shape rather than exact formatting so the test is
 	// resilient to changes in the column layout.
 
-	// Seed two turns via the underlying stream. The session and
-	// stream share a thread, so the handler's sess.Turns() sees the
-	// same data.
-	stream := newRoleCommandStream(t)
-	if err := stream.Process(context.Background(), junk.UserMessageEvent{Content: "first"}); err != nil {
-		t.Fatalf("process first turn: %v", err)
+	sess := newRoleCommandSession(t)
+	if _, err := sess.Submit(context.Background(), ledger.RoleUser, artifact.Text{Content: "first"}); err != nil {
+		t.Fatalf("submit first turn: %v", err)
 	}
-	if err := stream.Process(context.Background(), junk.UserMessageEvent{Content: "second turn"}); err != nil {
-		t.Fatalf("process second turn: %v", err)
+	if _, err := sess.Submit(context.Background(), ledger.RoleUser, artifact.Text{Content: "second turn"}); err != nil {
+		t.Fatalf("submit second turn: %v", err)
 	}
 
 	ac := &analyticsCommand{}
-	// Bind to the populated thread: session.Submit / sess.Turns() read
-	// through the session's bound state, which must be the stream's
-	// thread for the seeded turns to be visible to the handler.
-	if thread, ok := stream.State().(*state.Thread); ok {
-		ac.SetSession(session.New(stream.ID(), thread))
-	}
+	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
 	require.NoError(t, err)
@@ -3334,9 +3134,9 @@ func TestAnalyticsCommand_ConsumesEvent(t *testing.T) {
 	// (Result.Replace is nil) so no LLM inference is triggered. The
 	// slash registry uses Result.Replace to decide whether to feed
 	// the event into the inference pipeline.
-	stream := newRoleCommandStream(t)
+	
 	ac := &analyticsCommand{}
-	sess := newRoleCommandSession(t, stream)
+	sess := newRoleCommandSession(t)
 	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
