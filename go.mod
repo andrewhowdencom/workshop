@@ -120,3 +120,49 @@ require (
 	google.golang.org/grpc v1.83.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/andrewhowdencom/ore => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event
+
+replace github.com/andrewhowdencom/ore/x/conduit/tui => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/conduit/tui
+
+replace github.com/andrewhowdencom/ore/x/provider/openai => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/provider/openai
+
+replace github.com/andrewhowdencom/ore/x/provider/anthropic => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/provider/anthropic
+
+replace github.com/andrewhowdencom/ore/x/provider/retry => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/provider/retry
+
+replace github.com/andrewhowdencom/ore/x/subagent => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/subagent
+
+replace github.com/andrewhowdencom/ore/x/telemetry => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/telemetry
+
+replace github.com/andrewhowdencom/ore/x/analytics => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/analytics
+
+replace github.com/andrewhowdencom/ore/x/compaction => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/compaction
+
+replace github.com/andrewhowdencom/ore/x/export => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/export
+
+replace github.com/andrewhowdencom/ore/x/tool => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/tool
+
+replace github.com/andrewhowdencom/ore/x/tool/bash => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/tool/bash
+
+replace github.com/andrewhowdencom/ore/x/tool/filesystem => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/tool/filesystem
+
+replace github.com/andrewhowdencom/ore/x/tool/set_title => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/tool/set_title
+
+replace github.com/andrewhowdencom/ore/x/tool/skills => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/tool/skills
+
+replace github.com/andrewhowdencom/ore/x/usage => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/usage
+
+replace github.com/andrewhowdencom/ore/x/conduit/http => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/conduit/http
+
+replace github.com/andrewhowdencom/ore/x/wire/anthropic => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/wire/anthropic
+
+replace github.com/andrewhowdencom/ore/x/wire/openai => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/wire/openai
+
+replace github.com/andrewhowdencom/ore/x/llmbytes => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/llmbytes
+
+replace github.com/andrewhowdencom/ore/x/conduit/stdio => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/conduit/stdio
+
+replace github.com/andrewhowdencom/ore/x/conduit => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/conduit
+
+replace github.com/andrewhowdencom/ore/x/tool/truncate => /home/andrewhowdencom/Development/ore/.worktrees/feat/remove-session-interrupt-event/x/tool/truncate

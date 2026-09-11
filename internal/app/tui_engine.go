@@ -281,9 +281,11 @@ func runTUIEngine(
 	}
 
 	// 1. Event pump: forward every session.Event from the TUI to
-	// engine.Submit. The TUI emits session.UserMessageEvent when
-	// the user presses Enter and session.InterruptEvent when the
-	// user presses Ctrl+C / Esc. engine.Submit returns an error
+	// engine.Submit. The TUI emits session.UserMessageEvent when the
+	// user presses Enter. User-driven cancellation (Ctrl+C / Esc) is
+	// signalled out-of-band via the event context passed through
+	// tui.WithEventContext; the engine propagates the cancellation
+	// into the running agent's Run. engine.Submit returns an error
 	// only on session-not-found or queue-full; either is fatal to
 	// the pump.
 	//

@@ -309,11 +309,17 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	}
 	setup.seedMetadata(sess)
 
-	// Build the TUI conduit. The session-based TUI contract
-	// requires a *session.Session; the engine + factory do the
-	// inference behind the scenes.
+	// The TUI's cancel pathway flows through event-context
+	// propagation. We derive runCtx from the parent signal-derived
+	// ctx and pass it to the TUI as its event context. The TUI
+	// wraps it internally and cancels the wrapper on Esc / Ctrl+C;
+	// the cancellation propagates through the event's Context()
+	// into the engine's per-event ctx, unwinding the running agent.
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 	tuiConduit, err := tui.New(sess,
 		tui.WithName("ws"),
+		tui.WithEventContext(runCtx),
 		tui.WithTracer(cfg.tracer),
 		tui.WithStatusZones(statusZoneMapping),
 		tui.WithStatusLabels(map[string]string{
@@ -334,7 +340,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
 	})
 
-	return runTUIEngine(ctx, sess, tuiImpl, setup.factory, setup.engine, setup.repo)
+	return runTUIEngine(runCtx, sess, tuiImpl, setup.factory, setup.engine, setup.repo)
 }
 
 // RunHTTP initializes and starts the HTTP web UI application.
