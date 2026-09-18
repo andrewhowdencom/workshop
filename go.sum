@@ -14,8 +14,8 @@ github.com/alecthomas/chroma/v2 v2.27.0 h1:FodwmyOBgJULFYmDqibcp9pvfDLWdtPRh9v/r
 github.com/alecthomas/chroma/v2 v2.27.0/go.mod h1:NjJ3ciIgrqBNeIkWZ4e46nseoLDslxU1LmfCoL+wcY8=
 github.com/alecthomas/repr v0.5.2 h1:SU73FTI9D1P5UNtvseffFSGmdNci/O6RsqzeXJtP0Qs=
 github.com/alecthomas/repr v0.5.2/go.mod h1:Fr0507jx4eOXV7AlPV6AVZLYrLIuIeSOWtW57eE/O/4=
-github.com/andrewhowdencom/ore v1.3.2 h1:fgle7tRJv7aQnRSex2eY/CqAnvB+aznCxjh5paxNrdU=
-github.com/andrewhowdencom/ore v1.3.2/go.mod h1:eJaDVKTPcGcuvdMi/KtdBufwGrUardXKw4zSGIF1TKA=
+github.com/andrewhowdencom/ore v1.4.0 h1:HCRnwqQQhto8Wh6LzKbbCBUibdtWJQAoss9DsWpaHFs=
+github.com/andrewhowdencom/ore v1.4.0/go.mod h1:eJaDVKTPcGcuvdMi/KtdBufwGrUardXKw4zSGIF1TKA=
 github.com/andrewhowdencom/ore/x/analytics v0.2.6 h1:rzey52GuNYzU4R8QM4kCQgZLgFNJX/rCJY6TKtMvdYo=
 github.com/andrewhowdencom/ore/x/analytics v0.2.6/go.mod h1:HL4I6sCgOT6H1ZpJHspBXZNbDUf7hrGkTNlho093ucU=
 github.com/andrewhowdencom/ore/x/compaction v0.5.1 h1:QKzSjcSLvTG4ozOz8tA6IXvbcfhnTrpOogo3Mc6F3iE=
@@ -34,6 +34,8 @@ github.com/andrewhowdencom/ore/x/llmbytes v0.1.2 h1:Iextd0XUHRZOvhVWawJY2MMQj0o0
 github.com/andrewhowdencom/ore/x/llmbytes v0.1.2/go.mod h1:JxGVBAMfkWklMOC4kUCF5gs1/epk4g1WMIYtl02ZwCY=
 github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.6 h1:cg4cSEyIn6uApw51etDmcpo25W6m0UxeUC7t1+lBv9U=
 github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.6/go.mod h1:wNwMCDJcrHhU5pyFJ8F6MFBsSjikx1U6ahASlr72GhM=
+github.com/andrewhowdencom/ore/x/provider/codex v0.1.0 h1:fi6+TmnFeqs0hRozySvAibu942ThfzHQNXs9Dm8vnHo=
+github.com/andrewhowdencom/ore/x/provider/codex v0.1.0/go.mod h1:q5CjiHWCzIbuE3QhgMzye8Q1H9iVvjc+csT6A2XvPv0=
 github.com/andrewhowdencom/ore/x/provider/openai v0.6.5 h1:dYVqIRfxNLe7MGkfODLW1Cg0HRvriNvHUYgwZTU9IzA=
 github.com/andrewhowdencom/ore/x/provider/openai v0.6.5/go.mod h1:lLx4GvV8NbDhTsCY6uK4lswtrYKBhrqZwB2vnKMbKH4=
 github.com/andrewhowdencom/ore/x/provider/retry v0.0.3 h1:hSfSKo7jzYQrjvaEHiyivfod5U2FaOa5wOaJlPaWfUc=
@@ -60,6 +62,8 @@ github.com/andrewhowdencom/ore/x/wire/anthropic v0.2.3 h1:+0OxAjJ6CAR8VXrtcL2E7X
 github.com/andrewhowdencom/ore/x/wire/anthropic v0.2.3/go.mod h1:80AxBZispnjKKqFATbB8yxYEfyxrwOsda124zl83YkI=
 github.com/andrewhowdencom/ore/x/wire/openai v0.1.4 h1:UrD0MQ6eWpxIA+TffFFfziEIMB5j+L4uMR1qgSUhO4I=
 github.com/andrewhowdencom/ore/x/wire/openai v0.1.4/go.mod h1:m6w6PwdBwP/yWoF8yAkpdgbGXHVbHaYtBAJO6zcNDyE=
+github.com/andrewhowdencom/ore/x/wire/openai/responses v0.1.0 h1:h6SIs+mEp61e0Z1TAaowh+NG06j7+Ax4jEstRJApmJ8=
+github.com/andrewhowdencom/ore/x/wire/openai/responses v0.1.0/go.mod h1:82sDy2ya2b6zf7B7gn/5TwS161R9uWjvhgY73/n+xcE=
 github.com/anthropics/anthropic-sdk-go v1.72.0 h1:T0qQWWfygiL24lqEQaffRXCvEeno3yiv/mFzUdY1E88=
 github.com/anthropics/anthropic-sdk-go v1.72.0/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=

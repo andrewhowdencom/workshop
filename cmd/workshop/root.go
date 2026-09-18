@@ -116,8 +116,8 @@ func configureLogging(cmd *cobra.Command, args []string) error {
 // defaultThinkingLevelForKind returns the per-kind default thinking
 // level, applied only when the user has not configured one. Anthropic
 // defaults to "medium" because every supported model benefits from
-// extended thinking on hard turns. OpenAI-compatible providers keep
-// "off" as the default, matching historical behavior. Any unknown or
+// extended thinking on hard turns. OpenAI-compatible and Codex providers
+// keep "off" as the default, matching historical behavior. Any unknown or
 // future kind falls back to "off" until a default is added here.
 func defaultThinkingLevelForKind(kind string) string {
 	if kind == "anthropic" {
@@ -190,7 +190,7 @@ func bindNamedProviderEnvVars(v *viper.Viper) error {
 // returns (defaultName, providers, nil) on success or ("", nil, err)
 // on any validation failure. Each named provider's ThinkingLevel is
 // run through resolveThinkingLevelForConfig so the per-kind default
-// (medium for anthropic, off for openai) is applied when the user has
+// (medium for anthropic, off for openai and codex) is applied when the user has
 // not configured one. The env-var binding pass must have run first so
 // any WORKSHOP_PROVIDER_<NAME>_<FIELD> env vars are visible to the
 // per-leaf viper reads.

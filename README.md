@@ -7,7 +7,7 @@ This project demonstrates how to build a fully fledged agentic application outsi
 ## Prerequisites
 
 - [Go](https://go.dev/) 1.26+
-- An API key for [OpenAI](https://platform.openai.com/), [Anthropic](https://console.anthropic.com/), or a compatible endpoint (e.g. [OpenRouter](https://openrouter.ai/))
+- An API key for [OpenAI](https://platform.openai.com/), [Anthropic](https://console.anthropic.com/), or a compatible endpoint (e.g. [OpenRouter](https://openrouter.ai/)); alternatively, a ChatGPT account with Codex access
 - [Task](https://taskfile.dev/) (optional, for development tasks)
 
 ## Install
@@ -25,6 +25,9 @@ The binary lands in `$GOBIN` (default `$(go env GOPATH)/bin`). Add that to your 
 | `workshop` | Open the interactive TUI (default) |
 | `workshop http` | Run the web UI HTTP server |
 | `workshop config init` | Initialize a configuration file from current settings |
+| `workshop auth login` | Authenticate the selected provider |
+| `workshop auth status` | Show authentication status for the selected provider |
+| `workshop auth logout` | Remove authentication for the selected provider |
 | `workshop version` | Print the build version |
 | `workshop thread list` | List persistent threads (paginated, sorted by recency) |
 | `workshop thread export <id>` | Export a thread to stdout or a file (--format text, json, html; --output file) |
@@ -67,6 +70,37 @@ providers:
     api-key: sk-...
     model: gpt-4o
 ```
+
+### Codex with a ChatGPT subscription
+
+First configure and select a provider without an API key:
+
+```yaml
+provider: codex
+providers:
+  codex:
+    kind: codex
+    model: gpt-5.3-codex
+    thinking-level: high
+```
+
+Then complete device-code authentication for the selected provider:
+
+```bash
+workshop auth login
+```
+
+Open the displayed URL, enter the one-time code, and return to the terminal.
+Device-code login must be enabled in your ChatGPT security settings or by your
+workspace administrator. The auth commands use the provider selected by
+`provider:` or `--provider`; API-key providers report their configured status
+and direct login/logout changes back to their configuration source.
+
+Codex credentials are managed by ore in the user configuration directory at
+`ore/codex-credentials.json`, separately from the Codex CLI's `auth.json`.
+They are refreshed automatically before expiry. With the Codex provider
+selected, run `workshop auth status` to check whether credentials are present
+and `workshop auth logout` to revoke and remove them.
 
 ### Anthropic (native)
 

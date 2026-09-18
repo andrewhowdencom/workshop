@@ -4,13 +4,14 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v1.3.2
+	github.com/andrewhowdencom/ore v1.4.0
 	github.com/andrewhowdencom/ore/x/analytics v0.2.6
 	github.com/andrewhowdencom/ore/x/compaction v0.5.1
 	github.com/andrewhowdencom/ore/x/conduit/http v0.9.1
 	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.8
 	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.12
 	github.com/andrewhowdencom/ore/x/export v1.0.0
+	github.com/andrewhowdencom/ore/x/provider/codex v0.1.0
 	github.com/andrewhowdencom/ore/x/provider/openai v0.6.5
 	github.com/andrewhowdencom/ore/x/subagent v0.3.1
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.5
@@ -33,6 +34,8 @@ require (
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
 )
+
+require github.com/andrewhowdencom/ore/x/wire/openai/responses v0.1.0 // indirect
 
 require (
 	github.com/andrewhowdencom/ore/x/provider/retry v0.0.3

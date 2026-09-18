@@ -18,9 +18,10 @@ import (
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/tool"
-	osubagent "github.com/andrewhowdencom/ore/x/subagent"
 	"github.com/andrewhowdencom/ore/x/provider/anthropic"
+	"github.com/andrewhowdencom/ore/x/provider/codex"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
+	osubagent "github.com/andrewhowdencom/ore/x/subagent"
 	xtool "github.com/andrewhowdencom/ore/x/tool"
 	"github.com/andrewhowdencom/ore/x/tool/bash"
 	"github.com/andrewhowdencom/ore/x/tool/filesystem"
@@ -162,6 +163,8 @@ func buildSubagentTool(
 		switch providerKind {
 		case "anthropic":
 			invokeOpts = append(invokeOpts, anthropic.WithTools(parentTools))
+		case "codex":
+			invokeOpts = append(invokeOpts, codex.WithTools(parentTools))
 		default:
 			invokeOpts = append(invokeOpts, openai.WithTools(parentTools))
 		}
