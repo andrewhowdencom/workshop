@@ -50,6 +50,7 @@ import (
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/ore/x/guardrails"
 	"github.com/andrewhowdencom/ore/x/provider/anthropic"
+	"github.com/andrewhowdencom/ore/x/provider/codex"
 	"github.com/andrewhowdencom/ore/x/provider/openai"
 	"github.com/andrewhowdencom/ore/x/provider/retry"
 	slash "github.com/andrewhowdencom/ore/x/slash"
@@ -69,7 +70,7 @@ import (
 
 // ProviderConfig holds the user-supplied configuration for a concrete provider.
 type ProviderConfig struct {
-	Kind        string // e.g. "openai"
+	Kind        string // "openai", "anthropic", or "codex"
 	APIKey      string
 	Model       string
 	BaseURL     string
@@ -1449,6 +1450,8 @@ func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption 
 	switch pc.Kind {
 	case "anthropic":
 		opts = append(opts, anthropic.WithTools(tools))
+	case "codex":
+		opts = append(opts, codex.WithTools(tools))
 	default:
 		// OpenAI-compatible path (Kind == "" or "openai").
 		opts = append(opts, openai.WithTools(tools))
@@ -1545,6 +1548,22 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 			return nil, err
 		}
 		return wrapWithRetry(inner, tracer), nil
+	case "codex":
+		if pc.Model == "" {
+			return nil, fmt.Errorf("missing required provider config: model")
+		}
+		opts := []codex.Option{codex.WithOriginator("workshop")}
+		if tracer != nil {
+			opts = append(opts, codex.WithTracer(tracer))
+		}
+		inner, err := codex.New(opts...)
+		if err != nil {
+			return nil, err
+		}
+		if !inner.LoggedIn() {
+			return nil, fmt.Errorf("codex is not logged in; run `workshop auth login`")
+		}
+		return wrapWithRetry(&codexCompatibilityProvider{inner: inner}, tracer), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
 	}
@@ -1557,7 +1576,9 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 //
 //   - At least one provider must be defined.
 //   - The defaultProviderName must reference a defined name.
-//   - Every defined name must have a non-empty api-key and model.
+//   - Every defined name must have a non-empty model.
+//   - OpenAI and Anthropic providers must have a non-empty api-key; Codex uses
+//     separately persisted ChatGPT credentials instead.
 //   - Every defined name must have a known kind (or "" for openai).
 //
 // Errors include the offending name so a misconfigured config points

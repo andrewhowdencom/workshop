@@ -125,6 +125,47 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewProvider_Codex_MissingModel(t *testing.T) {
+	pc := ProviderConfig{Kind: "codex"}
+	_, err := newProvider("codex-test", &pc, nil)
+	if err == nil {
+		t.Fatal("expected error for missing model")
+	}
+	if err.Error() != "missing required provider config: model" {
+		t.Errorf("unexpected error message: %q", err.Error())
+	}
+}
+
+func TestNewProvider_Codex_NotLoggedIn(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	pc := ProviderConfig{Kind: "codex", Model: "gpt-5.3-codex"}
+	_, err := newProvider("codex-test", &pc, nil)
+	if err == nil {
+		t.Fatal("expected error when Codex credentials are absent")
+	}
+	if !strings.Contains(err.Error(), "workshop auth login") {
+		t.Errorf("error %q does not contain login guidance", err.Error())
+	}
+}
+
+func TestNewProvider_Codex_ConstructsWithoutAPIKey(t *testing.T) {
+	configHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	credentialDir := filepath.Join(configHome, "ore")
+	require.NoError(t, os.MkdirAll(credentialDir, 0o700))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(credentialDir, "codex-credentials.json"),
+		[]byte(`{"access_token":"test-token","account_id":"test-account"}`),
+		0o600,
+	))
+
+	pc := ProviderConfig{Kind: "codex", Model: "gpt-5.3-codex"}
+	prov, err := newProvider("codex-test", &pc, nil)
+	require.NoError(t, err)
+	_, ok := prov.(*retry.Provider)
+	assert.True(t, ok, "codex provider should be wrapped with *retry.Provider, got %T", prov)
+}
+
 // TestNewProvider_WrapsWithRetry locks in the retry-decoration contract:
 // newProvider must always wrap the inner provider with *retry.Provider so
 // transient 5xx/429 errors are retried. If a future refactor drops the

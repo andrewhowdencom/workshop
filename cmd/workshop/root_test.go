@@ -69,6 +69,27 @@ func TestLoadProvidersConfig_Valid(t *testing.T) {
 	}
 }
 
+func TestLoadProvidersConfig_CodexDoesNotRequireAPIKey(t *testing.T) {
+	v := newTestViper()
+	v.Set("provider", "codex")
+	v.Set("providers.codex.kind", "codex")
+	v.Set("providers.codex.model", "gpt-5.3-codex")
+
+	defaultName, providers, err := loadProvidersConfig(v)
+	if err != nil {
+		t.Fatalf("loadProvidersConfig: %v", err)
+	}
+	if defaultName != "codex" {
+		t.Errorf("defaultName = %q, want codex", defaultName)
+	}
+	if providers["codex"].APIKey != "" {
+		t.Errorf("APIKey = %q, want empty", providers["codex"].APIKey)
+	}
+	if providers["codex"].Model != "gpt-5.3-codex" {
+		t.Errorf("Model = %q, want gpt-5.3-codex", providers["codex"].Model)
+	}
+}
+
 // TestLoadProvidersConfig_CacheControl asserts that the cache-control
 // field round-trips through viper into ProviderConfig.CacheControl.
 // Workshop plumbs this onto models.Spec.CacheControl in
