@@ -1563,7 +1563,7 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 		if !inner.LoggedIn() {
 			return nil, fmt.Errorf("codex is not logged in; run `workshop auth login`")
 		}
-		return wrapWithRetry(inner, tracer), nil
+		return wrapWithRetry(&codexCompatibilityProvider{inner: inner}, tracer), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider kind: %q", pc.Kind)
 	}
