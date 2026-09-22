@@ -6,10 +6,7 @@ description: Guidelines for authoring workshop sub-agents — YAML-frontmatter .
 
 # Sub-agent Authoring
 
-A **sub-agent** is a specialist the parent agent invokes mid-turn by emitting a tool call. Each invocation runs a fresh `*agent.Agent` against an isolated conversation thread and returns a structured `{status, summary, findings}` JSON object. Sub-agents are the **invokable** counterpart to **roles** (which are loaded as the parent agent's system prompt).
-
-> **Roles** define the *active* agent (loaded as the system prompt).
-> **Sub-agents** define *invokable* agents (loaded as tools). Use a role for the persona the assistant takes; use a sub-agent for a specialist the assistant can delegate to.
+A **sub-agent** is a specialist the parent agent invokes mid-turn by emitting a tool call. Each invocation runs a fresh `*agent.Agent` against an isolated conversation thread and returns a structured `{status, summary, findings}` JSON object.
 
 ## Inlined Expertise Doctrine
 
@@ -48,7 +45,7 @@ A YAML frontmatter is optional — files without one parse fine and the sub-agen
 | `description` | Recommended | Tool description shown to the model. The model uses this to decide whether to call you. Empty string if absent. |
 | `name` | Ignored | The filename is the source of truth. A `name:` in the frontmatter is silently discarded — this is tested and deliberate, to keep the on-disk ↔ registered mapping deterministic. |
 
-Unknown fields (e.g., a future `pattern:`, `model:`, `tools:`) currently fail YAML parsing because the loader uses strict `yaml.Unmarshal`. This matches role behavior at v1. **Do not** add unsupported fields until they ship; open a GitHub issue first.
+Unknown fields (e.g., a future `pattern:`, `model:`, `tools:`) currently fail YAML parsing because the loader uses strict `yaml.Unmarshal`. **Do not** add unsupported fields until they ship; open a GitHub issue first.
 
 ## Body Content
 

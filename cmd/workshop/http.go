@@ -81,7 +81,6 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithHTTPAddr(viper.GetString("http.addr")),
 		app.WithWorkingDir(cwd),
-		app.WithRole(viper.GetString("role")),
 		app.WithTracer(tracer),
 		app.WithMeter(meter),
 		app.WithCompaction(app.CompactionConfig{

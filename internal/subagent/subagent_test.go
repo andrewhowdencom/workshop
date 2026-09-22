@@ -199,7 +199,7 @@ func TestListSubagentDefinitions_SkipsMalformedYAML(t *testing.T) {
 }
 
 // mockFileSandbox is a test double that implements tool.FileSandbox.
-// Mirrors the same helper in internal/role/role_test.go.
+// It keeps sandbox-path behavior covered without coupling to app wiring.
 type mockFileSandbox struct {
 	resolveFunc func(string) (string, error)
 	wd          string

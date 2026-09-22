@@ -40,7 +40,7 @@ func lastTurn(thr *ledger.Thread) *ledger.Turn {
 	return &t
 }
 
-func seedThreadAt(t *testing.T, repo ledger.Repository, id string, lastAt time.Time, role string) string {
+func seedThreadAt(t *testing.T, repo ledger.Repository, id string, lastAt time.Time) string {
 	t.Helper()
 
 	thr := ledger.NewThread(ledger.WithThreadClock(ledger.ClockFunc(func() time.Time { return lastAt })))
@@ -85,8 +85,8 @@ func TestThreadList_WithStore(t *testing.T) {
 	// rather than the thread object because the new persistence
 	// surface doesn't expose a thread type to callers.
 	now := time.Now()
-	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-2*time.Minute), "developer")
-	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now.Add(-1*time.Minute), "reviewer")
+	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-2*time.Minute))
+	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now.Add(-1*time.Minute))
 
 	// Render directly via the inner helper — bypassing the cobra
 	// path which depends on viper-bound --store.dir. The CLI
@@ -103,13 +103,6 @@ func TestThreadList_WithStore(t *testing.T) {
 	if !strings.Contains(output, thr2) {
 		t.Errorf("output missing thread 2 ID: %s", output)
 	}
-	if !strings.Contains(output, "developer") {
-		t.Errorf("output missing developer role: %s", output)
-	}
-	if !strings.Contains(output, "reviewer") {
-		t.Errorf("output missing reviewer role: %s", output)
-	}
-
 	// Verify sort order: thread2 (more recent) should appear before thread1.
 	idx1 := strings.Index(output, thr1)
 	idx2 := strings.Index(output, thr2)
@@ -136,9 +129,9 @@ tmpDir := t.TempDir()
 	}
 
 	now := time.Now()
-	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-30*time.Minute), "a")
-	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now.Add(-15*time.Minute), "b")
-	thr3 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000003", now, "c")
+	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-30*time.Minute))
+	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now.Add(-15*time.Minute))
+	thr3 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000003", now)
 
 	var buf bytes.Buffer
 	if err := runThreadListWithStore(context.Background(), 20, "", false, repo, &buf); err != nil {
@@ -179,7 +172,7 @@ tmpDir := t.TempDir()
 	ids := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
-		seedThreadAt(t, repo, id, now.Add(time.Duration(i-4)*time.Minute), "r")
+		seedThreadAt(t, repo, id, now.Add(time.Duration(i-4)*time.Minute))
 		ids = append(ids, id)
 	}
 
@@ -223,7 +216,7 @@ tmpDir := t.TempDir()
 	want := make(map[string]bool)
 	for i := 0; i < 5; i++ {
 		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
-		seedThreadAt(t, repo, id, now.Add(time.Duration(i)*time.Minute), "")
+		seedThreadAt(t, repo, id, now.Add(time.Duration(i)*time.Minute))
 		want[id] = true
 	}
 
@@ -258,7 +251,7 @@ tmpDir := t.TempDir()
 	ids := make([]string, 0, 4)
 	for i := 0; i < 4; i++ {
 		id := fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i+1)
-		seedThreadAt(t, repo, id, now.Add(time.Duration(i)*time.Minute), "")
+		seedThreadAt(t, repo, id, now.Add(time.Duration(i)*time.Minute))
 		ids = append(ids, id)
 	}
 
@@ -330,8 +323,8 @@ tmpDir := t.TempDir()
 	}
 
 	now := time.Now()
-	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-1*time.Minute), "a")
-	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now, "b")
+	thr1 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000001", now.Add(-1*time.Minute))
+	thr2 := seedThreadAt(t, repo, "00000000-0000-0000-0000-000000000002", now)
 
 	tests := []struct {
 		name    string

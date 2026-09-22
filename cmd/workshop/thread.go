@@ -299,7 +299,7 @@ func runThreadList(cmd *cobra.Command, args []string) error {
 // O(N) full-thread reads on the first call and O(limit) per
 // subsequent page in --all mode.
 //
-// The table has three columns: ID, LAST ACTIVITY, ROLE. The "LAST
+// The table has two columns: ID and LAST ACTIVITY. The "LAST
 // ACTIVITY" column is the timestamp of the most recent turn.
 func runThreadListWithStore(ctx context.Context, limit int, cursor string, all bool, repo ledger.Repository, w io.Writer) error {
 	entries, err := hydrateAllThreads(ctx, repo)
@@ -308,7 +308,7 @@ func runThreadListWithStore(ctx context.Context, limit int, cursor string, all b
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "ID\tLAST ACTIVITY\tROLE\n")
+	fmt.Fprintf(tw, "ID\tLAST ACTIVITY\n")
 
 	current := cursor
 	for {
@@ -321,13 +321,12 @@ func runThreadListWithStore(ctx context.Context, limit int, cursor string, all b
 		}
 
 		for _, e := range page {
-			role, _ := e.thread.Meta().Get("workshop.role")
 			at := lastActivity(e.thread)
 			last := ""
 			if !at.IsZero() {
 				last = at.Format("2006-01-02 15:04")
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\n", e.id, last, role)
+			fmt.Fprintf(tw, "%s\t%s\n", e.id, last)
 		}
 
 		if all {
@@ -443,18 +442,9 @@ func runThreadExportWithStore(ctx context.Context, repo ledger.Repository, id, f
 // *ledger.Thread into an export.Thread value. The exporters take
 // the value type to avoid pulling ledger into x/export.
 func exportThread(id string, thread *ledger.Thread) export.Thread {
-	// Build a flat metadata map from the thread's Meta accessor.
-	// The thread only exposes Get/Set; we read the keys we know
-	// matter for exporters (currently just "workshop.role"). Any
-	// other keys on the thread are dropped here — the exporters
-	// only surface what the session set explicitly.
-	md := map[string]string{}
-	if role, ok := thread.Meta().Get("workshop.role"); ok {
-		md["workshop.role"] = role
-	}
 	return export.Thread{
 		ID:       id,
-		Metadata: md,
+		Metadata: map[string]string{},
 		Turns:    thread.Turns(),
 	}
 }

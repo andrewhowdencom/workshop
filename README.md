@@ -39,11 +39,7 @@ The binary lands in `$GOBIN` (default `$(go env GOPATH)/bin`). Add that to your 
 > `update_parent`). The previous whole-thread snapshot format
 > (`<uuid>.json`) is no longer written or read. Pre-migration stores
 > are unreadable by the current binary; rebuild from your provider
-> or restore from backup. Role metadata is session-live, not
-> journaled — set `/role` again on restore.
-
-Role files (e.g. `ideation.md`, `build.md`) are loaded from
-`$XDG_DATA_HOME/workshop/roles/` (fallback: `~/.local/share/workshop/roles/`).
+> or restore from backup.
 
 ## Usage
 
@@ -163,16 +159,6 @@ With custom port:
 
 ```bash
 go run ./cmd/workshop http --http.addr :7654
-```
-
-### Start with a role
-
-```bash
-# Via CLI flag
-go run ./cmd/workshop --role ideation
-
-# Via environment variable
-WORKSHOP_ROLE=reviewer go run ./cmd/workshop
 ```
 
 The web chat UI is available at `http://localhost:8080/` (or the configured address).
@@ -333,13 +319,8 @@ file or `WORKSHOP_PROVIDER_<UPPER_NAME>_<FIELD>` env vars to set
 them. The single `--provider` flag selects which named entry is the
 default (inference) provider.
 
-For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info` in the config file, unless `--log-level` is also supplied. The same precedence applies to `role`:
-
-| Source | Example |
-|---|---|
-| Flag | `--role=ideation` |
-| Environment | `WORKSHOP_ROLE=reviewer` |
-| Config file | `role: planner` |
+For example, setting `WORKSHOP_LOG_LEVEL=debug` overrides `log-level: info`
+in the config file, unless `--log-level` is also supplied.
 
 > **Security notice:** `config init` writes `providers.<name>.api-key` in plaintext for every defined named provider. Ensure the generated file is stored securely and never committed to a public repository.
 
@@ -440,12 +421,6 @@ thread state without triggering an LLM turn. They are entered as the first
 text of a user message and processed by the slash interceptor before the
 provider is invoked. The auto-generated `/help` lists every bound command.
 
-- `/role` or `/role help` — show the current role and the list of
-  available role definitions.
-- `/role <name>` — switch the active role (see Roles). Switching to a
-  role that does not exist returns an error.
-- `/role none` — clear the active role for this thread; persists
-  across session restarts until explicitly re-set.
 - `/compact` — force compaction of the conversation history (see Compaction).
 - `/thinking` — report the current thinking level and the available levels.
 - `/thinking <level>` — set the thinking level for this thread, where
@@ -525,49 +500,7 @@ cobra flags, because the names are dynamic.
 
 `--thread` is a per-invocation flag. It is never persisted to the config file and must be supplied on each run that resumes an existing thread.
 
-## Roles
-
-Workshop supports dynamic system prompts via role definitions stored as
-YAML-frontmatter markdown files in the XDG data directory.
-
-- Linux / macOS: `$XDG_DATA_HOME/workshop/roles/`
-  (fallback: `~/.local/share/workshop/roles/`)
-- Windows: `%LOCALAPPDATA%\workshop\roles\`
-
-**File format**
-
-Each role is a `.md` file with YAML frontmatter delimited by `---`:
-
-```markdown
----
-name: reviewer
-description: A critical code reviewer focused on bugs and performance
----
-You are a senior code reviewer. Identify bugs, security issues, and
-performance problems. Provide direct, actionable fixes with concrete
-code suggestions.
-```
-
-> The example above is illustrative. Create your own role files in the
-> XDG data directory to customize the assistant's behavior.
-
-The frontmatter fields are:
-- `name` — Display name for the role (optional; defaults to filename).
-- `description` — Short summary shown in `list_roles` (optional).
-
-Everything after the closing `---` becomes the system prompt body.
-
-> **Note:** Role file loading is sandbox-aware. When a custom `FileSandbox` is
-> configured, role paths are resolved through the sandbox before reading.
-
-**Persistence**
-
-Roles are stored per-thread in thread metadata. When you call
-`switch_role`, the active role persists across session restarts. Resume a
-thread with `--thread <uuid>` to continue with the previously selected
-persona.
-
-**Runtime context**
+## Runtime context
 
 The system prompt automatically includes the current working directory so
 the AI knows which project directory it is operating in. This helps the
@@ -605,15 +538,9 @@ EOF
 
 ## Sub-agents
 
-Workshop exposes **sub-agents** as a parallel declarative construction
-to roles: agent definitions the parent agent can call mid-turn as
-tools. Each invocation runs a fresh `*agent.Agent` against an
+Workshop exposes **sub-agents** as agent definitions the parent agent can
+call mid-turn as tools. Each invocation runs a fresh `*agent.Agent` against an
 isolated conversation thread and returns a structured JSON result.
-
-> **Roles** define the *active* agent (loaded as the system prompt).
-> **Sub-agents** define *invokable* agents (loaded as tools). Use a
-> role for the persona the assistant takes; use a sub-agent for a
-> specialist the assistant can delegate to.
 
 **Sub-agent directory**
 
@@ -691,9 +618,6 @@ your sub-agent filenames (e.g., `my-team.researcher`, not
 | `list_directory` | List files in a directory |
 | `search_files` | Search file contents with a query string |
 | `bash` | Execute shell commands with optional working directory and timeout |
-| `list_roles` | List available role definitions |
-| `get_current_role` | Show the currently active role for this thread |
-| `switch_role` | Switch to a different role by name |
 | `workspace_create` | Create a new git worktree for isolated development |
 | `workspace_destroy` | Remove the git worktree created in this session |
 | `git_commit` | Commit staged changes with automatic co-author attribution |

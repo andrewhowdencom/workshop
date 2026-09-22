@@ -13,9 +13,9 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/andrewhowdencom/ore/ledger"
-	"github.com/andrewhowdencom/workshop/internal/resume"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	"github.com/andrewhowdencom/workshop/internal/app"
+	"github.com/andrewhowdencom/workshop/internal/resume"
 	"github.com/andrewhowdencom/workshop/internal/telemetry"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -31,7 +31,6 @@ func init() {
 	// cobra flags don't fit dynamic names, so they're not exposed here.
 	rootCmd.PersistentFlags().String("provider", "", "Name of the default inference provider (must be a key in the providers: section)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
-	rootCmd.PersistentFlags().String("role", "", "Initial role for new threads")
 	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
 	rootCmd.PersistentFlags().String("pprof.addr", defaultPProfAddr, "TCP address for the pprof server")
 	rootCmd.PersistentFlags().String("telemetry.traces.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL for traces (e.g. http://localhost:4318); empty = disabled")
@@ -335,7 +334,6 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		app.WithDefaultProviderName(defaultName),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithWorkingDir(cwd),
-		app.WithRole(viper.GetString("role")),
 		app.WithTracer(tracer),
 		app.WithMeter(meter),
 		app.WithCompaction(app.CompactionConfig{
