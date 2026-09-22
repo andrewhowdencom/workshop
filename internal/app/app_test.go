@@ -31,7 +31,6 @@ import (
 	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
 
-	"github.com/andrewhowdencom/workshop/internal/role"
 	"github.com/andrewhowdencom/workshop/internal/subagent"
 
 	"github.com/stretchr/testify/assert"
@@ -379,422 +378,9 @@ func TestBuildDefaultSpec(t *testing.T) {
 	})
 }
 
-func TestRoleResolverPath_FallbackWhenEmpty(t *testing.T) {
-	rdir := t.TempDir()
-	resolver := source.NewFileResolver("")
-
-	// With an empty path, the body should be the default prompt.
-	// Mirror what makeSystemPromptTransform does internally.
-	path := resolver.Path()
-	if path != "" {
-		t.Fatalf("path = %q, want empty", path)
-	}
-	// The fallback is defaultPrompt; we don't re-derive it here since
-	// the constant lives in app.go. Just verify the contract: empty
-	// path means the resolver has not been initialised with a role.
-	if _, err := role.LoadBody(filepath.Join(rdir, "missing.md"), nil); err == nil {
-		t.Fatal("LoadBody on missing file should error")
-	}
-}
-
-func TestRoleResolverPath_TracksSetPath(t *testing.T) {
-	rdir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(rdir, "reviewer.md"), []byte("---\nname: reviewer\n---\nYou are a reviewer.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	resolver := source.NewFileResolver("")
-	resolver.SetPath(filepath.Join(rdir, "reviewer.md"))
-
-	body, err := role.LoadBody(resolver.Path(), nil)
-	if err != nil {
-		t.Fatalf("LoadBody error: %v", err)
-	}
-	if body != "You are a reviewer." {
-		t.Errorf("body = %q, want %q", body, "You are a reviewer.")
-	}
-}
-
-func TestRoleSlashHandler(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t)
-	rc.SetSession(sess)
-
-	// Valid role (first set on a fresh thread): the resolver's path
-	// is updated and the role metadata is recorded. A RoleSystem
-	// handoff turn is appended so the LLM is grounded in the new role
-	// on its next turn. Because this is the first set on a fresh
-	// thread, the message uses the "set" framing.
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
-	if err != nil {
-		t.Fatalf("handler error: %v", err)
-	}
-	assert.Equal(t, "Role: reviewer", res.Notice.Content, "successful set should confirm the new role")
-
-	v, ok := sess.Thread().Meta().Get("workshop.role")
-	if !ok || v != "reviewer" {
-		t.Errorf("metadata = %q, want reviewer", v)
-	}
-
-	if got := filepath.Join(dir, "reviewer.md"); rc.Resolver().Path() != got {
-		t.Errorf("resolver path = %q, want %q", rc.Resolver().Path(), got)
-	}
-
-	turns := sess.Thread().Turns()
-	if got := len(turns); got != 1 {
-		t.Fatalf("len(turns) = %d, want 1 (first set appends one transition turn)", got)
-	}
-	assert.Equal(t, state.RoleSystem, turns[0].Role)
-	require.Len(t, turns[0].Artifacts, 1)
-	text, ok := turns[0].Artifacts[0].(artifact.Text)
-	require.True(t, ok)
-	assert.Contains(t, text.Content, "Role set: reviewer.", "first set must use the set framing")
-	assert.NotContains(t, text.Content, "switched", "first set must not use the switched framing")
-	assert.NotContains(t, text.Content, "carried over", "first set must not reference carried-over behavior")
-
-	// Switching to the same role is a no-op: the resolver path is
-	// already correct, no additional turn is appended.
-	res, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "reviewer"})
-	if err != nil {
-		t.Fatalf("handler error on no-op: %v", err)
-	}
-	if got := len(sess.Thread().Turns()); got != 1 {
-		t.Errorf("len(turns) after no-op = %d, want 1 (unchanged)", got)
-	}
-	assert.Equal(t, "Role: reviewer", res.Notice.Content, "no-op should still confirm the active role")
-
-	// Invalid role returns an error (preserves the long-standing contract
-	// that switching to a missing role is a hard failure) and does not
-	// mutate the state. No new turn is appended on failure.
-	_, err = rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
-	if err == nil {
-		t.Fatal("expected error for nonexistent role")
-	}
-	assert.Contains(t, err.Error(), "nonexistent", "error should mention the unknown role name")
-	if got := len(sess.Thread().Turns()); got != 1 {
-		t.Errorf("invalid role should not append a turn: len(turns) = %d, want 1", got)
-	}
-}
-
-// newRoleCommandStream creates a session suitable for the role-command
-// tests below. Pre-bump this helper built a stream via
-// newRoleCommandSession creates a session for slash-handler tests.
-// In the post-junk architecture, sessions are first-class: each test
-// gets a fresh session with its own empty ledger thread. No engine,
-// factory, or provider is required because the slash handlers run
-// against session metadata directly (the engine's role is to drive
-// inference, which the tests in this file do not exercise).
-func newRoleCommandSession(t *testing.T) *session.Session {
+func newTestSession(t *testing.T) *session.Session {
 	t.Helper()
-	id := "test-thread-" + t.Name()
-	thread := ledger.NewThread()
-	return session.New(id, thread)
-}
-
-
-// newRoleCommandSessionWithExistingRole constructs a session bound
-// to a fresh thread, with a pre-seeded "workshop.role" metadata key.
-// Used by the role-preservation tests that exercise attach semantics:
-// the role is set on the thread before the second session attaches,
-// and the test verifies the second session sees the same role.
-func newRoleCommandSessionWithExistingRole(t *testing.T, _ string, role string) *session.Session {
-	t.Helper()
-	sess := newRoleCommandSession(t)
-	sess.Thread().Meta().Set("workshop.role", role)
-	return sess
-}
-
-func TestRoleCommand_NoArgListsRoles(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "planner.md"), []byte("---\ndescription: Plans multi-step work\n---\nBody.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	
-	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t)
-	rc.SetSession(sess)
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
-	require.NoError(t, err, "no-arg form must not return an error")
-	assert.Contains(t, res.Notice.Content, "Role: (none)", "no current role should render as (none)")
-	assert.Contains(t, res.Notice.Content, "  planner (Plans multi-step work)", "description from frontmatter should be shown")
-	assert.Contains(t, res.Notice.Content, "  reviewer", "role with no description should still appear")
-	assert.Contains(t, res.Notice.Content, "Usage: /role <name> | /role none", "usage hint should be present")
-}
-
-func TestRoleCommand_HelpArgListsRoles(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	
-	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t)
-	rc.SetSession(sess)
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "help"})
-	require.NoError(t, err, "/role help must not return an error")
-	assert.Contains(t, res.Notice.Content, "  reviewer", "help form should list roles")
-}
-
-func TestRoleCommand_NoArgShowsCurrentRole(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	
-	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t)
-	rc.SetSession(sess)
-	sess.Thread().Meta().Set("workshop.role", "reviewer")
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
-	require.NoError(t, err)
-	assert.Contains(t, res.Notice.Content, "Role: reviewer", "should show the active role")
-}
-
-func TestRoleCommand_NoArgEmptyDir(t *testing.T) {
-	dir := t.TempDir()
-	
-	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t)
-	rc.SetSession(sess)
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
-	require.NoError(t, err)
-	assert.Contains(t, res.Notice.Content, "No roles available in", "empty dir should produce a helpful message")
-	assert.Contains(t, res.Notice.Content, dir, "the message should point at the configured directory")
-}
-
-func TestRoleCommand_NoArgDoesNotMutateStream(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "reviewer.md"), []byte("Prompt.\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	
-	rc := &roleCommand{rdir: dir}
-	sess := newRoleCommandSession(t)
-	rc.SetSession(sess)
-	sess.Thread().Meta().Set("workshop.role", "reviewer")
-
-	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: ""})
-	require.NoError(t, err)
-
-	got, _ := sess.Thread().Meta().Get("workshop.role")
-	assert.Equal(t, "reviewer", got, "no-arg form must not change the active role")
-}
-
-// newRoleCommandStreamWithRoles creates a session plus two role
-// files on disk (ideation and planner) for the role-switching tests
-// below. The session has no role set; callers set it explicitly when
-// they need a non-empty starting role.
-func newRoleCommandSessionWithRoles(t *testing.T) (string, *session.Session) {
-	t.Helper()
-	dir := t.TempDir()
-	for _, name := range []string{"ideation", "planner"} {
-		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte("Prompt "+name+".\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir, newRoleCommandSession(t)
-}
-
-func TestRoleCommand_UpdateResolver(t *testing.T) {
-	dir, sess := newRoleCommandSessionWithRoles(t)
-	rc := &roleCommand{rdir: dir}
-	rc.SetSession(sess)
-	sess.Thread().Meta().Set("workshop.role", "ideation")
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
-	require.NoError(t, err)
-	assert.Equal(t, "Role: planner", res.Notice.Content)
-
-	// The resolver's path should now point to the new role.
-	want := filepath.Join(dir, "planner.md")
-	assert.Equal(t, want, rc.Resolver().Path(), "resolver should track the new role")
-
-	// A RoleSystem handoff turn should have been appended to ground
-	// the LLM in the new role on its next turn. The fixture's role
-	// files have no YAML frontmatter, so no description parenthetical
-	// is expected.
-	turns := sess.Thread().Turns()
-	require.Equal(t, 1, len(turns), "exactly one transition turn on actual change")
-	assert.Equal(t, state.RoleSystem, turns[0].Role)
-	require.Len(t, turns[0].Artifacts, 1)
-	text, ok := turns[0].Artifacts[0].(artifact.Text)
-	require.True(t, ok)
-	assert.Contains(t, text.Content, "Role switched: ideation → planner.")
-	assert.Contains(t, text.Content, "follow the planner role")
-	assert.NotContains(t, text.Content, "(", "no parenthesized description when destination has no frontmatter")
-}
-
-func TestRoleCommand_SameRoleDoesNotChangeResolver(t *testing.T) {
-	dir, sess := newRoleCommandSessionWithRoles(t)
-	rc := &roleCommand{rdir: dir}
-	sess.Thread().Meta().Set("workshop.role", "planner")
-	rc.SetSession(sess)
-	initialPath := rc.Resolver().Path()
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
-	require.NoError(t, err)
-	assert.Equal(t, "Role: planner", res.Notice.Content)
-
-	// The path is unchanged. SetPath is called but with the same value.
-	assert.Equal(t, initialPath, rc.Resolver().Path())
-
-	turns := sess.Thread().Turns()
-	if len(turns) != 0 {
-		t.Errorf("len(turns) = %d, want 0", len(turns))
-	}
-}
-
-func TestRoleCommand_SetStreamSeedsResolverFromMetadata(t *testing.T) {
-	dir, sess := newRoleCommandSessionWithRoles(t)
-	rc := &roleCommand{rdir: dir}
-	sess.Thread().Meta().Set("workshop.role", "planner")
-	rc.SetSession(sess)
-
-	want := filepath.Join(dir, "planner.md")
-	assert.Equal(t, want, rc.Resolver().Path(), "SetSession should seed the resolver from metadata")
-}
-
-func TestRoleCommand_NoneClearsActiveRole(t *testing.T) {
-	dir, sess := newRoleCommandSessionWithRoles(t)
-	rc := &roleCommand{rdir: dir}
-	rc.SetSession(sess)
-	sess.Thread().Meta().Set("workshop.role", "ideation")
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
-	require.NoError(t, err, "/role none must not return an error when a role is set")
-	assert.Equal(t, "Role: (none)", res.Notice.Content, "successful clear should report the new state")
-
-	// The role metadata is preserved with the empty-string sentinel
-	// (rather than deleted) so that defaultMeta's re-seed on Attach
-	// can distinguish "explicitly cleared" from "never set".
-	v, ok := sess.Thread().Meta().Get("workshop.role")
-	assert.True(t, ok, "workshop.role should still be present after clear, just empty (sentinel)")
-	assert.Equal(t, "", v)
-
-	assert.Equal(t, "", rc.Resolver().Path(), "resolver path should be reset")
-
-	// A RoleSystem handoff turn should be appended on the actual
-	// clear so the LLM is grounded in the cleared state on its next
-	// turn. The transition uses the "cleared" framing.
-	turns := sess.Thread().Turns()
-	require.Equal(t, 1, len(turns), "exactly one transition turn on actual clear")
-	assert.Equal(t, state.RoleSystem, turns[0].Role)
-	require.Len(t, turns[0].Artifacts, 1)
-	text, ok := turns[0].Artifacts[0].(artifact.Text)
-	require.True(t, ok)
-	assert.Contains(t, text.Content, "Role cleared: was ideation, now (none).")
-	assert.Contains(t, text.Content, "follow the default prompt")
-}
-
-func TestRoleCommand_NoneIdempotentOnEmpty(t *testing.T) {
-	dir, sess := newRoleCommandSessionWithRoles(t)
-	rc := &roleCommand{rdir: dir}
-	rc.SetSession(sess)
-	// Pre-seed with the empty-string sentinel to simulate an
-	// already-cleared thread.
-	sess.Thread().Meta().Set("workshop.role", "")
-
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
-	require.NoError(t, err, "/role none on an already-cleared thread must not return an error")
-	assert.Equal(t, "Role: (none)", res.Notice.Content)
-
-	v, ok := sess.Thread().Meta().Get("workshop.role")
-	assert.True(t, ok)
-	assert.Equal(t, "", v)
-
-	assert.Equal(t, 0, len(sess.Thread().Turns()))
-}
-
-func TestRoleCommand_NoneFromInvalidRole(t *testing.T) {
-	dir, sess := newRoleCommandSessionWithRoles(t)
-	rc := &roleCommand{rdir: dir}
-	rc.SetSession(sess)
-	sess.Thread().Meta().Set("workshop.role", "ideation")
-
-	// First, attempt an invalid switch — the role metadata should
-	// remain untouched (the existing "role not found" contract).
-	// The invalid switch appends no turn.
-	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "nonexistent"})
-	require.Error(t, err, "invalid role must error")
-
-	v, ok := sess.Thread().Meta().Get("workshop.role")
-	require.True(t, ok, "metadata should still be set after the failed switch")
-	assert.Equal(t, "ideation", v)
-	assert.Equal(t, 0, len(sess.Thread().Turns()), "failed switch must not append a turn")
-
-	// Now /role none succeeds even though the previous attempt
-	// failed — clearing is independent of the current state's
-	// validity. Because ideation was the active role all along,
-	// the success branch is an actual change and appends one
-	// transition turn.
-	res, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "none"})
-	require.NoError(t, err)
-	assert.Equal(t, "Role: (none)", res.Notice.Content)
-	assert.Equal(t, 1, len(sess.Thread().Turns()), "successful clear should append one transition turn")
-
-	v, ok = sess.Thread().Meta().Get("workshop.role")
-	assert.True(t, ok)
-	assert.Equal(t, "", v)
-}
-
-// newRoleCommandStreamWithFrontmatterRoles creates a stream plus
-// two role files with YAML frontmatter describing their purpose.
-// Used by the description-rendering test that exercises the
-// transition message's parenthetical label.
-func newRoleCommandSessionWithFrontmatterRoles(t *testing.T) (string, *session.Session) {
-	t.Helper()
-	dir := t.TempDir()
-	roles := map[string]string{
-		"ideation": "Generates options and explores possibilities.",
-		"planner":  "Plans multi-step work.",
-	}
-	for name, desc := range roles {
-		body := fmt.Sprintf("---\ndescription: %s\n---\nPrompt %s.\n", desc, name)
-		if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(body), 0644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir, newRoleCommandSession(t)
-}
-
-// TestRoleCommand_TransitionTurnWithDescription verifies the
-// destination role's description from YAML frontmatter is rendered
-// into the transition message, while the previous role's name stays
-// bare. The description grounds the LLM in the new role's purpose on
-// its next turn.
-func TestRoleCommand_TransitionTurnWithDescription(t *testing.T) {
-	dir, sess := newRoleCommandSessionWithFrontmatterRoles(t)
-	rc := &roleCommand{rdir: dir}
-	rc.SetSession(sess)
-	sess.Thread().Meta().Set("workshop.role", "ideation")
-
-	_, err := rc.Handler(context.Background(), nil, slash.Command{Name: "role", Input: "planner"})
-	require.NoError(t, err)
-
-	turns := sess.Thread().Turns()
-	require.Equal(t, 1, len(turns))
-	text, ok := turns[0].Artifacts[0].(artifact.Text)
-	require.True(t, ok)
-
-	assert.Contains(t, text.Content, "planner (Plans multi-step work.)", "destination role must include its description parenthetical")
-	assert.Contains(t, text.Content, "ideation → planner", "previous role is rendered bare, destination role is rendered with description")
-	assert.NotContains(t, text.Content, "ideation (Generates options", "previous role must NOT carry its description parenthetical")
+	return session.New("test-thread-"+t.Name(), ledger.NewThread())
 }
 
 // TestCompactSlashHandler_ZeroBudgetStillCompacts verifies that /compact
@@ -804,7 +390,7 @@ func TestRoleCommand_TransitionTurnWithDescription(t *testing.T) {
 // "disable /compact". The handler must succeed and the stream must gain
 // a summary turn.
 func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	for i := 0; i < 5; i++ {
 		if _, err := sess.Submit(context.Background(), ledger.RoleUser, artifact.Text{Content: fmt.Sprintf("message %d", i)}); err != nil {
 			t.Fatalf("submit event %d: %v", i, err)
@@ -846,7 +432,7 @@ func TestCompactSlashHandler_ZeroBudgetStillCompacts(t *testing.T) {
 }
 
 func TestCompactSlashHandler_Enabled(t *testing.T) {
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 
 	// Pre-populate the session with 5 user turns.
 	for i := 0; i < 5; i++ {
@@ -1015,12 +601,6 @@ func TestNameSlashHandler_TrimsInput(t *testing.T) {
 	}
 }
 
-type testSlashProvider struct{}
-
-func (p *testSlashProvider) Invoke(ctx context.Context, s state.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
-	return nil
-}
-
 type testSummarizeProvider struct{}
 
 func (p *testSummarizeProvider) Invoke(ctx context.Context, s state.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
@@ -1047,7 +627,7 @@ func TestStatusZoneMapping_ThinkingInLifecycle(t *testing.T) {
 	}
 }
 
-func TestRoleToolSchemas(t *testing.T) {
+func TestToolSchemas(t *testing.T) {
 	tests := []struct {
 		name   string
 		schema map[string]any
@@ -1163,7 +743,9 @@ func TestBuildManager_Smoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupSession error: %v", err)
 	}
-	if setup == nil { t.Fatal("setupSession returned nil setup") }
+	if setup == nil {
+		t.Fatal("setupSession returned nil setup")
+	}
 }
 
 func TestBuildManager_WithCompaction(t *testing.T) {
@@ -1184,7 +766,9 @@ func TestBuildManager_WithCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupSession error: %v", err)
 	}
-	if setup == nil { t.Fatal("setupSession returned nil setup") }
+	if setup == nil {
+		t.Fatal("setupSession returned nil setup")
+	}
 }
 
 func TestBuildManager_WithWorkingDir(t *testing.T) {
@@ -1208,115 +792,8 @@ func TestBuildManager_WithWorkingDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupSession error: %v", err)
 	}
-	if setup == nil { t.Fatal("setupSession returned nil setup") }
-}
-
-func TestBuildManager_SeedsRoleForNewThread(t *testing.T) {
-	setup, err := setupSession(&config{
-		storeDir: t.TempDir(),
-		role:     "reviewer",
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:   "openai",
-				APIKey: "sk-test-dummy",
-				Model:  "test-model",
-			},
-		},
-		defaultProviderName: "test",
-	})
-	if err != nil {
-		t.Fatalf("setupSession error: %v", err)
-	}
-	_ = setup // Verify setup constructs without error.
-
-	// defaultMeta seeds the role into the session's metadata at
-	// construction. Construct a session and seed.
-	sess := setup.newSession()
-	if err := setup.registry.Register(sess); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	setup.seedMetadata(sess)
-
-	workshopRole, ok := sess.GetMetadata("workshop.role")
-	if !ok {
-		t.Fatal("workshop.role not seeded for new thread")
-	}
-	if workshopRole != "reviewer" {
-		t.Errorf("workshop.role = %q, want reviewer", workshopRole)
-	}
-	if _, ok := sess.GetMetadata("role"); ok {
-		t.Error("role should not be seeded for new threads (use workshop.role only)")
-	}
-}
-
-func TestBuildManager_PreservesExistingRoleOnAttach(t *testing.T) {
-	storeDir := t.TempDir()
-
-	// First session: create with role "reviewer"
-	setup1, err := setupSession(&config{
-		storeDir: storeDir,
-		role:     "reviewer",
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:   "openai",
-				APIKey: "sk-test-dummy",
-				Model:  "test-model",
-			},
-		},
-		defaultProviderName: "test",
-	})
-	if err != nil {
-		t.Fatalf("setupSession error: %v", err)
-	}
-	_ = setup1
-
-	// Create session with role "reviewer".
-	sess1 := newRoleCommandSessionWithExistingRole(t, storeDir, "reviewer")
-	threadID := sess1.ID()
-
-	// Simulate role change during session (like /role command).
-	sess1.SetMetadata("workshop.role", "writer")
-	if err := setup1.repo.SaveTurn(context.Background(), threadID, &ledger.Turn{ID: "test", Role: ledger.RoleSystem}); err != nil {
-		t.Fatalf("save turn: %v", err)
-	}
-
-	// Second session: attach with different role "planner"
-	setup2, err := setupSession(&config{
-		storeDir: storeDir,
-		role:     "planner",
-		providers: map[string]ProviderConfig{
-			"test": {
-				Kind:   "openai",
-				APIKey: "sk-test-dummy",
-				Model:  "test-model",
-			},
-		},
-		defaultProviderName: "test",
-	})
-	if err != nil {
-		t.Fatalf("setupSession error: %v", err)
-	}
-	_ = setup2
-
-	// Attach to the existing thread via the repo.
-	sess2, err := setup2.attachSession(context.Background(), threadID)
-	if err != nil {
-		t.Fatalf("attach session: %v", err)
-	}
-	// Seed metadata onto the attached session (attachSession itself
-	// only hydrates the thread; session metadata is a per-session
-	// live store, not journaled).
-	setup2.seedMetadata(sess2)
-
-	// In the new model, thread metadata does not persist across
-	// sessions. The role set in the first session is lost on
-	// attach; the second session's seed is "planner" (from
-	// cfg.role). This is a known regression: pre-migration,
-	// defaultMeta preserved the role. We assert the new seed here
-	// to document the change.
-	workshopRole, _ := sess2.GetMetadata("workshop.role")
-	if workshopRole != "planner" {
-		t.Errorf("workshop.role = %q, want planner (new session re-seeds)", workshopRole)
+	if setup == nil {
+		t.Fatal("setupSession returned nil setup")
 	}
 }
 
@@ -1368,7 +845,7 @@ func TestCoAuthoredByTrailer(t *testing.T) {
 }
 
 func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	handler := makeWorkspaceCreateHandler(thr)
 	_, err := handler(context.Background(), nil, map[string]any{})
 	if err == nil {
@@ -1377,7 +854,7 @@ func TestMakeWorkspaceCreateHandler_MissingBranch(t *testing.T) {
 }
 
 func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	handler := makeWorkspaceDestroyHandler(thr)
 	_, err := handler(context.Background(), nil, map[string]any{})
 	if err == nil {
@@ -1389,7 +866,7 @@ func TestMakeWorkspaceDestroyHandler_NoWorktree(t *testing.T) {
 }
 
 func TestMakeGitCommitHandler_MissingTitle(t *testing.T) {
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	handler := makeGitCommitHandler(thr, ProviderConfig{Kind: "openai", Model: "gpt-4o"})
 	_, err := handler(context.Background(), nil, map[string]any{})
 	if err == nil {
@@ -1420,7 +897,7 @@ func TestMakeWorkspaceCreateDestroyIntegration(t *testing.T) {
 		t.Fatalf("git commit: %v", err)
 	}
 
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 
 	oldWd, err := os.Getwd()
 	if err != nil {
@@ -1516,7 +993,7 @@ func TestMakeGitCommitHandler_Integration(t *testing.T) {
 	}
 	defer func() { _ = os.Chdir(oldWd) }()
 
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
 	handler := makeGitCommitHandler(thr, pc)
 	_, err = handler(context.Background(), nil, map[string]any{"title": "Update greeting", "message": "Changed text"})
@@ -1552,24 +1029,8 @@ func TestSystemPrompt_WithCWD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	// No role is set in this test; the closure mirrors the production
-	// resolver-based dispatch in makeSystemPromptTransform and falls
-	// back to defaultPrompt when the resolver path is empty.
-	resolver := source.NewFileResolver("")
-	currentPrompt := func() string {
-		path := resolver.Path()
-		if path == "" {
-			return defaultPrompt
-		}
-		body, err := role.LoadBody(path, nil)
-		if err != nil {
-			return defaultPrompt
-		}
-		return body
-	}
-
 	sp, err := systemprompt.New(
-		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(func() string { return defaultPrompt }),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 	)
 	if err != nil {
@@ -1619,24 +1080,8 @@ func TestSystemPrompt_WithoutCWD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	// No role is set in this test; the closure mirrors the production
-	// resolver-based dispatch in makeSystemPromptTransform and falls
-	// back to defaultPrompt when the resolver path is empty.
-	resolver := source.NewFileResolver("")
-	currentPrompt := func() string {
-		path := resolver.Path()
-		if path == "" {
-			return defaultPrompt
-		}
-		body, err := role.LoadBody(path, nil)
-		if err != nil {
-			return defaultPrompt
-		}
-		return body
-	}
-
 	sp, err := systemprompt.New(
-		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(func() string { return defaultPrompt }),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 	)
 	if err != nil {
@@ -1683,24 +1128,8 @@ func TestSystemPrompt_WithAgentsMD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	// No role is set in this test; the closure mirrors the production
-	// resolver-based dispatch in makeSystemPromptTransform and falls
-	// back to defaultPrompt when the resolver path is empty.
-	resolver := source.NewFileResolver("")
-	currentPrompt := func() string {
-		path := resolver.Path()
-		if path == "" {
-			return defaultPrompt
-		}
-		body, err := role.LoadBody(path, nil)
-		if err != nil {
-			return defaultPrompt
-		}
-		return body
-	}
-
 	sp, err := systemprompt.New(
-		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(func() string { return defaultPrompt }),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
 	)
@@ -1767,24 +1196,8 @@ func TestSystemPrompt_WithAgentsMDNearestFirst(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	// No role is set in this test; the closure mirrors the production
-	// resolver-based dispatch in makeSystemPromptTransform and falls
-	// back to defaultPrompt when the resolver path is empty.
-	resolver := source.NewFileResolver("")
-	currentPrompt := func() string {
-		path := resolver.Path()
-		if path == "" {
-			return defaultPrompt
-		}
-		body, err := role.LoadBody(path, nil)
-		if err != nil {
-			return defaultPrompt
-		}
-		return body
-	}
-
 	sp, err := systemprompt.New(
-		systemprompt.WithContentFunc(currentPrompt),
+		systemprompt.WithContentFunc(func() string { return defaultPrompt }),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
 	)
@@ -1833,8 +1246,6 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thr := newRoleCommandSession(t)
-
 	cfg := &config{
 		workingDir: dir,
 		conduit:    "TUI",
@@ -1848,7 +1259,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit(), source.NewFileResolver(""))
+	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit())
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1923,8 +1334,6 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thr := newRoleCommandSession(t)
-
 	cfg := &config{
 		workingDir: child,
 		conduit:    "TUI",
@@ -1938,7 +1347,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit(), source.NewFileResolver(""))
+	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit())
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1971,8 +1380,6 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 	dir := t.TempDir() // empty directory, no AGENTS.md or CLAUDE.md
 
-	thr := newRoleCommandSession(t)
-
 	cfg := &config{
 		workingDir: dir,
 		providers: map[string]ProviderConfig{
@@ -1985,7 +1392,7 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, thr, skills.NewToolkit(), source.NewFileResolver(""))
+	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit())
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -2339,7 +1746,7 @@ func TestSkillsFragment_SurfacesSubagentAuthoring(t *testing.T) {
 
 func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2355,7 +1762,7 @@ func TestWorkshopSandbox_ResolvePath_RelativeInWorktree(t *testing.T) {
 
 func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
 	worktree := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2370,7 +1777,7 @@ func TestWorkshopSandbox_ResolvePath_AbsoluteUnchanged(t *testing.T) {
 }
 
 func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	relPath := "file.txt"
@@ -2385,7 +1792,7 @@ func TestWorkshopSandbox_ResolvePath_NoWorktree(t *testing.T) {
 
 func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2396,7 +1803,7 @@ func TestWorkshopSandbox_WorkingDirectory_WithWorktree(t *testing.T) {
 }
 
 func TestWorkshopSandbox_WorkingDirectory_WithoutWorktree(t *testing.T) {
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
 	got := sb.WorkingDirectory()
@@ -2411,7 +1818,7 @@ func TestReadFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2436,7 +1843,7 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 	}
 
 	worktree := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2456,7 +1863,7 @@ func TestReadFile_AbsolutePathUnchangedInWorktree(t *testing.T) {
 
 func TestWriteFile_ResolvesRelativePathInWorktree(t *testing.T) {
 	worktree := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2483,7 +1890,7 @@ func TestEditFile_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2514,7 +1921,7 @@ func TestListDirectory_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2538,7 +1945,7 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2561,7 +1968,7 @@ func TestSearchFiles_ResolvesRelativePathInWorktree(t *testing.T) {
 
 func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
 	worktree := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2582,7 +1989,7 @@ func TestBash_DefaultsToWorktreeDirectory(t *testing.T) {
 func TestBash_ExplicitWorkingDirectoryRespected(t *testing.T) {
 	worktree := t.TempDir()
 	explicitDir := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	sb := &workshopSandbox{name: "test", mr: thr}
@@ -2640,7 +2047,7 @@ func TestGitCommitHandler_WorktreeAware(t *testing.T) {
 		t.Fatalf("git add in worktree: %v", err)
 	}
 
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktreePath)
 
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
@@ -2665,7 +2072,7 @@ func TestGitCommitHandler_WorktreeAware(t *testing.T) {
 }
 
 func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", "/some/worktree/path")
 	handler := makeWorkspaceCreateHandler(thr)
 	_, err := handler(context.Background(), nil, map[string]any{"branch": "nested"})
@@ -2679,7 +2086,7 @@ func TestWorkspaceCreateHandler_NestedRejection(t *testing.T) {
 
 func TestWorkspaceDestroy_RevertsContext(t *testing.T) {
 	worktree := t.TempDir()
-	thr := newRoleCommandSession(t)
+	thr := newTestSession(t)
 	thr.SetMetadata("workshop.worktree.path", worktree)
 
 	// Verify sandbox resolves relative paths to worktree
@@ -2794,7 +2201,7 @@ func TestCompactionNotifier(t *testing.T) {
 func TestCompactSlashHandler_Notifies(t *testing.T) {
 	prov := &testSummarizeProvider{}
 
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 
 	var notified []state.Turn
 	var notifiedBoundary compaction.BoundaryInfo
@@ -2886,7 +2293,9 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupSession error: %v", err)
 	}
-	if setup == nil { t.Fatal("setupSession returned nil setup") }
+	if setup == nil {
+		t.Fatal("setupSession returned nil setup")
+	}
 
 	// Verify that the notifier is still functional after buildManager.
 	testTurns := []state.Turn{{Role: state.RoleUser}}
@@ -2902,9 +2311,9 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 // per-handler stream helper is no longer needed.
 
 func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
-	
+
 	tc := &thinkingCommand{}
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: ""})
@@ -2914,9 +2323,9 @@ func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
 }
 
 func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
-	
+
 	tc := &thinkingCommand{}
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	tc.SetSession(sess)
 
 	res, err := tc.Handler(context.Background(), nil, slash.Command{Name: "thinking", Input: "high"})
@@ -2932,10 +2341,10 @@ func TestThinkingCommand_ValidLevelSetsMetadata(t *testing.T) {
 }
 
 func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
-	
+
 	tc := &thinkingCommand{}
 	// Pre-set a known level so we can verify it isn't overwritten.
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	tc.SetSession(sess)
 	sess.Thread().Meta().Set("workshop.thinking_level", "medium")
 
@@ -2949,9 +2358,9 @@ func TestThinkingCommand_InvalidLevelNoOp(t *testing.T) {
 }
 
 func TestThinkingCommand_OffIsValid(t *testing.T) {
-	
+
 	tc := &thinkingCommand{}
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	tc.SetSession(sess)
 
 	// "off" is a valid level that disables thinking; it must be accepted
@@ -2982,10 +2391,9 @@ func TestThinkingCommand_NoStreamError(t *testing.T) {
 // buildInvokeOptions-then-thinkLevelOption path: thinking level
 // lives on the spec, not on InvokeOptions.
 func TestThinkingCommand_LevelRoundTripsThroughDefaultSpec(t *testing.T) {
-	
 
 	// Simulate the user setting the level via /thinking.
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	sess.Thread().Meta().Set("workshop.thinking_level", "high")
 
 	cfg := &config{
@@ -3032,7 +2440,9 @@ func TestBuildManager_CompactionProvider_DefaultsToInference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupSession: %v", err)
 	}
-	if setup == nil { t.Fatal("setupSession returned nil setup") }
+	if setup == nil {
+		t.Fatal("setupSession returned nil setup")
+	}
 }
 
 // TestBuildManager_CompactionProvider_DistinctFromInference verifies
@@ -3057,7 +2467,9 @@ func TestBuildManager_CompactionProvider_DistinctFromInference(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupSession: %v", err)
 	}
-	if setup == nil { t.Fatal("setupSession returned nil setup") }
+	if setup == nil {
+		t.Fatal("setupSession returned nil setup")
+	}
 }
 
 // TestBuildManager_CompactionProvider_UndefinedErrors verifies the
@@ -3110,12 +2522,14 @@ func TestBuildManager_CompactionZeroBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setupSession: %v", err)
 	}
-	if setup == nil { t.Fatal("setupSession returned nil setup") }
+	if setup == nil {
+		t.Fatal("setupSession returned nil setup")
+	}
 }
 
 // newAnalyticsCommandStream was used when analytics-command tests
 // needed their own stream. The slash handler is now session-based;
-// tests use newRoleCommandSession, so this helper is no longer needed.
+// Tests use newTestSession, so this helper is no longer needed.
 
 func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
 	// With no stream wired, the handler must surface the friendly
@@ -3130,9 +2544,9 @@ func TestAnalyticsCommand_NoStreamFriendlyMessage(t *testing.T) {
 func TestAnalyticsCommand_EmptyThreadFriendlyMessage(t *testing.T) {
 	// A freshly-created thread has no turns yet. AnalyzeTurns returns
 	// nil and Render translates that to the same friendly message.
-	
+
 	ac := &analyticsCommand{}
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})
@@ -3145,7 +2559,7 @@ func TestAnalyticsCommand_RendersTable(t *testing.T) {
 	// structural shape rather than exact formatting so the test is
 	// resilient to changes in the column layout.
 
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	if _, err := sess.Submit(context.Background(), ledger.RoleUser, artifact.Text{Content: "first"}); err != nil {
 		t.Fatalf("submit first turn: %v", err)
 	}
@@ -3170,9 +2584,9 @@ func TestAnalyticsCommand_ConsumesEvent(t *testing.T) {
 	// (Result.Replace is nil) so no LLM inference is triggered. The
 	// slash registry uses Result.Replace to decide whether to feed
 	// the event into the inference pipeline.
-	
+
 	ac := &analyticsCommand{}
-	sess := newRoleCommandSession(t)
+	sess := newTestSession(t)
 	ac.SetSession(sess)
 
 	res, err := ac.Handler(context.Background(), nil, slash.Command{Name: "analytics", Input: ""})

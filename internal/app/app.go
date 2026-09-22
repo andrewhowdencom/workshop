@@ -3,13 +3,9 @@
 // conduit, system prompt transforms, guardrails, and tool registry to create
 // an interactive coding agent.
 //
-// The system prompt is composed dynamically from three sources:
-//
-//  1. The active role definition (or a default prompt if none is set).
-//  2. A contextual sentence describing the current working directory.
-//  3. Repository-level instructions discovered by walking parent directories
-//     from the working directory toward the root, collecting AGENTS.md and
-//     CLAUDE.md files nearest-first.
+// The system prompt combines the default prompt, current working directory,
+// available skills, runtime details, and repository instructions discovered by
+// walking from the working directory toward the root.
 package app
 
 import (
@@ -27,7 +23,6 @@ import (
 	"time"
 
 	"github.com/andrewhowdencom/ore/agent"
-	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/engine"
 	"github.com/andrewhowdencom/ore/ledger"
@@ -64,7 +59,6 @@ import (
 
 	"github.com/adrg/xdg"
 
-	"github.com/andrewhowdencom/workshop/internal/role"
 	"github.com/andrewhowdencom/workshop/internal/subagent"
 )
 
@@ -173,7 +167,6 @@ type config struct {
 	defaultProviderName string
 	compaction          CompactionConfig
 	workingDir          string
-	role                string
 	tracer              trace.Tracer
 	meter               metric.Meter
 	conduit             string // e.g. "TUI", "HTTP", "stdio"
@@ -233,11 +226,6 @@ func WithWorkingDir(dir string) Option {
 	return func(c *config) { c.workingDir = dir }
 }
 
-// WithRole sets the initial role name for new threads.
-func WithRole(name string) Option {
-	return func(c *config) { c.role = name }
-}
-
 // WithCompaction sets the compaction configuration.
 func WithCompaction(c CompactionConfig) Option {
 	return func(cfg *config) { cfg.compaction = c }
@@ -274,7 +262,6 @@ var statusZoneMapping = map[string]string{
 	"thread_id":               "context",
 	"cwd":                     "context",
 	"git_branch":              "context",
-	"workshop.role":           "context",
 	"workshop.thinking_level": "context",
 	"tui.pid":                 "context",
 	"model":                   "context",
@@ -324,7 +311,6 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		tui.WithTracer(cfg.tracer),
 		tui.WithStatusZones(statusZoneMapping),
 		tui.WithStatusLabels(map[string]string{
-			"workshop.role":           "role",
 			"workshop.thinking_level": "thinking",
 		}),
 	)
@@ -428,288 +414,6 @@ type metadataStore interface {
 	SetMetadata(key, value string)
 }
 
-// roleCommand handles the /role slash command for switching roles
-// without triggering an LLM turn. With no argument (or an explicit
-// "help" subcommand) it returns a feedback message listing the
-// current role and the available role definitions. With a name it
-// validates the role exists and updates the active resolver's path.
-// With `none` it clears the active role by resetting the resolver
-// path and setting workshop.role to the empty-string sentinel,
-// matching the fresh-thread "no role" state. The clear is idempotent.
-//
-// When the active role actually changes, a `RoleSystem` handoff
-// turn is appended before the resolver and metadata are mutated so
-// the LLM is not "surprised" by its own conversation history
-// produced under a prior role. Submit-before-mutate ordering keeps
-// state consistent on submit failure.
-type roleCommand struct {
-	mu       sync.Mutex
-	rdir     string
-	session  *session.Session
-	resolver *source.FileResolver
-}
-
-// SetSession is called from the tui engine factory when a new
-// session is bound. It creates a fresh resolver for the session
-// and seeds it from the session's current role metadata, if any.
-// Existing sessions preserve their previously-set role; new sessions
-// start with no role until one is selected via /role.
-//
-// session-based design: the slash handler reads and writes through
-// the *session.Session directly. Pre-bump the handler held a
-// The TUI conduit is session-based;
-// slashReg.Intercept threads the session through; making the handler
-// session-only keeps the data flow uniform across conduits.
-//
-// Persistence note: the handler writes to both
-// sess.Thread().Metadata (which the journal does not persist) and
-// sess.SetMetadata (which drives the live TUI status zone via
-// PropertiesEvent and seeds this resolver on reload). Writing to
-// only one of the two stores would either lose persistence across
-// TUI restarts or leave the status zone stale. See
-// writeRole for the dual-write rationale.
-func (c *roleCommand) SetSession(sess *session.Session) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.session = sess
-	c.resolver = source.NewFileResolver("")
-	// Read the role from thread.Metadata (the persisted store),
-	// not session.metadata (in-memory only). The handler writes
-	// to both via writeRole, so thread.Metadata is the durable
-	// source across TUI restarts.
-	if role, ok := sess.Thread().Meta().Get("workshop.role"); ok && role != "" {
-		c.resolver.SetPath(filepath.Join(c.rdir, role+".md"))
-	}
-}
-
-// Resolver returns the resolver for the current session. Returns nil
-// when no session is attached. Intended to be passed to
-// makeSystemPromptTransform so the system prompt can read the
-// active role directly from the file, without going through metadata.
-func (c *roleCommand) Resolver() *source.FileResolver {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.resolver
-}
-
-// writeRole persists the active role in two places and emits a
-// PropertiesEvent for live status updates. The dual-write is
-// load-bearing:
-//
-//   - sess.Thread().Metadata is no longer journaled;
-//     disk. Without this write, /role would reset across TUI
-//     restarts.
-//   - sess.SetMetadata drives the TUI status zone via
-//     PropertiesEvent AND seeds this handler's resolver on
-//     SetSession (see the comment on SetSession above).
-//
-// Writing to only one of the two stores would either drop the
-// role on restart or leave the TUI's status display stale. Both
-// writes are required.
-//
-// The caller MUST hold c.mu. writeRole does not lock because the
-// only callers are Handler and SetSession, both of which already
-// hold the lock. Re-locking here would deadlock.
-func (c *roleCommand) writeRole(name string) {
-	if c.session == nil {
-		return
-	}
-	c.session.Thread().Meta().Set("workshop.role", name)
-	c.session.SetMetadata("workshop.role", name)
-}
-
-// currentRole returns the active role from session metadata, or the
-// empty string when no role is set (or no session is attached). The
-// empty string is rendered as "(none)" by callers.
-//
-// Reads from sess.Thread().Meta() (the persisted source of truth
-// across TUI restarts) rather than session.metadata. The two stores
-// stay in sync because writeRole writes to both.
-func (c *roleCommand) currentRole() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.session == nil {
-		return ""
-	}
-	if v, ok := c.session.Thread().Meta().Get("workshop.role"); ok {
-		return v
-	}
-	return ""
-}
-
-// Handler dispatches the /role slash command. With no argument (or
-// "help") it lists the available roles. With a name it validates the
-// role exists, updates the active resolver's path, and writes the
-// role name to stream metadata. An unknown role returns an error so
-// the user sees the failure rather than having their active role
-// silently changed.
-func (c *roleCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
-	args := slash.Fields(cmd.Input)
-	// "help" is reserved as a subcommand so that /role help always
-	// shows the role list, mirroring /role with no argument. This
-	// matches the convention used by other slash commands and means
-	// a user-defined role cannot collide with the help affordance.
-	if len(args) == 0 || args[0] == "help" {
-		return slash.Result{
-			Notice: loop.Notice{
-				Content:  c.formatRoleList(),
-				Severity: loop.SeverityInfo,
-			},
-		}, nil
-	}
-
-	name := args[0]
-	// "none" is reserved as a subcommand so that /role none always
-	// clears the active role, mirroring the fresh-thread state. This
-	// matches the convention used by other slash commands and means a
-	// user-defined role literally named "none" cannot collide with the
-	// clear affordance. The check happens before role.LoadRole so that
-	// "none" is never caught by the "role not found" path.
-	if name == "none" {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.session == nil || c.resolver == nil {
-			return slash.Result{}, fmt.Errorf("no active session")
-		}
-		// Reset the resolver path and set the role metadata to the
-		// empty-string sentinel. FileResolver.Resolve treats an empty
-		// path the same as "no role file", matching the fresh-thread
-		// state, so the system prompt transform emits no role content.
-		// The empty-string sentinel is necessary, not optional: the
-		// defaultMeta seed runs on every Attach and re-applies the
-		// CLI cfg.role whenever the role key is absent, which would
-		// silently overwrite a cleared state on reopen. Empty-string
-		// is consistent with how the workshop subsystem already clears
-		// workshop.worktree.path on worktree destroy, and every reader
-		// of workshop.role in this codebase already gates on
-		// `ok && role != ""`. The operation is idempotent: clearing
-		// a cleared role is a no-op.
-		var prev string
-		if v, ok := c.session.Thread().Meta().Get("workshop.role"); ok {
-			prev = v
-		}
-		if prev != "" {
-			msg := c.roleTransitionMessage(prev, "(none)", "")
-			if _, err := c.session.Submit(ctx, state.RoleSystem, artifact.Text{Content: msg}); err != nil {
-				return slash.Result{}, fmt.Errorf("append role transition turn: %w", err)
-			}
-		}
-		c.resolver.SetPath("")
-		c.writeRole("")
-
-		return slash.Result{
-			Notice: loop.Notice{
-				Content:  "Role: (none)",
-				Severity: loop.SeverityInfo,
-			},
-		}, nil
-	}
-
-	def, err := role.LoadRole(c.rdir, name, nil)
-	if err != nil {
-		return slash.Result{}, fmt.Errorf("role %q not found: %w", name, err)
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.session == nil || c.resolver == nil {
-		return slash.Result{}, fmt.Errorf("no active session")
-	}
-	var prev string
-	if v, ok := c.session.Thread().Meta().Get("workshop.role"); ok {
-		prev = v
-	}
-	if prev != name {
-		msg := c.roleTransitionMessage(prev, name, def.Description)
-		if _, err := c.session.Submit(ctx, state.RoleSystem, artifact.Text{Content: msg}); err != nil {
-			return slash.Result{}, fmt.Errorf("append role transition turn: %w", err)
-		}
-	}
-	c.resolver.SetPath(filepath.Join(c.rdir, name+".md"))
-	c.writeRole(name)
-
-	return slash.Result{
-		Notice: loop.Notice{
-			Content:  fmt.Sprintf("Role: %s", name),
-			Severity: loop.SeverityInfo,
-		},
-	}, nil
-}
-
-// formatRoleList builds a multi-line help message describing the
-// active role and every role definition on disk. The list is sorted
-// alphabetically for stable output. Used by the no-arg and "help"
-// forms of /role.
-func (c *roleCommand) formatRoleList() string {
-	current := c.currentRole()
-	if current == "" {
-		current = "(none)"
-	}
-
-	roles, err := role.ListRoleDefinitions(c.rdir, nil)
-	if err != nil {
-		return fmt.Sprintf("Role: %s\nError reading roles from %s: %v\nUsage: /role <name> | /role none",
-			current, c.rdir, err)
-	}
-
-	if len(roles) == 0 {
-		return fmt.Sprintf("Role: %s\nNo roles available in %s\nUsage: /role <name> | /role none",
-			current, c.rdir)
-	}
-
-	sort.Slice(roles, func(i, j int) bool { return roles[i].Name < roles[j].Name })
-
-	lines := []string{fmt.Sprintf("Role: %s", current), "Available:"}
-	for _, r := range roles {
-		lines = append(lines, "  "+c.roleLabel(r.Name, r.Description))
-	}
-	lines = append(lines, "Usage: /role <name> | /role none")
-	return strings.Join(lines, "\n")
-}
-
-// roleLabel returns a one-line display label for a role: the bare
-// name when no description is set, or `<name> (<description>)` when
-// one is.
-func (c *roleCommand) roleLabel(name, description string) string {
-	if description == "" {
-		return name
-	}
-	return fmt.Sprintf("%s (%s)", name, description)
-}
-
-// roleTransitionMessage returns the body of the system turn that
-// announces a role change. prevName is "" when this is the first
-// role set on a fresh thread; newName == "(none)" indicates
-// /role none. Otherwise both are non-empty (a switch). The
-// destination role's description is rendered via roleLabel; the
-// previous role's name is rendered bare.
-func (c *roleCommand) roleTransitionMessage(prevName, newName, newDesc string) string {
-	newLabel := c.roleLabel(newName, newDesc)
-
-	var headline, body string
-	switch {
-	case newName == "(none)":
-		headline = fmt.Sprintf("Role cleared: was %s, now (none).", prevName)
-		body = fmt.Sprintf(
-			"Your system prompt has been reset to the default. From this point forward, follow the default prompt and drop behavior carried over from %s. Do not mention this transition unless asked.",
-			prevName,
-		)
-	case prevName == "":
-		headline = fmt.Sprintf("Role set: %s.", newLabel)
-		body = fmt.Sprintf(
-			"Your system prompt has been updated. From this point forward, follow the %s role. Do not mention this transition unless asked.",
-			newName,
-		)
-	default:
-		headline = fmt.Sprintf("Role switched: %s → %s.", prevName, newLabel)
-		body = fmt.Sprintf(
-			"Your system prompt has been updated. From this point forward, follow the %s role and drop behavior carried over from %s. Do not mention this transition unless asked.",
-			newName, prevName,
-		)
-	}
-	return headline + "\n\n" + body
-}
-
 // thinkingCommand handles the /thinking slash command for changing
 // the active thread's thinking level without triggering an LLM turn.
 // The level is stored in stream metadata under "workshop.thinking_level"
@@ -724,9 +428,8 @@ type thinkingCommand struct {
 // SetSession updates the shared session reference. Called by the
 // tui engine factory on every Build call (one per dequeued event).
 //
-// session-based design: the slash handler reads and writes through
-// the *session.Session directly. See roleCommand.SetSession for the
-// rationale.
+// The slash handler reads and writes through the *session.Session directly so
+// it uses the same state as every conduit.
 func (c *thinkingCommand) SetSession(sess *session.Session) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -754,11 +457,8 @@ func (c *thinkingCommand) currentThinkingLevel() models.ThinkingLevel {
 	return level
 }
 
-// writeLevel persists the active thinking level in two places and
-// emits a PropertiesEvent for live status updates. The dual-write
-// rationale matches roleCommand.writeRole: thread.Metadata for
-// persistence (per-turn journal appends), session.metadata for live status
-// (PropertiesEvent).
+// writeLevel persists the active thinking level in thread metadata and emits a
+// PropertiesEvent through session metadata for live status updates.
 //
 // The caller MUST hold c.mu. writeLevel does not lock because the
 // only callers (Handler) already hold the lock. Re-locking here
@@ -837,9 +537,9 @@ func (c *thinkingCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash
 // ErrTruncatedSummary the buffer is left untouched and the user is
 // told why.
 type compactCommand struct {
-	mu      sync.Mutex
-	session *session.Session
-	agent   *agent.Agent
+	mu       sync.Mutex
+	session  *session.Session
+	agent    *agent.Agent
 	notifier *compactionNotifier
 }
 
@@ -899,9 +599,8 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	summaryID := postSubmitTurns[len(postSubmitTurns)-1].ID
 	c.session.Thread().SetControl(summaryID, state.ControlStop)
 
-	// Record the boundary under the framework's key. The dual-write
-	// is load-bearing, mirroring roleCommand.writeRole and
-	// thinkingCommand.writeLevel:
+	// Record the boundary under the framework's key. The dual-write is
+	// load-bearing, matching thinkingCommand.writeLevel:
 	//
 	//   - thread.Metadata is not journaled in the new model;
 	//     disk. Without this, /compact's effect would not survive
@@ -946,9 +645,6 @@ type analyticsCommand struct {
 // session pipeline), the friendly empty-state message is returned
 // rather than panicking. The event is consumed (no Result.Replace) so
 // no LLM inference is triggered.
-//
-// session-based design: see roleCommand.SetSession for the
-// rationale.
 func (c *analyticsCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1024,7 +720,7 @@ type sessionSetup struct {
 	// engine drives inference via the factory below. Constructed
 	// once per process so every conduit shares the same per-session
 	// mailbox.
-	engine  *engine.Engine
+	engine *engine.Engine
 	// factory is shared between conduits; TUI uses the slash handler
 	// bindings in Build, stdio and HTTP don't drive slash through
 	// this factory (they surface slash via their own conduits or
@@ -1111,16 +807,14 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 
 	defaultSpec := buildDefaultSpec(cfg.defaultProviderConfig())
 
-	// Slash command handlers. The role, thinking, and analytics
-	// handlers read from session metadata; the compact handler
+	// Slash command handlers. The thinking and analytics handlers read
+	// from session metadata; the compact handler
 	// additionally owns a compaction agent.
-	rc := &roleCommand{rdir: role.Dir()}
 	cc := &compactCommand{agent: ccAgent, notifier: cfg.compactionNotifier}
 	tc := &thinkingCommand{}
 	ac := &analyticsCommand{}
 
 	slashReg := slash.NewRegistry()
-	slashReg.Bind("role", "Show the current role and available roles, or switch to one by name", rc.Handler)
 	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
 	slashReg.Bind("thinking", "Set the thinking level for this thread", tc.Handler)
 	slashReg.Bind("analytics", "Show per-(kind, source) byte and count breakdown for this thread", ac.Handler)
@@ -1148,7 +842,7 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 		}
 		skillsToolkit := skills.NewToolkit(discoverers...)
 
-		sp, err := makeSystemPromptTransform(cfg, sess, skillsToolkit, rc.Resolver())
+		sp, err := makeSystemPromptTransform(cfg, skillsToolkit)
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -1221,7 +915,7 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 		}, nil
 	}
 
-	handlers := slashHandlers{rc, cc, tc, ac}
+	handlers := slashHandlers{cc, tc, ac}
 	factory := &tuiEngineFactory{
 		stepFactory: stepFactory,
 		prov:        prov,
@@ -1238,15 +932,15 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 	}
 
 	return &sessionSetup{
-		cfg:        cfg,
-		repo:       repo,
-		registry:   registry,
-		engine:     eng,
-		factory:    factory,
-		slashReg:   slashReg,
-		handlers:   handlers,
+		cfg:         cfg,
+		repo:        repo,
+		registry:    registry,
+		engine:      eng,
+		factory:     factory,
+		slashReg:    slashReg,
+		handlers:    handlers,
 		defaultSpec: defaultSpec,
-		meter:      meter,
+		meter:       meter,
 	}, nil
 }
 
@@ -1276,22 +970,13 @@ func (s *sessionSetup) attachSession(ctx context.Context, threadID string) (*ses
 	return session.New(threadID, thread), nil
 }
 
-// seedMetadata writes the five static info-bar keys into the
+// seedMetadata writes static info-bar keys into the
 // session's live metadata store. These power the TUI status zone
-// (read via sess.AllMetadata()) and the slash handlers' session
-// resolvers; they are emitted on every SetMetadata call as a
+// (read via sess.AllMetadata()) and are emitted on every SetMetadata call as a
 // PropertiesEvent.
 //
-// Thread metadata (sess.Thread().Meta()) is intentionally NOT
-// seeded here. The ledger's per-turn journal does not capture
-// thread metadata, so a seed there would be misleading; slash
-// handlers that dual-write to thread metadata (e.g. roleCommand)
-// write on demand.
-//
-// The five keys: thread_id, cwd (with home-prefix shortened to ~),
-// git_branch (or "(not in git repo)"), workshop.role (only if
-// already set on the session or via cfg.role), tui.pid, and model
-// (from defaultSpec.Name).
+// The keys are thread_id, cwd (with home-prefix shortened to ~), git_branch
+// (or "(not in git repo)"), tui.pid, and model (from defaultSpec.Name).
 func (s *sessionSetup) seedMetadata(sess *session.Session) {
 	cwd, _ := os.Getwd()
 	shortCwd := cwd
@@ -1308,16 +993,6 @@ func (s *sessionSetup) seedMetadata(sess *session.Session) {
 	sess.SetMetadata("cwd", shortCwd)
 	sess.SetMetadata("git_branch", branch)
 
-	role := ""
-	if r, ok := sess.GetMetadata("workshop.role"); ok {
-		role = r
-	} else if s.cfg.role != "" {
-		role = s.cfg.role
-	}
-	if role != "" {
-		sess.SetMetadata("workshop.role", role)
-	}
-
 	sess.SetMetadata("tui.pid", strconv.Itoa(os.Getpid()))
 
 	if s.defaultSpec.Name != "" {
@@ -1325,33 +1000,12 @@ func (s *sessionSetup) seedMetadata(sess *session.Session) {
 	}
 }
 
-// makeSystemPromptTransform builds the composable system prompt transform for
-// a given configuration and metadata reader. It concatenates four content sources:
-//
-//  1. The active role prompt read from the resolver's current file path
-//     (or defaultPrompt if no role is set). The resolver is mutated in
-//     place by the role command when the active role changes; the
-//     transform reads whatever path is current at Transform-time.
-//  2. A contextual sentence describing the current working directory.
-//  3. The skills catalog fragment showing available skills to the LLM.
-//  4. Repository-level instructions discovered by walking parent directories
-//     from cfg.workingDir toward the root, collecting AGENTS.md and
-//     CLAUDE.md files nearest-first.
-//
-// The resulting transform is passed to loop.Step via loop.WithTransforms.
-func makeSystemPromptTransform(cfg *config, _ metadataReader, skillsToolkit *skills.Toolkit, roleResolver *source.FileResolver) (loop.Transform, error) {
+// makeSystemPromptTransform builds the composable system prompt transform. It
+// concatenates the default prompt, working-directory context, available skills,
+// repository instructions, and runtime details.
+func makeSystemPromptTransform(cfg *config, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
 	return systemprompt.New(
-		systemprompt.WithContentFunc(func() string {
-			path := roleResolver.Path()
-			if path == "" {
-				return defaultPrompt
-			}
-			body, err := role.LoadBody(path, nil)
-			if err != nil {
-				return defaultPrompt
-			}
-			return body
-		}),
+		systemprompt.WithContentFunc(func() string { return defaultPrompt }),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
 		systemprompt.WithContextContentFunc(skillsToolkit.SystemPromptFragment()),
 		systemprompt.WithContentFunc(source.AgentsMD(cfg.workingDir)),
@@ -1633,14 +1287,14 @@ func mustRegister(registry tool.Registry, t tool.Tool, fn tool.ToolFunc) {
 }
 
 // mustRegisterRaw is a convenience variant for tools that do not have a
-// tool.Tool struct (e.g., ad-hoc role management tools).
+// tool.Tool struct.
 func mustRegisterRaw(registry tool.Registry, name, description string, schema map[string]any, fn tool.ToolFunc) {
 	if err := registry.Register(tool.Tool{Name: name, Description: description, Schema: schema}, fn); err != nil {
 		panic(fmt.Sprintf("register %s: %v", name, err))
 	}
 }
 
-// defaultPrompt is the baked-in system prompt used when no role is active.
+// defaultPrompt is the baked-in system prompt.
 const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"You help users write, review, refactor, and debug code across any language or framework. " +
 	"You have access to filesystem tools (read_file, write_file, edit_file, list_directory, search_files) and a bash tool for running shell commands. " +

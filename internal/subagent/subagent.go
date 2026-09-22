@@ -5,19 +5,11 @@
 // can be imported by either the app layer (the stepFactory closure) or
 // any other consumer without cycle risk.
 //
-// # Construction parallel with roles
+// # Construction
 //
-// Sub-agents are the "tool invocation" counterpart to roles'
-// "system-prompt injection". The two packages share identical discovery
-// and parsing surface (the body is free-form markdown in both cases);
-// they differ in how their content is wired into the agent:
-//
-//   - role.RoleDefinition is injected into a system-prompt transform
-//     on the parent agent. The user picks the role with /role.
-//   - subagent.SubagentDefinition is wrapped in a (tool.Tool,
-//     tool.ToolFunc) pair via x/subagent.AsTool and registered into
-//     the parent's tool.Registry. The LLM picks the sub-agent by
-//     emitting a tool call.
+// Sub-agent definitions are wrapped in a (tool.Tool, tool.ToolFunc) pair via
+// x/subagent.AsTool and registered in the parent's tool.Registry. The LLM
+// selects a sub-agent by emitting a tool call.
 //
 // # Sub-agents are domain specialists, not restricted capability delegates
 //
