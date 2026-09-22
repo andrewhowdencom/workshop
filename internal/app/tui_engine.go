@@ -82,6 +82,7 @@ import (
 	"github.com/andrewhowdencom/ore/session"
 	"github.com/andrewhowdencom/ore/x/conduit/tui"
 	slash "github.com/andrewhowdencom/ore/x/slash"
+	"github.com/andrewhowdencom/ore/x/usage"
 
 	"github.com/andrewhowdencom/workshop/internal/resume"
 )
@@ -134,8 +135,9 @@ type tuiEngineFactory struct {
 	// clears pending. Build calls are concurrent across sessions
 	// (the engine serializes per-session via its mailbox), so mu
 	// is necessary.
-	mu      sync.Mutex
-	pending []*loop.Step
+	mu            sync.Mutex
+	pending       []*loop.Step
+	usageHandlers map[string]*usage.Handler
 }
 
 // Build implements agent.Factory. It binds slash handlers to the
@@ -170,6 +172,7 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("engine: build step options: %w", err)
 	}
+	opts = append(opts, loop.WithHandlers(f.usageHandler(sess)))
 
 	// Append the synchronous bridge OnEmit to the stepFactory's
 	// options. The OnEmit forwards every emission to the session's
@@ -210,6 +213,35 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	), nil
 }
 
+// usageHandler returns the session-scoped usage accumulator. Steps are rebuilt
+// for every event, but token spending belongs to the conversation, so the
+// handler must outlive those steps. Historical Usage artifacts seed resumed
+// sessions without emitting replay events into the live TUI.
+func (f *tuiEngineFactory) usageHandler(sess *session.Session) *usage.Handler {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if handler := f.usageHandlers[sess.ID()]; handler != nil {
+		return handler
+	}
+
+	handler := usage.New()
+	for _, turn := range sess.Thread().AllTurns() {
+		for _, art := range turn.Artifacts {
+			_ = handler.Handle(context.Background(), art, discardEmitter{})
+		}
+	}
+	if f.usageHandlers == nil {
+		f.usageHandlers = make(map[string]*usage.Handler)
+	}
+	f.usageHandlers[sess.ID()] = handler
+	return handler
+}
+
+type discardEmitter struct{}
+
+func (discardEmitter) Emit(context.Context, loop.OutputEvent) {}
+
 // Close drains every pending per-turn step. Each step.Close closes
 // its EventBus/FanOut, releasing the buffered events channel and
 // stopping the FanOut's run goroutine. With the synchronous OnEmit
@@ -230,6 +262,7 @@ func (f *tuiEngineFactory) Close() {
 	f.mu.Lock()
 	pending := f.pending
 	f.pending = nil
+	f.usageHandlers = nil
 	f.mu.Unlock()
 
 	for _, p := range pending {

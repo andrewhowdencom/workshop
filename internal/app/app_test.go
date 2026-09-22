@@ -620,7 +620,7 @@ func TestStatusZoneMapping_ThinkingInLifecycle(t *testing.T) {
 	if got, want := statusZoneMapping["thinking"], "lifecycle"; got != want {
 		t.Errorf("statusZoneMapping[thinking] = %q, want %q (thinking token must share zone with other token counters)", got, want)
 	}
-	for _, k := range []string{"sent", "received", "total"} {
+	for _, k := range []string{"sent", "cache_read", "cache_write", "received", "total"} {
 		if got, want := statusZoneMapping[k], "lifecycle"; got != want {
 			t.Errorf("statusZoneMapping[%s] = %q, want %q (token key out of zone)", k, got, want)
 		}
