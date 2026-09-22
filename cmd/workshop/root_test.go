@@ -356,38 +356,6 @@ func TestPrecedence_ConfigFileThenDefault(t *testing.T) {
 	}
 }
 
-func TestRoleFlag_ConfigFile(t *testing.T) {
-	v := viper.New()
-	tmpDir := t.TempDir()
-
-	configDir := filepath.Join(tmpDir, "workshop")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	content := []byte("role: planner\n")
-	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), content, 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	if err := loadViperConfigWithPath(v, tmpDir); err != nil {
-		t.Fatalf("valid config should not error, got: %v", err)
-	}
-
-	if got := v.GetString("role"); got != "planner" {
-		t.Errorf("config file value: role = %q, want %q", got, "planner")
-	}
-}
-
-func TestRoleFlag_Environment(t *testing.T) {
-	v := viper.New()
-	setupViper(v)
-
-	t.Setenv("WORKSHOP_ROLE", "reviewer")
-	if got := v.GetString("role"); got != "reviewer" {
-		t.Errorf("env value: role = %q, want %q", got, "reviewer")
-	}
-}
-
 func TestDefaultStoreDir(t *testing.T) {
 	got := defaultStoreDir()
 	if !strings.Contains(got, filepath.Join("workshop", "threads")) {

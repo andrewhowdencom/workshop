@@ -95,18 +95,6 @@ type slashHandler interface {
 	SetSession(sess *session.Session)
 }
 
-// findHandler returns the first handler in hs whose concrete type
-// is T. Used by the factory to call type-specific methods.
-func findHandler[T slashHandler](hs slashHandlers) (T, bool) {
-	var zero T
-	for _, h := range hs {
-		if v, ok := h.(T); ok {
-			return v, true
-		}
-	}
-	return zero, false
-}
-
 // slashHandlers is a slice of slashHandler, bound as a group on
 // every factory Build call.
 type slashHandlers []slashHandler
@@ -171,8 +159,7 @@ type tuiEngineFactory struct {
 func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	// Bind slash handlers to the session before any agent code runs.
 	// SetSession is idempotent — each handler caches the session
-	// reference and seeds per-session state (e.g. roleCommand's
-	// resolver path from session metadata). The TUI path goes
+	// reference and seeds any per-session state. The TUI path goes
 	// through here on every dequeued event; stdio doesn't
 	// intercept slash commands today and skips this.
 	for _, h := range f.handlers {
@@ -270,12 +257,12 @@ func runTUIEngine(
 	repo ledger.Repository,
 ) error {
 	// Bind slash handlers to the session BEFORE the TUI starts so
-	// slash commands (e.g. /role, /thinking) work on a fresh
+	// slash commands (e.g. /thinking) work on a fresh
 	// TUI without requiring the user to send a chat message first.
 	// The factory's Build also binds handlers, but Build only runs
 	// when the engine processes an inference event — so without
 	// this pre-bind, the user gets "no active session" on their
-	// first /role attempt.
+	// first slash-command attempt.
 	for _, h := range factory.handlers {
 		h.SetSession(sess)
 	}
@@ -293,7 +280,7 @@ func runTUIEngine(
 	// slashReg.Intercept before reaching the engine. The
 	// interceptor matches against /<name> prefixes; matched
 	// commands are consumed (no inference triggered) and any
-	// notices (e.g. "Role: reviewer") are emitted on the
+	// notices are emitted on the
 	// session's emitter so the user sees the feedback. Unmatched
 	// events fall through unchanged.
 	//
