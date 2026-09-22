@@ -228,6 +228,94 @@ func TestEngineSubmit_DrivesAgentAndBridgesToSession(t *testing.T) {
 	assert.Equal(t, int64(1), prov.calls.Load(), "provider should be invoked once per Submit")
 }
 
+type usageProvider struct {
+	calls  atomic.Int64
+	usages []artifact.Usage
+}
+
+func (p *usageProvider) Invoke(ctx context.Context, s ledger.State, spec models.Spec, ch chan<- artifact.Artifact, opts ...provider.InvokeOption) error {
+	index := int(p.calls.Add(1) - 1)
+	ch <- artifact.Text{Content: "response"}
+	ch <- p.usages[index]
+	ch <- artifact.StopReason{Reason: artifact.StopReasonStop}
+	return nil
+}
+
+func TestTUIEngineFactory_UsageTotalPersistsAcrossBuilds(t *testing.T) {
+	prov := &usageProvider{usages: []artifact.Usage{
+		{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
+		{PromptTokens: 150, CompletionTokens: 30, TotalTokens: 180},
+	}}
+	sess := session.New("usage-session", ledger.NewThread())
+	t.Cleanup(func() { _ = sess.Close() })
+	factory := &tuiEngineFactory{
+		stepFactory: func(*session.Session) ([]loop.Option, error) { return nil, nil },
+		prov:        prov,
+		defaultSpec: models.Spec{Name: "usage-test"},
+	}
+	t.Cleanup(factory.Close)
+	properties := sess.Subscribe("properties")
+
+	first, err := factory.Build(sess)
+	require.NoError(t, err)
+	_, err = first.Run(t.Context(), sess.Thread())
+	require.NoError(t, err)
+	assertUsageProperties(t, properties, "100", "20", "120")
+
+	_, err = sess.Submit(t.Context(), ledger.RoleUser, artifact.Text{Content: "next"})
+	require.NoError(t, err)
+	second, err := factory.Build(sess)
+	require.NoError(t, err)
+	_, err = second.Run(t.Context(), sess.Thread())
+	require.NoError(t, err)
+	assertUsageProperties(t, properties, "150", "30", "300")
+}
+
+func TestTUIEngineFactory_UsageTotalIncludesPersistedHistory(t *testing.T) {
+	thread := ledger.NewThread()
+	thread.Append(ledger.RoleAssistant, artifact.Usage{
+		PromptTokens: 80, CompletionTokens: 20, TotalTokens: 100,
+	})
+	sess := session.New("resumed-usage-session", thread)
+	t.Cleanup(func() { _ = sess.Close() })
+	prov := &usageProvider{usages: []artifact.Usage{
+		{PromptTokens: 120, CompletionTokens: 30, TotalTokens: 150},
+	}}
+	factory := &tuiEngineFactory{
+		stepFactory: func(*session.Session) ([]loop.Option, error) { return nil, nil },
+		prov:        prov,
+		defaultSpec: models.Spec{Name: "usage-test"},
+	}
+	t.Cleanup(factory.Close)
+	properties := sess.Subscribe("properties")
+
+	ag, err := factory.Build(sess)
+	require.NoError(t, err)
+	_, err = ag.Run(t.Context(), sess.Thread())
+	require.NoError(t, err)
+	assertUsageProperties(t, properties, "120", "30", "250")
+}
+
+func assertUsageProperties(t *testing.T, events <-chan loop.OutputEvent, sent, received, total string) {
+	t.Helper()
+	select {
+	case event := <-events:
+		properties, ok := event.(loop.PropertiesEvent)
+		require.True(t, ok)
+		values := make(map[string]string)
+		for _, operation := range properties.Operations {
+			if operation.Op == loop.PropertyOpSet {
+				values[operation.Key] = operation.Value
+			}
+		}
+		assert.Equal(t, sent, values["sent"])
+		assert.Equal(t, received, values["received"])
+		assert.Equal(t, total, values["total"])
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for usage properties")
+	}
+}
+
 // TestRunTUIEngine_PumpWaitsForEvents is the focused regression
 // test for the nil-channel bug. We can't drive a real *tui.TUI
 // from a unit test (Bubble Tea needs a TTY), so we test the

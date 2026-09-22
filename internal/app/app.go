@@ -55,7 +55,6 @@ import (
 	xtool "github.com/andrewhowdencom/ore/x/tool"
 	settitle "github.com/andrewhowdencom/ore/x/tool/set_title"
 	"github.com/andrewhowdencom/ore/x/tool/skills"
-	"github.com/andrewhowdencom/ore/x/usage"
 
 	"github.com/adrg/xdg"
 
@@ -243,19 +242,11 @@ func WithMeter(meter metric.Meter) Option {
 
 // statusZoneMapping assigns each status-bar key to a semantic zone.
 // The "lifecycle" zone carries the active turn's counters (phase, title,
-// and the four token counters sent / received / total / thinking);
-// "context" carries thread-level metadata; unmapped keys fall into
-// the "default" zone (lowest priority, only rendered if the higher-
-// priority zones fit within the 3-line status budget). The thinking
-// token is grouped with sent / received / total so the framework's
-// compactTokenSegments can fold it into the same ↑ / ↓ / Σ / Ψ
-// cluster instead of leaving it as an orphan "tokens" segment in
-// the default zone.
+// and token usage); "context" carries thread-level metadata; unmapped keys
+// fall into the "default" zone. Cache reads and writes are provider-reported
+// breakdowns and share the ↑ / ↻ / ⊕ / ↓ / Σ / Ψ cluster.
 //
-// Keys listed here must match the keys emitted by the upstream
-// handler: x/usage/handler.go emits "sent", "received", "total",
-// and "thinking"; the workshop app emits the others via slash
-// commands and Stream.SetMetadata in defaultMeta.
+// Keys listed here must match those emitted by x/usage/handler.go.
 var statusZoneMapping = map[string]string{
 	"phase":                   "lifecycle",
 	"title":                   "lifecycle",
@@ -266,6 +257,8 @@ var statusZoneMapping = map[string]string{
 	"tui.pid":                 "context",
 	"model":                   "context",
 	"sent":                    "lifecycle",
+	"cache_read":              "lifecycle",
+	"cache_write":             "lifecycle",
 	"received":                "lifecycle",
 	"total":                   "lifecycle",
 	"thinking":                "lifecycle",
@@ -907,7 +900,7 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 
 		return []loop.Option{
 			loop.WithTransforms(sp, compaction.NewTransform(), gr),
-			loop.WithHandlers(xtool.NewHandler(registry, xtool.WithTracer(tracer)), usage.New()),
+			loop.WithHandlers(xtool.NewHandler(registry, xtool.WithTracer(tracer))),
 			loop.WithInvokeOptions(invokeOpts...),
 			loop.WithDefaultSpec(defaultSpec),
 			loop.WithTracer(tracer),
