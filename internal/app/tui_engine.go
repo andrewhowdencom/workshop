@@ -192,6 +192,14 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 
 	step := loop.New(opts...)
 
+	// Model selection is a per-session override. Copy the configured spec so
+	// changing only the model name preserves token, temperature, thinking, and
+	// cache settings.
+	spec := f.defaultSpec
+	if model, ok := sess.GetMetadata(agent.MetadataKeyModelName); ok && model != "" {
+		spec.Name = model
+	}
+
 	// Track the per-turn step so Close can drain its FanOut
 	// subscribers (if any) at shutdown. With the synchronous
 	// OnEmit design, the bridge is no longer a separate
@@ -207,7 +215,7 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 
 	return agent.New(sess.ID(),
 		agent.WithProvider(f.prov),
-		agent.WithSpec(f.defaultSpec),
+		agent.WithSpec(spec),
 		agent.WithPattern(&cognitive.ReAct{}),
 		agent.WithTracer(f.tracer),
 		agent.WithStep(step),
