@@ -1278,7 +1278,7 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit())
+	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit(), nil)
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1340,6 +1340,28 @@ func TestMakeSystemPromptTransform_WithAgentsMD(t *testing.T) {
 	}
 }
 
+func TestMakeSystemPromptTransform_UsesSelectedModel(t *testing.T) {
+	cfg := &config{
+		workingDir: t.TempDir(),
+		conduit:    "TUI",
+		providers: map[string]ProviderConfig{
+			"test": {Kind: "openai", APIKey: "sk-test", Model: "configured-model"},
+		},
+		defaultProviderName: "test",
+	}
+	sess := newTestSession(t)
+	sess.SetMetadata(agent.MetadataKeyModelName, "selected-model")
+
+	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit(), sess)
+	require.NoError(t, err)
+	result, err := sp.Transform(context.Background(), state.NewThread())
+	require.NoError(t, err)
+	text, ok := result.Turns()[0].Artifacts[0].(artifact.Text)
+	require.True(t, ok)
+	assert.Contains(t, text.Content, "You are running on model selected-model.")
+	assert.NotContains(t, text.Content, "You are running on model configured-model.")
+}
+
 func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 	parent := t.TempDir()
 	child := filepath.Join(parent, "child")
@@ -1366,7 +1388,7 @@ func TestMakeSystemPromptTransform_NearestFirst(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit())
+	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit(), nil)
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -1411,7 +1433,7 @@ func TestMakeSystemPromptTransform_NoInstructionFiles(t *testing.T) {
 		defaultProviderName: "test",
 	}
 
-	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit())
+	sp, err := makeSystemPromptTransform(cfg, skills.NewToolkit(), nil)
 	if err != nil {
 		t.Fatalf("makeSystemPromptTransform error: %v", err)
 	}
@@ -2328,6 +2350,57 @@ func TestBuildManager_CompactionNotifier(t *testing.T) {
 // needed their own stream. The slash handler is now session-based;
 // tests seed via sess.Thread().Meta() and verify there, so the
 // per-handler stream helper is no longer needed.
+
+func TestModelCommand_NoArgReportsCurrent(t *testing.T) {
+	mc := &modelCommand{defaultModel: "configured-model"}
+	sess := newTestSession(t)
+	mc.SetSession(sess)
+
+	res, err := mc.Handler(context.Background(), nil, slash.Command{Name: "model"})
+	require.NoError(t, err)
+	assert.Equal(t, "Model: configured-model\nUsage: /model <name>", res.Notice.Content)
+}
+
+func TestModelCommand_SetsModelMetadata(t *testing.T) {
+	mc := &modelCommand{defaultModel: "configured-model"}
+	sess := newTestSession(t)
+	mc.SetSession(sess)
+
+	res, err := mc.Handler(context.Background(), nil, slash.Command{Name: "model", Input: "new-model"})
+	require.NoError(t, err)
+	assert.Equal(t, "Model: new-model", res.Notice.Content)
+
+	got, ok := sess.GetMetadata(agent.MetadataKeyModelName)
+	require.True(t, ok)
+	assert.Equal(t, "new-model", got)
+	statusModel, ok := sess.GetMetadata("model")
+	require.True(t, ok)
+	assert.Equal(t, "new-model", statusModel)
+
+	persisted, ok := sess.Thread().Meta().Get(agent.MetadataKeyModelName)
+	require.True(t, ok)
+	assert.Equal(t, "new-model", persisted)
+}
+
+func TestModelCommand_RejectsMultipleNames(t *testing.T) {
+	mc := &modelCommand{defaultModel: "configured-model"}
+	sess := newTestSession(t)
+	mc.SetSession(sess)
+
+	res, err := mc.Handler(context.Background(), nil, slash.Command{Name: "model", Input: "one two"})
+	require.NoError(t, err)
+	assert.Equal(t, loop.SeverityError, res.Notice.Severity)
+	assert.Equal(t, "Usage: /model <name>", res.Notice.Content)
+	_, ok := sess.GetMetadata(agent.MetadataKeyModelName)
+	assert.False(t, ok)
+}
+
+func TestModelCommand_NoSessionError(t *testing.T) {
+	mc := &modelCommand{defaultModel: "configured-model"}
+
+	_, err := mc.Handler(context.Background(), nil, slash.Command{Name: "model", Input: "new-model"})
+	require.ErrorContains(t, err, "no active session")
+}
 
 func TestThinkingCommand_NoArgReportsCurrent(t *testing.T) {
 

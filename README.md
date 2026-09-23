@@ -421,6 +421,10 @@ text of a user message and processed by the slash interceptor before the
 provider is invoked. The auto-generated `/help` lists every bound command.
 
 - `/compact` — force compaction of the conversation history (see Compaction).
+- `/model` — report the model used by the active thread.
+- `/model <name>` — use `<name>` for subsequent turns in the active thread. This
+  keeps the configured provider and other model settings unchanged and updates
+  the TUI status bar immediately.
 - `/thinking` — report the current thinking level and the available levels.
 - `/thinking <level>` — set the thinking level for this thread, where
   `<level>` is `off`, `minimal`, `low`, `medium`, `high`, or `max`. The

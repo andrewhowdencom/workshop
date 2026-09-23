@@ -407,6 +407,72 @@ type metadataStore interface {
 	SetMetadata(key, value string)
 }
 
+// modelCommand handles /model, which selects the model name used for
+// subsequent turns while retaining the configured provider and other spec
+// settings. The override is session-scoped and mirrored into thread metadata.
+type modelCommand struct {
+	mu           sync.Mutex
+	session      *session.Session
+	defaultModel string
+}
+
+// SetSession updates the active session reference. If the thread already has a
+// model override, it is restored into live session metadata and the status bar.
+func (c *modelCommand) SetSession(sess *session.Session) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.session = sess
+	if _, ok := sess.GetMetadata(agent.MetadataKeyModelName); ok {
+		return
+	}
+	if model, ok := sess.Thread().Meta().Get(agent.MetadataKeyModelName); ok && model != "" {
+		sess.SetMetadata(agent.MetadataKeyModelName, model)
+		sess.SetMetadata("model", model)
+	}
+}
+
+func (c *modelCommand) currentModel() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.session != nil {
+		if model, ok := c.session.GetMetadata(agent.MetadataKeyModelName); ok && model != "" {
+			return model
+		}
+	}
+	return c.defaultModel
+}
+
+// Handler reports the current model or changes it without triggering inference.
+func (c *modelCommand) Handler(_ context.Context, _ loop.Emitter, cmd slash.Command) (slash.Result, error) {
+	args := slash.Fields(cmd.Input)
+	if len(args) == 0 {
+		return slash.Result{Notice: loop.Notice{
+			Content:  fmt.Sprintf("Model: %s\nUsage: /model <name>", c.currentModel()),
+			Severity: loop.SeverityInfo,
+		}}, nil
+	}
+	if len(args) != 1 {
+		return slash.Result{Notice: loop.Notice{
+			Content:  "Usage: /model <name>",
+			Severity: loop.SeverityError,
+		}}, nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.session == nil {
+		return slash.Result{}, fmt.Errorf("no active session")
+	}
+	model := args[0]
+	c.session.Thread().Meta().Set(agent.MetadataKeyModelName, model)
+	c.session.SetMetadata(agent.MetadataKeyModelName, model)
+	c.session.SetMetadata("model", model)
+	return slash.Result{Notice: loop.Notice{
+		Content:  "Model: " + model,
+		Severity: loop.SeverityInfo,
+	}}, nil
+}
+
 // thinkingCommand handles the /thinking slash command for changing
 // the active thread's thinking level without triggering an LLM turn.
 // The level is stored in stream metadata under "workshop.thinking_level"
@@ -804,11 +870,13 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 	// from session metadata; the compact handler
 	// additionally owns a compaction agent.
 	cc := &compactCommand{agent: ccAgent, notifier: cfg.compactionNotifier}
+	mc := &modelCommand{defaultModel: defaultSpec.Name}
 	tc := &thinkingCommand{}
 	ac := &analyticsCommand{}
 
 	slashReg := slash.NewRegistry()
 	slashReg.Bind("compact", "Compact conversation history", cc.Handler)
+	slashReg.Bind("model", "Set the model for this thread", mc.Handler)
 	slashReg.Bind("thinking", "Set the thinking level for this thread", tc.Handler)
 	slashReg.Bind("analytics", "Show per-(kind, source) byte and count breakdown for this thread", ac.Handler)
 	slashReg.Bind("name", "Set the conversation title", settitle.Slash())
@@ -835,7 +903,7 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 		}
 		skillsToolkit := skills.NewToolkit(discoverers...)
 
-		sp, err := makeSystemPromptTransform(cfg, skillsToolkit)
+		sp, err := makeSystemPromptTransform(cfg, skillsToolkit, sess)
 		if err != nil {
 			return nil, fmt.Errorf("create system prompt transform: %w", err)
 		}
@@ -908,7 +976,7 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 		}, nil
 	}
 
-	handlers := slashHandlers{cc, tc, ac}
+	handlers := slashHandlers{cc, mc, tc, ac}
 	factory := &tuiEngineFactory{
 		stepFactory: stepFactory,
 		prov:        prov,
@@ -996,7 +1064,7 @@ func (s *sessionSetup) seedMetadata(sess *session.Session) {
 // makeSystemPromptTransform builds the composable system prompt transform. It
 // concatenates the default prompt, working-directory context, available skills,
 // repository instructions, and runtime details.
-func makeSystemPromptTransform(cfg *config, skillsToolkit *skills.Toolkit) (loop.Transform, error) {
+func makeSystemPromptTransform(cfg *config, skillsToolkit *skills.Toolkit, metadata metadataReader) (loop.Transform, error) {
 	return systemprompt.New(
 		systemprompt.WithContentFunc(func() string { return defaultPrompt }),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
@@ -1009,11 +1077,16 @@ func makeSystemPromptTransform(cfg *config, skillsToolkit *skills.Toolkit) (loop
 			)
 		}),
 		systemprompt.WithContentFunc(func() string {
-			pc := cfg.defaultProviderConfig()
-			if pc.Model == "" {
+			model := cfg.defaultProviderConfig().Model
+			if metadata != nil {
+				if selected, ok := metadata.GetMetadata(agent.MetadataKeyModelName); ok && selected != "" {
+					model = selected
+				}
+			}
+			if model == "" {
 				return ""
 			}
-			return "You are running on model " + pc.Model + "."
+			return "You are running on model " + model + "."
 		}),
 		systemprompt.WithContentFunc(func() string {
 			pc := cfg.defaultProviderConfig()

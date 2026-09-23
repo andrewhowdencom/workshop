@@ -135,6 +135,20 @@ func TestTUIEngineFactory_Build_DrivesAgent(t *testing.T) {
 	assert.Equal(t, int64(1), prov.calls.Load(), "provider should be invoked once")
 }
 
+// TestTUIEngineFactory_Build_UsesSessionModelOverride verifies that a model
+// selected by /model replaces only the configured model name.
+func TestTUIEngineFactory_Build_UsesSessionModelOverride(t *testing.T) {
+	factory, _, sess, _ := newTestEngine(t)
+	defer func() { require.NoError(t, sess.Close()) }()
+	factory.defaultSpec = models.Spec{Name: "configured-model", MaxOutputTokens: 1234}
+	sess.SetMetadata(agent.MetadataKeyModelName, "selected-model")
+
+	ag, err := factory.Build(sess)
+	require.NoError(t, err)
+	assert.Equal(t, "selected-model", ag.Spec().Name)
+	assert.Equal(t, int64(1234), ag.Spec().MaxOutputTokens, "model selection must preserve configured spec fields")
+}
+
 // TestTUIEngineFactory_Build_NoDoubleAppend asserts that two
 // consecutive factory.Build + ag.Run pairs each append EXACTLY
 // one assistant turn to the session thread — no double-append
