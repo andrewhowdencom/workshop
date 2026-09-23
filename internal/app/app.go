@@ -894,7 +894,7 @@ func setupSession(cfg *config) (*sessionSetup, error) {
 			registered[sa.Name] = true
 		}
 
-		invokeOpts := buildInvokeOptions(cfg, registry.Tools())
+		invokeOpts := buildInvokeOptions(cfg, registry.Tools(), sess.ID())
 
 		tel := telemetry.New(meter)
 
@@ -1086,22 +1086,21 @@ func buildDefaultSpec(pc ProviderConfig) models.Spec {
 
 // buildInvokeOptions assembles the per-invocation options for the configured
 // provider. It branches on the default provider's Kind so the right
-// per-provider options are applied for each backend. Per-call model
-// identity and inference configuration live on models.Spec (see
-// buildDefaultSpec and Stream.Spec); buildInvokeOptions only carries
-// provider-specific options that have no spec equivalent (currently just
-// the tool list).
-func buildInvokeOptions(cfg *config, tools []tool.Tool) []provider.InvokeOption {
+// per-provider options are applied for each backend. Per-call model identity
+// and inference configuration live on models.Spec (see buildDefaultSpec and
+// Stream.Spec). OpenAI-compatible providers also receive the stable session ID
+// as their prompt cache key so every turn in a conversation has cache affinity.
+func buildInvokeOptions(cfg *config, tools []tool.Tool, sessionID string) []provider.InvokeOption {
 	pc := cfg.defaultProviderConfig()
 	var opts []provider.InvokeOption
 	switch pc.Kind {
 	case "anthropic":
 		opts = append(opts, anthropic.WithTools(tools))
 	case "codex":
-		opts = append(opts, codex.WithTools(tools))
+		opts = append(opts, codex.WithTools(tools), codex.WithSessionID(sessionID))
 	default:
 		// OpenAI-compatible path (Kind == "" or "openai").
-		opts = append(opts, openai.WithTools(tools))
+		opts = append(opts, openai.WithTools(tools), openai.WithSessionID(sessionID))
 	}
 	return opts
 }

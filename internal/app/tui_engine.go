@@ -71,6 +71,7 @@ import (
 	"sync"
 
 	"github.com/andrewhowdencom/ore/agent"
+	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/engine"
 	"github.com/andrewhowdencom/ore/ledger"
@@ -137,7 +138,7 @@ type tuiEngineFactory struct {
 	// is necessary.
 	mu            sync.Mutex
 	pending       []*loop.Step
-	usageHandlers map[string]*usage.Handler
+	usageHandlers map[string]*usageStatusHandler
 }
 
 // Build implements agent.Factory. It binds slash handlers to the
@@ -213,11 +214,49 @@ func (f *tuiEngineFactory) Build(sess *session.Session) (*agent.Agent, error) {
 	), nil
 }
 
+// usageStatusHandler preserves x/usage's accounting while changing its
+// zero-cache policy for Workshop's status bar. The upstream handler deletes
+// zero-valued cache properties; Workshop keeps them as explicit zeroes so users
+// can distinguish a completed request with no cache hit from a stale display.
+type usageStatusHandler struct {
+	inner *usage.Handler
+}
+
+func newUsageStatusHandler() *usageStatusHandler {
+	return &usageStatusHandler{inner: usage.New()}
+}
+
+func (h *usageStatusHandler) Handle(ctx context.Context, art artifact.Artifact, emitter loop.Emitter) error {
+	return h.inner.Handle(ctx, art, cacheStatusEmitter{Emitter: emitter})
+}
+
+type cacheStatusEmitter struct {
+	loop.Emitter
+}
+
+func (e cacheStatusEmitter) Emit(ctx context.Context, event loop.OutputEvent) {
+	properties, ok := event.(loop.PropertiesEvent)
+	if !ok {
+		e.Emitter.Emit(ctx, event)
+		return
+	}
+
+	properties.Operations = append([]loop.PropertyOperation(nil), properties.Operations...)
+	for i := range properties.Operations {
+		op := &properties.Operations[i]
+		if op.Op == loop.PropertyOpDelete && (op.Key == "cache_read" || op.Key == "cache_write") {
+			op.Op = loop.PropertyOpSet
+			op.Value = "0"
+		}
+	}
+	e.Emitter.Emit(ctx, properties)
+}
+
 // usageHandler returns the session-scoped usage accumulator. Steps are rebuilt
 // for every event, but token spending belongs to the conversation, so the
 // handler must outlive those steps. Historical Usage artifacts seed resumed
 // sessions without emitting replay events into the live TUI.
-func (f *tuiEngineFactory) usageHandler(sess *session.Session) *usage.Handler {
+func (f *tuiEngineFactory) usageHandler(sess *session.Session) *usageStatusHandler {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -225,14 +264,14 @@ func (f *tuiEngineFactory) usageHandler(sess *session.Session) *usage.Handler {
 		return handler
 	}
 
-	handler := usage.New()
+	handler := newUsageStatusHandler()
 	for _, turn := range sess.Thread().AllTurns() {
 		for _, art := range turn.Artifacts {
 			_ = handler.Handle(context.Background(), art, discardEmitter{})
 		}
 	}
 	if f.usageHandlers == nil {
-		f.usageHandlers = make(map[string]*usage.Handler)
+		f.usageHandlers = make(map[string]*usageStatusHandler)
 	}
 	f.usageHandlers[sess.ID()] = handler
 	return handler
