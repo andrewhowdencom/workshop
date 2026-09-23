@@ -218,16 +218,35 @@ func TestBuildInvokeOptions_OpenAI_IncludesTools(t *testing.T) {
 		},
 		defaultProviderName: "test",
 	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
+	got := optionTypes(buildInvokeOptions(cfg, nil, "session-123"))
 	foundTools := false
+	foundSessionID := false
 	for _, ty := range got {
 		if ty == "provider.ToolsOption" || ty == "*provider.toolsOption" {
 			foundTools = true
+		}
+		if ty == "openai.sessionIDOption" {
+			foundSessionID = true
 		}
 	}
 	if !foundTools {
 		t.Errorf("expected a tools option on the openai path; got %v", got)
 	}
+	if !foundSessionID {
+		t.Errorf("expected a stable session ID option on the openai path; got %v", got)
+	}
+}
+
+func TestBuildInvokeOptions_Codex_IncludesStableSessionID(t *testing.T) {
+	cfg := &config{
+		providers: map[string]ProviderConfig{
+			"test": {Kind: "codex"},
+		},
+		defaultProviderName: "test",
+	}
+	got := optionTypes(buildInvokeOptions(cfg, nil, "session-123"))
+	assert.Contains(t, got, "provider.ToolsOption")
+	assert.Contains(t, got, "responses.sessionIDOption")
 }
 
 // TestBuildInvokeOptions_Anthropic_IncludesTools verifies that the
@@ -243,7 +262,7 @@ func TestBuildInvokeOptions_Anthropic_IncludesTools(t *testing.T) {
 		},
 		defaultProviderName: "test",
 	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
+	got := optionTypes(buildInvokeOptions(cfg, nil, "session-123"))
 	foundTools := false
 	for _, ty := range got {
 		if ty == "provider.ToolsOption" || ty == "*provider.toolsOption" {
@@ -271,7 +290,7 @@ func TestBuildInvokeOptions_DoesNotIncludePerProviderSampling(t *testing.T) {
 		},
 		defaultProviderName: "test",
 	}
-	got := optionTypes(buildInvokeOptions(cfg, nil))
+	got := optionTypes(buildInvokeOptions(cfg, nil, "session-123"))
 	for _, ty := range got {
 		switch ty {
 		case "anthropic.temperatureOption",

@@ -244,7 +244,7 @@ func (p *usageProvider) Invoke(ctx context.Context, s ledger.State, spec models.
 func TestTUIEngineFactory_UsageTotalPersistsAcrossBuilds(t *testing.T) {
 	prov := &usageProvider{usages: []artifact.Usage{
 		{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
-		{PromptTokens: 150, CompletionTokens: 30, TotalTokens: 180},
+		{PromptTokens: 150, CompletionTokens: 30, TotalTokens: 180, CacheReadTokens: 80, CacheWriteTokens: 10},
 	}}
 	sess := session.New("usage-session", ledger.NewThread())
 	t.Cleanup(func() { _ = sess.Close() })
@@ -260,7 +260,7 @@ func TestTUIEngineFactory_UsageTotalPersistsAcrossBuilds(t *testing.T) {
 	require.NoError(t, err)
 	_, err = first.Run(t.Context(), sess.Thread())
 	require.NoError(t, err)
-	assertUsageProperties(t, properties, "100", "20", "120")
+	assertUsageProperties(t, properties, "100", "0", "0", "20", "120")
 
 	_, err = sess.Submit(t.Context(), ledger.RoleUser, artifact.Text{Content: "next"})
 	require.NoError(t, err)
@@ -268,7 +268,7 @@ func TestTUIEngineFactory_UsageTotalPersistsAcrossBuilds(t *testing.T) {
 	require.NoError(t, err)
 	_, err = second.Run(t.Context(), sess.Thread())
 	require.NoError(t, err)
-	assertUsageProperties(t, properties, "150", "30", "300")
+	assertUsageProperties(t, properties, "150", "80", "10", "30", "300")
 }
 
 func TestTUIEngineFactory_UsageTotalIncludesPersistedHistory(t *testing.T) {
@@ -293,10 +293,10 @@ func TestTUIEngineFactory_UsageTotalIncludesPersistedHistory(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ag.Run(t.Context(), sess.Thread())
 	require.NoError(t, err)
-	assertUsageProperties(t, properties, "120", "30", "250")
+	assertUsageProperties(t, properties, "120", "0", "0", "30", "250")
 }
 
-func assertUsageProperties(t *testing.T, events <-chan loop.OutputEvent, sent, received, total string) {
+func assertUsageProperties(t *testing.T, events <-chan loop.OutputEvent, sent, cacheRead, cacheWrite, received, total string) {
 	t.Helper()
 	select {
 	case event := <-events:
@@ -309,6 +309,8 @@ func assertUsageProperties(t *testing.T, events <-chan loop.OutputEvent, sent, r
 			}
 		}
 		assert.Equal(t, sent, values["sent"])
+		assert.Equal(t, cacheRead, values["cache_read"])
+		assert.Equal(t, cacheWrite, values["cache_write"])
 		assert.Equal(t, received, values["received"])
 		assert.Equal(t, total, values["total"])
 	case <-time.After(time.Second):
