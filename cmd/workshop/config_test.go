@@ -50,6 +50,7 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	// is 100000; we want the round-trip to assert that exact value.
 	setViperValue(t, "compaction.max-tokens", "100000")
 	setViperValue(t, "store.dir", "/tmp/store")
+	setViperValue(t, "tls.key-log-file", "/tmp/workshop.keys")
 
 	tmpFile := filepath.Join(t.TempDir(), "config.yaml")
 	if err := runConfigInitWithPath(nil, nil, tmpFile); err != nil {
@@ -134,6 +135,13 @@ func TestRunConfigInitWithPath_WritesCorrectYAML(t *testing.T) {
 	}
 	if got, want := http["addr"], ":8080"; got != want {
 		t.Errorf("http.addr = %v, want %v", got, want)
+	}
+	tls, ok := settings["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatal("tls section missing or not a map")
+	}
+	if got, want := tls["key-log-file"], "/tmp/workshop.keys"; got != want {
+		t.Errorf("tls.key-log-file = %v, want %v", got, want)
 	}
 }
 

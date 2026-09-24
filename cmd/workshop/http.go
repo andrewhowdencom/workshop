@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"time"
@@ -40,6 +41,15 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	providerClient, closeKeyLog, err := providerHTTPClient(viper.GetString("tls.key-log-file"))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := closeKeyLog(); err != nil {
+			slog.Warn("close TLS key log", "error", err)
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -78,6 +88,7 @@ func runHTTP(cmd *cobra.Command, args []string) error {
 
 	opts := []app.Option{
 		app.WithDefaultProviderName(defaultName),
+		app.WithProviderHTTPClient(providerClient),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithHTTPAddr(viper.GetString("http.addr")),
 		app.WithWorkingDir(cwd),

@@ -31,6 +31,7 @@ func init() {
 	// cobra flags don't fit dynamic names, so they're not exposed here.
 	rootCmd.PersistentFlags().String("provider", "", "Name of the default inference provider (must be a key in the providers: section)")
 	rootCmd.PersistentFlags().String("store.dir", "", "Directory for persistent JSON thread storage (default: $XDG_DATA_HOME/workshop/threads)")
+	rootCmd.PersistentFlags().String("tls.key-log-file", "", "Write provider TLS secrets to this owner-only file for Wireshark (sensitive; disabled by default)")
 	rootCmd.PersistentFlags().Bool("pprof", false, "Enable the pprof debug server")
 	rootCmd.PersistentFlags().String("pprof.addr", defaultPProfAddr, "TCP address for the pprof server")
 	rootCmd.PersistentFlags().String("telemetry.traces.endpoint", "", "OpenTelemetry OTLP/HTTP endpoint URL for traces (e.g. http://localhost:4318); empty = disabled")
@@ -243,6 +244,15 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	providerClient, closeKeyLog, err := providerHTTPClient(viper.GetString("tls.key-log-file"))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := closeKeyLog(); err != nil {
+			slog.Warn("close TLS key log", "error", err)
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -332,6 +342,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	opts := []app.Option{
 		app.WithThreadID(threadID),
 		app.WithDefaultProviderName(defaultName),
+		app.WithProviderHTTPClient(providerClient),
 		app.WithStoreDir(viper.GetString("store.dir")),
 		app.WithWorkingDir(cwd),
 		app.WithTracer(tracer),

@@ -39,7 +39,7 @@ import (
 
 func TestNewProvider_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
-	_, err := newProvider("openai-test", &pc, nil)
+	_, err := newProvider("openai-test", &pc, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -50,7 +50,7 @@ func TestNewProvider_MissingAPIKey(t *testing.T) {
 
 func TestNewProvider_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", APIKey: "sk-test"}
-	_, err := newProvider("openai-test", &pc, nil)
+	_, err := newProvider("openai-test", &pc, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -61,7 +61,7 @@ func TestNewProvider_MissingModel(t *testing.T) {
 
 func TestNewProvider_UnsupportedKind(t *testing.T) {
 	pc := ProviderConfig{Kind: "unsupported", APIKey: "sk-test", Model: "gpt-4o"}
-	_, err := newProvider("unsupported-test", &pc, nil)
+	_, err := newProvider("unsupported-test", &pc, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for unsupported provider kind")
 	}
@@ -73,7 +73,7 @@ func TestNewProvider_UnsupportedKind(t *testing.T) {
 
 func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", Model: "claude-sonnet-4-5"}
-	_, err := newProvider("anthropic-test", &pc, nil)
+	_, err := newProvider("anthropic-test", &pc, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing API key")
 	}
@@ -84,7 +84,7 @@ func TestNewProvider_Anthropic_MissingAPIKey(t *testing.T) {
 
 func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test"}
-	_, err := newProvider("anthropic-test", &pc, nil)
+	_, err := newProvider("anthropic-test", &pc, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -95,7 +95,7 @@ func TestNewProvider_Anthropic_MissingModel(t *testing.T) {
 
 func TestNewProvider_Anthropic_Constructs(t *testing.T) {
 	pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
-	prov, err := newProvider("anthropic-test", &pc, nil)
+	prov, err := newProvider("anthropic-test", &pc, nil, nil)
 	if err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 		Model:   "anthropic/claude-sonnet-4-5",
 		BaseURL: "https://openrouter.ai/api/v1",
 	}
-	prov, err := newProvider("openrouter-test", &pc, nil)
+	prov, err := newProvider("openrouter-test", &pc, nil, nil)
 	if err != nil {
 		t.Fatalf("newProvider error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestNewProvider_Anthropic_OpenRouterBaseURL(t *testing.T) {
 
 func TestNewProvider_Codex_MissingModel(t *testing.T) {
 	pc := ProviderConfig{Kind: "codex"}
-	_, err := newProvider("codex-test", &pc, nil)
+	_, err := newProvider("codex-test", &pc, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for missing model")
 	}
@@ -138,7 +138,7 @@ func TestNewProvider_Codex_MissingModel(t *testing.T) {
 func TestNewProvider_Codex_NotLoggedIn(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	pc := ProviderConfig{Kind: "codex", Model: "gpt-5.3-codex"}
-	_, err := newProvider("codex-test", &pc, nil)
+	_, err := newProvider("codex-test", &pc, nil, nil)
 	if err == nil {
 		t.Fatal("expected error when Codex credentials are absent")
 	}
@@ -159,7 +159,7 @@ func TestNewProvider_Codex_ConstructsWithoutAPIKey(t *testing.T) {
 	))
 
 	pc := ProviderConfig{Kind: "codex", Model: "gpt-5.3-codex"}
-	prov, err := newProvider("codex-test", &pc, nil)
+	prov, err := newProvider("codex-test", &pc, nil, nil)
 	require.NoError(t, err)
 	_, ok := prov.(*retry.Provider)
 	assert.True(t, ok, "codex provider should be wrapped with *retry.Provider, got %T", prov)
@@ -172,14 +172,14 @@ func TestNewProvider_Codex_ConstructsWithoutAPIKey(t *testing.T) {
 func TestNewProvider_WrapsWithRetry(t *testing.T) {
 	t.Run("openai", func(t *testing.T) {
 		pc := ProviderConfig{Kind: "openai", APIKey: "sk-test", Model: "gpt-4o"}
-		prov, err := newProvider("openai", &pc, nil)
+		prov, err := newProvider("openai", &pc, nil, nil)
 		require.NoError(t, err)
 		_, ok := prov.(*retry.Provider)
 		assert.True(t, ok, "openai provider should be wrapped with *retry.Provider, got %T", prov)
 	})
 	t.Run("anthropic", func(t *testing.T) {
 		pc := ProviderConfig{Kind: "anthropic", APIKey: "sk-ant-test", Model: "claude-sonnet-4-5"}
-		prov, err := newProvider("anthropic", &pc, nil)
+		prov, err := newProvider("anthropic", &pc, nil, nil)
 		require.NoError(t, err)
 		_, ok := prov.(*retry.Provider)
 		assert.True(t, ok, "anthropic provider should be wrapped with *retry.Provider, got %T", prov)

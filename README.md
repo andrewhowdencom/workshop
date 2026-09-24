@@ -163,6 +163,27 @@ go run ./cmd/workshop http --http.addr :7654
 
 The web chat UI is available at `http://localhost:8080/` (or the configured address).
 
+### Inspect provider HTTPS traffic
+
+To decrypt provider requests and streamed responses in Wireshark, run workshop
+with a TLS key log file and capture the matching network traffic:
+
+```bash
+workshop --tls.key-log-file /private/path/workshop.keys
+# or: workshop http --tls.key-log-file /private/path/workshop.keys
+```
+
+The same setting can be supplied as `WORKSHOP_TLS_KEY_LOG_FILE` or as
+`tls.key-log-file` in `config.yaml`. It applies to all named OpenAI,
+Anthropic, and Codex providers, including a separate compaction provider.
+Key logging is disabled by default. Workshop creates the file with owner-only
+permissions and refuses an existing file accessible by other users. Set
+Wireshark's TLS `(Pre)-Master-Secret log filename` to the key log path.
+
+**Treat the key log and capture as credentials.** Together they reveal request
+and response bodies, API keys, and authorization headers. Store them privately
+and delete them after debugging.
+
 ### Resume an existing thread
 
 ```bash

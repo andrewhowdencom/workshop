@@ -61,6 +61,7 @@ require (
 	github.com/andrewhowdencom/ore/x/llmbytes v0.1.2 // indirect
 	github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.6
 	github.com/andrewhowdencom/ore/x/tool/truncate v0.1.1 // indirect
+	github.com/andrewhowdencom/stdlib v0.0.0-20260924074001-3173b376437d
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
