@@ -225,7 +225,7 @@ func TestBuildInvokeOptions_OpenAI_IncludesTools(t *testing.T) {
 		if ty == "provider.ToolsOption" || ty == "*provider.toolsOption" {
 			foundTools = true
 		}
-		if ty == "openai.sessionIDOption" {
+		if ty == "chatcompletions.sessionIDOption" {
 			foundSessionID = true
 		}
 	}

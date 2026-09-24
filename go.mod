@@ -4,22 +4,22 @@ go 1.26.2
 
 require (
 	github.com/adrg/xdg v0.5.3
-	github.com/andrewhowdencom/ore v1.4.0
+	github.com/andrewhowdencom/ore v1.4.1
 	github.com/andrewhowdencom/ore/x/analytics v0.2.6
 	github.com/andrewhowdencom/ore/x/compaction v0.5.1
-	github.com/andrewhowdencom/ore/x/conduit/http v0.9.1
-	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.8
-	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.13
+	github.com/andrewhowdencom/ore/x/conduit/http v0.9.2
+	github.com/andrewhowdencom/ore/x/conduit/stdio v0.2.9
+	github.com/andrewhowdencom/ore/x/conduit/tui v0.12.14
 	github.com/andrewhowdencom/ore/x/export v1.0.0
-	github.com/andrewhowdencom/ore/x/provider/codex v0.1.0
-	github.com/andrewhowdencom/ore/x/provider/openai v0.6.5
+	github.com/andrewhowdencom/ore/x/provider/codex v0.1.1
+	github.com/andrewhowdencom/ore/x/provider/openai v0.6.7
 	github.com/andrewhowdencom/ore/x/subagent v0.3.1
 	github.com/andrewhowdencom/ore/x/telemetry v0.1.5
 	github.com/andrewhowdencom/ore/x/tool v0.6.1
-	github.com/andrewhowdencom/ore/x/tool/bash v0.3.7
-	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.2
-	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.3
-	github.com/andrewhowdencom/ore/x/tool/skills v0.5.2
+	github.com/andrewhowdencom/ore/x/tool/bash v0.3.8
+	github.com/andrewhowdencom/ore/x/tool/filesystem v0.5.3
+	github.com/andrewhowdencom/ore/x/tool/set_title v0.3.4
+	github.com/andrewhowdencom/ore/x/tool/skills v0.5.3
 	github.com/andrewhowdencom/ore/x/usage v0.2.4
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -35,12 +35,14 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
-require github.com/andrewhowdencom/ore/x/wire/openai/responses v0.1.0 // indirect
+require (
+	github.com/andrewhowdencom/ore/x/wire/openai/chatcompletions v0.1.1 // indirect
+	github.com/andrewhowdencom/ore/x/wire/openai/responses v0.1.1 // indirect
+)
 
 require (
 	github.com/andrewhowdencom/ore/x/provider/retry v0.0.3
-	github.com/andrewhowdencom/ore/x/wire/anthropic v0.2.3 // indirect
-	github.com/andrewhowdencom/ore/x/wire/openai v0.1.4 // indirect
+	github.com/andrewhowdencom/ore/x/wire/anthropic v0.2.4 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.72.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.6.1 // indirect
@@ -55,7 +57,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9 // indirect
 	charm.land/lipgloss/v2 v2.0.6 // indirect
 	github.com/alecthomas/chroma/v2 v2.27.0 // indirect
-	github.com/andrewhowdencom/ore/x/conduit v0.2.1 // indirect
+	github.com/andrewhowdencom/ore/x/conduit v0.2.2 // indirect
 	github.com/andrewhowdencom/ore/x/llmbytes v0.1.2 // indirect
 	github.com/andrewhowdencom/ore/x/provider/anthropic v0.2.6
 	github.com/andrewhowdencom/ore/x/tool/truncate v0.1.1 // indirect
