@@ -64,6 +64,8 @@ github.com/andrewhowdencom/ore/x/wire/openai/chatcompletions v0.1.1 h1:dvZSLJ+uu
 github.com/andrewhowdencom/ore/x/wire/openai/chatcompletions v0.1.1/go.mod h1:zJBCCASeoW0aS4uojfv6zQ1d7diUARalnqBmWU5emoM=
 github.com/andrewhowdencom/ore/x/wire/openai/responses v0.1.1 h1:NvWpN4QhajeiGhzhanKqBkzIwG1WNFO6d9zrfOksaEQ=
 github.com/andrewhowdencom/ore/x/wire/openai/responses v0.1.1/go.mod h1:2CzJ+YstMgwP2NZDf8T7pniNgdRytM+yf2y4FpYL1uU=
+github.com/andrewhowdencom/stdlib v0.0.0-20260924074001-3173b376437d h1:iVhSO1nV4EKZ/0th0xeKEuezNCWah7c6xT+aSVgdeks=
+github.com/andrewhowdencom/stdlib v0.0.0-20260924074001-3173b376437d/go.mod h1:p57zTv4CBlWB535+ItxJrzDQuCU2R5e160egGOk+aLw=
 github.com/anthropics/anthropic-sdk-go v1.72.0 h1:T0qQWWfygiL24lqEQaffRXCvEeno3yiv/mFzUdY1E88=
 github.com/anthropics/anthropic-sdk-go v1.72.0/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
 github.com/atotto/clipboard v0.1.4 h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=

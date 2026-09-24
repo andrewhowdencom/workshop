@@ -74,6 +74,11 @@ compaction:
   max-tokens: 8192
 
 log-level: info
+# Opt in to TLS session key logging for provider requests. The file contains
+# secrets that can decrypt a matching packet capture, including API keys and
+# authorization headers. Keep both files private and delete them after debugging.
+# tls:
+#   key-log-file: "/private/path/workshop.keys"
 pprof: true
 store:
   dir: ""

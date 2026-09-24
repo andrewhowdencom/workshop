@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -154,10 +155,11 @@ func (n *compactionNotifier) Notify(turns []state.Turn, boundary compaction.Boun
 
 // config holds the runtime configuration for the application.
 type config struct {
-	threadID  string
-	storeDir  string
-	httpAddr  string
-	providers map[string]ProviderConfig
+	threadID           string
+	storeDir           string
+	httpAddr           string
+	providers          map[string]ProviderConfig
+	providerHTTPClient *http.Client
 	// defaultProviderName is the name of the provider used for inference
 	// (the main loop, the system prompt, the git_commit trailer, etc.).
 	// It must reference a key in providers. Compaction has its own
@@ -200,6 +202,12 @@ func WithProvider(name string, p ProviderConfig) Option {
 		}
 		c.providers[name] = p
 	}
+}
+
+// WithProviderHTTPClient sets the client used by every named provider.
+// A nil client leaves the providers' normal HTTP behavior unchanged.
+func WithProviderHTTPClient(client *http.Client) Option {
+	return func(c *config) { c.providerHTTPClient = client }
 }
 
 // WithDefaultProviderName sets the name of the provider used for
@@ -1218,7 +1226,7 @@ func wrapWithRetry(p provider.Provider, tracer trace.Tracer) provider.Provider {
 // discard that mutation, causing buildInvokeOptions to see a zero value
 // and skip the WithMaxTokens option (which would then default to
 // max_tokens=1 on the wire).
-func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider.Provider, error) {
+func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer, client *http.Client) (provider.Provider, error) {
 	switch pc.Kind {
 	case "", "openai":
 		if pc.APIKey == "" {
@@ -1232,6 +1240,9 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 		// (configured on the loop as the default spec).
 		var opts []openai.Option
 		opts = append(opts, openai.WithAPIKey(pc.APIKey))
+		if client != nil {
+			opts = append(opts, openai.WithHTTPClient(client))
+		}
 		if pc.BaseURL != "" {
 			opts = append(opts, openai.WithBaseURL(pc.BaseURL))
 		}
@@ -1256,6 +1267,9 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 		// spec-build time.
 		var opts []anthropic.Option
 		opts = append(opts, anthropic.WithAPIKey(pc.APIKey))
+		if client != nil {
+			opts = append(opts, anthropic.WithHTTPClient(client))
+		}
 		if pc.BaseURL != "" {
 			opts = append(opts, anthropic.WithBaseURL(pc.BaseURL))
 		}
@@ -1272,6 +1286,9 @@ func newProvider(name string, pc *ProviderConfig, tracer trace.Tracer) (provider
 			return nil, fmt.Errorf("missing required provider config: model")
 		}
 		opts := []codex.Option{codex.WithOriginator("workshop")}
+		if client != nil {
+			opts = append(opts, codex.WithHTTPClient(client))
+		}
 		if tracer != nil {
 			opts = append(opts, codex.WithTracer(tracer))
 		}
@@ -1319,7 +1336,7 @@ func compileProviders(cfg *config, tracer trace.Tracer) (map[string]provider.Pro
 	out := make(map[string]provider.Provider, len(cfg.providers))
 	for name := range cfg.providers {
 		pc := cfg.providers[name]
-		prov, err := newProvider(name, &pc, tracer)
+		prov, err := newProvider(name, &pc, tracer, cfg.providerHTTPClient)
 		if err != nil {
 			return nil, fmt.Errorf("create provider %q: %w", name, err)
 		}

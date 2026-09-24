@@ -94,6 +94,9 @@ func buildConfigMap() map[string]interface{} {
 		"http": map[string]interface{}{
 			"addr": viper.GetString("http.addr"),
 		},
+		"tls": map[string]interface{}{
+			"key-log-file": viper.GetString("tls.key-log-file"),
+		},
 		"pprof":      viper.GetBool("pprof"),
 		"pprof.addr": viper.GetString("pprof.addr"),
 		"compaction": map[string]interface{}{
