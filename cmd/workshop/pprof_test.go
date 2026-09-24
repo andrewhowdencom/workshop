@@ -3,11 +3,19 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 )
+
+func closePProfResource(t *testing.T, resource io.Closer) {
+	t.Helper()
+	if err := resource.Close(); err != nil {
+		t.Errorf("close test resource: %v", err)
+	}
+}
 
 func getFreeAddr(t *testing.T) string {
 	t.Helper()
@@ -16,7 +24,7 @@ func getFreeAddr(t *testing.T) string {
 		t.Fatalf("failed to reserve port: %v", err)
 	}
 	addr := l.Addr().String()
-	l.Close()
+	closePProfResource(t, l)
 	return addr
 }
 
@@ -51,7 +59,7 @@ func TestPProf_StartAndServe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reach pprof server: %v", err)
 	}
-	defer resp.Body.Close()
+	defer closePProfResource(t, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected status code: %d", resp.StatusCode)
@@ -67,7 +75,7 @@ func TestPProf_PortInUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to occupy port: %v", err)
 	}
-	defer l.Close()
+	defer closePProfResource(t, l)
 
 	addr := l.Addr().String()
 
@@ -93,7 +101,7 @@ func TestPProf_PortInUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dummy listener no longer reachable: %v", err)
 	}
-	conn.Close()
+	closePProfResource(t, conn)
 }
 
 func TestPProf_EmptyAddrFallsBackToDefault(t *testing.T) {
@@ -112,7 +120,7 @@ func TestPProf_EmptyAddrFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reach fallback pprof server: %v", err)
 	}
-	defer resp.Body.Close()
+	defer closePProfResource(t, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected status code from fallback: %d", resp.StatusCode)
@@ -133,7 +141,7 @@ func TestPProf_ShutdownOnCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to reach pprof server before cancel: %v", err)
 	}
-	resp.Body.Close()
+	closePProfResource(t, resp.Body)
 
 	// Cancel context to trigger shutdown.
 	cancel()

@@ -26,7 +26,6 @@ import (
 	"github.com/andrewhowdencom/ore/cognitive"
 	"github.com/andrewhowdencom/ore/engine"
 	"github.com/andrewhowdencom/ore/ledger"
-	state "github.com/andrewhowdencom/ore/ledger"
 	"github.com/andrewhowdencom/ore/loop"
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
@@ -132,11 +131,11 @@ type CompactionConfig struct {
 // no collapse marker in that case).
 type compactionNotifier struct {
 	mu       sync.Mutex
-	reloader func(turns []state.Turn, boundary compaction.BoundaryInfo)
+	reloader func(turns []ledger.Turn, boundary compaction.BoundaryInfo)
 }
 
 // SetReloader registers the callback that receives compacted turns.
-func (n *compactionNotifier) SetReloader(fn func(turns []state.Turn, boundary compaction.BoundaryInfo)) {
+func (n *compactionNotifier) SetReloader(fn func(turns []ledger.Turn, boundary compaction.BoundaryInfo)) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.reloader = fn
@@ -144,7 +143,7 @@ func (n *compactionNotifier) SetReloader(fn func(turns []state.Turn, boundary co
 
 // Notify forwards the compacted turns (and boundary) to the registered reloader
 // if any.
-func (n *compactionNotifier) Notify(turns []state.Turn, boundary compaction.BoundaryInfo) {
+func (n *compactionNotifier) Notify(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if n.reloader != nil {
@@ -316,7 +315,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 	if !ok {
 		return fmt.Errorf("TUI conduit does not implement *tui.TUI")
 	}
-	notifier.SetReloader(func(turns []state.Turn, boundary compaction.BoundaryInfo) {
+	notifier.SetReloader(func(turns []ledger.Turn, boundary compaction.BoundaryInfo) {
 		_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
 	})
 
@@ -656,7 +655,7 @@ func (c *compactCommand) Handler(ctx context.Context, _ loop.Emitter, cmd slash.
 	// pre-submit state.
 	postSubmitTurns := c.session.Turns()
 	summaryID := postSubmitTurns[len(postSubmitTurns)-1].ID
-	c.session.Thread().SetControl(summaryID, state.ControlStop)
+	c.session.Thread().SetControl(summaryID, ledger.ControlStop)
 
 	// Record the boundary under the framework's key. The dual-write is
 	// load-bearing, matching thinkingCommand.writeLevel:
@@ -1313,7 +1312,7 @@ func compileProviders(cfg *config, tracer trace.Tracer) (map[string]provider.Pro
 		return nil, fmt.Errorf("provider: <name> is required; set the name of the default inference provider")
 	}
 	if _, ok := cfg.providers[cfg.defaultProviderName]; !ok {
-		return nil, fmt.Errorf("default provider %q is not defined in providers:", cfg.defaultProviderName)
+		return nil, fmt.Errorf("default provider %q is not defined in providers", cfg.defaultProviderName)
 	}
 
 	out := make(map[string]provider.Provider, len(cfg.providers))

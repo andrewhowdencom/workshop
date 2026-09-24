@@ -79,29 +79,34 @@ func (b *codexAuthBackend) Login(ctx context.Context, out io.Writer) error {
 	}
 	defer login.cancel()
 
-	fmt.Fprintf(out, "Provider %q: open %s and enter code %s\n", b.name, login.verificationURL, login.userCode)
+	if _, err := fmt.Fprintf(out, "Provider %q: open %s and enter code %s\n", b.name, login.verificationURL, login.userCode); err != nil {
+		return fmt.Errorf("write login instructions: %w", err)
+	}
 	if err := login.wait(ctx); err != nil {
 		return fmt.Errorf("complete device login: %w", err)
 	}
-	fmt.Fprintf(out, "Provider %q login complete.\n", b.name)
+	if _, err := fmt.Fprintf(out, "Provider %q login complete.\n", b.name); err != nil {
+		return fmt.Errorf("write login result: %w", err)
+	}
 	return nil
 }
 
 func (b *codexAuthBackend) Status(out io.Writer) error {
 	if b.client.LoggedIn() {
-		fmt.Fprintf(out, "Provider %q: Codex credentials are present.\n", b.name)
+		_, err := fmt.Fprintf(out, "Provider %q: Codex credentials are present.\n", b.name)
+		return err
 	} else {
-		fmt.Fprintf(out, "Provider %q: Codex credentials are not present. Run `workshop auth login`.\n", b.name)
+		_, err := fmt.Fprintf(out, "Provider %q: Codex credentials are not present. Run `workshop auth login`.\n", b.name)
+		return err
 	}
-	return nil
 }
 
 func (b *codexAuthBackend) Logout(ctx context.Context, out io.Writer) error {
 	if err := b.client.Logout(ctx); err != nil {
 		return fmt.Errorf("revoke Codex credentials: %w", err)
 	}
-	fmt.Fprintf(out, "Provider %q logged out.\n", b.name)
-	return nil
+	_, err := fmt.Fprintf(out, "Provider %q logged out.\n", b.name)
+	return err
 }
 
 type apiKeyAuthBackend struct {
@@ -122,8 +127,8 @@ func (b *apiKeyAuthBackend) Status(out io.Writer) error {
 	if b.configured {
 		state = "configured"
 	}
-	fmt.Fprintf(out, "Provider %q: %s API key is %s.\n", b.name, b.kind, state)
-	return nil
+	_, err := fmt.Fprintf(out, "Provider %q: %s API key is %s.\n", b.name, b.kind, state)
+	return err
 }
 
 func (b *apiKeyAuthBackend) Logout(context.Context, io.Writer) error {
