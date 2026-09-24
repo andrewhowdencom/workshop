@@ -308,7 +308,9 @@ func runThreadListWithStore(ctx context.Context, limit int, cursor string, all b
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "ID\tLAST ACTIVITY\n")
+	if _, err := fmt.Fprint(tw, "ID\tLAST ACTIVITY\n"); err != nil {
+		return fmt.Errorf("write thread list header: %w", err)
+	}
 
 	current := cursor
 	for {
@@ -326,7 +328,9 @@ func runThreadListWithStore(ctx context.Context, limit int, cursor string, all b
 			if !at.IsZero() {
 				last = at.Format("2006-01-02 15:04")
 			}
-			fmt.Fprintf(tw, "%s\t%s\n", e.id, last)
+			if _, err := fmt.Fprintf(tw, "%s\t%s\n", e.id, last); err != nil {
+				return fmt.Errorf("write thread list row: %w", err)
+			}
 		}
 
 		if all {
@@ -341,7 +345,9 @@ func runThreadListWithStore(ctx context.Context, limit int, cursor string, all b
 		// remain so the user knows to invoke again with the cursor.
 		// (The loop runs exactly once in this branch.)
 		if next != "" {
-			fmt.Fprintf(tw, "\n-- next: --cursor %s\n", next)
+			if _, err := fmt.Fprintf(tw, "\n-- next: --cursor %s\n", next); err != nil {
+				return fmt.Errorf("write thread list cursor: %w", err)
+			}
 		}
 		break
 	}
@@ -401,17 +407,16 @@ func runThreadExport(cmd *cobra.Command, args []string) error {
 	format := viper.GetString("format")
 	output := viper.GetString("output")
 
-	var w io.Writer = os.Stdout
-	if output != "" {
-		f, err := os.Create(output)
-		if err != nil {
-			return fmt.Errorf("create output file: %w", err)
-		}
-		defer f.Close()
-		w = f
+	if output == "" {
+		return runThreadExportWithStore(cmd.Context(), repo, args[0], format, os.Stdout)
 	}
 
-	return runThreadExportWithStore(cmd.Context(), repo, args[0], format, w)
+	f, err := os.Create(output)
+	if err != nil {
+		return fmt.Errorf("create output file: %w", err)
+	}
+	renderErr := runThreadExportWithStore(cmd.Context(), repo, args[0], format, f)
+	return errors.Join(renderErr, f.Close())
 }
 
 // runThreadExportWithStore hydrates the named thread and renders it
@@ -550,9 +555,13 @@ func runThreadAnalyticsWithStore(ctx context.Context, days int, id string, repo 
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintf(tw, "KIND\tSOURCE\tCOUNT\tBYTES\n")
+	if _, err := fmt.Fprint(tw, "KIND\tSOURCE\tCOUNT\tBYTES\n"); err != nil {
+		return fmt.Errorf("write analytics header: %w", err)
+	}
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%d\n", s.Kind, s.Source, s.Count, s.Bytes)
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%d\t%d\n", s.Kind, s.Source, s.Count, s.Bytes); err != nil {
+			return fmt.Errorf("write analytics row: %w", err)
+		}
 	}
 
 	if err := tw.Flush(); err != nil {

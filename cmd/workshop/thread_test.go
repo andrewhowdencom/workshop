@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,13 @@ import (
 	"github.com/andrewhowdencom/ore/ledger"
 	"github.com/spf13/viper"
 )
+
+func closePipe(t *testing.T, f *os.File) {
+	t.Helper()
+	if err := f.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+		t.Errorf("close pipe: %v", err)
+	}
+}
 
 // seedThreadAt writes a single journal entry to the given repository
 // with a controlled timestamp, simulating a thread with one user
@@ -146,7 +154,7 @@ tmpDir := t.TempDir()
 		t.Fatalf("could not find all thread IDs in output:\n%s", output)
 	}
 	// Most recent first.
-	if !(idx3 < idx2 && idx2 < idx1) {
+	if idx3 >= idx2 || idx2 >= idx1 {
 		t.Errorf("sort order wrong: expected thr3<thr2<thr1; got idx1=%d, idx2=%d, idx3=%d",
 			idx1, idx2, idx3)
 	}
@@ -450,10 +458,15 @@ tmpDir := t.TempDir()
 		t.Fatalf("create pipe: %v", err)
 	}
 	os.Stdout = w
+	t.Cleanup(func() {
+		os.Stdout = oldStdout
+		closePipe(t, w)
+		closePipe(t, r)
+	})
 
 	runErr := threadAnalyticsCmd.RunE(threadAnalyticsCmd, []string{"--days", "30"})
 
-	w.Close()
+	closePipe(t, w)
 	os.Stdout = oldStdout
 
 	if runErr != nil {
@@ -723,8 +736,8 @@ tmpDir := t.TempDir()
 
 	t.Cleanup(func() {
 		os.Stdout = oldStdout
-		w.Close()
-		r.Close()
+		closePipe(t, w)
+		closePipe(t, r)
 	})
 
 	oldStoreDir := viper.GetString("repo.dir")
@@ -741,14 +754,14 @@ tmpDir := t.TempDir()
 		t.Fatalf("threadExportCmd.RunE: %v", err)
 	}
 
-	w.Close()
+	closePipe(t, w)
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, r); err != nil {
 		t.Fatalf("read pipe: %v", err)
 	}
-	r.Close()
+	closePipe(t, r)
 
 	if !strings.Contains(buf.String(), thrID) {
 		t.Errorf("stdout output missing thread ID: %s", buf.String())

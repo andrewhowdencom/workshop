@@ -1,6 +1,6 @@
 // Package app — Backend adapter for the ore v1.x session-based conduit API.
 //
-// Background
+// # Background
 //
 // The HTTP conduit (x/conduit/http) follows the session-based contract
 // documented in x/conduit/doc.go: it consumes a Backend interface that
@@ -35,7 +35,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -68,11 +67,6 @@ func newSessionBackend(
 
 // Compile-time assertion that *sessionBackend satisfies httpc.Backend.
 var _ httpc.Backend = (*sessionBackend)(nil)
-
-// errUnexpectedEvent is reserved for future event-type drift. Today
-// session.Event and engine.Submit consume the same event types
-// directly, so the Submit path does not need translation.
-var errUnexpectedEvent = errors.New("sessionBackend: unsupported event type")
 
 // CreateSession creates a fresh *session.Session when threadID is
 // empty, or attaches to an existing thread (hydrated from the

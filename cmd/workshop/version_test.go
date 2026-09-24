@@ -18,8 +18,16 @@ func TestVersionCommand(t *testing.T) {
 
 	cmdErr := versionCmd.RunE(versionCmd, []string{})
 
-	w.Close()
+	closeErr := w.Close()
 	os.Stdout = oldStdout
+	if closeErr != nil {
+		t.Fatalf("close stdout pipe: %v", closeErr)
+	}
+	defer func() {
+		if err := r.Close(); err != nil {
+			t.Errorf("close pipe reader: %v", err)
+		}
+	}()
 
 	if cmdErr != nil {
 		t.Fatalf("version RunE failed: %v", cmdErr)

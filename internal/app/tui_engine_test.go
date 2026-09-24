@@ -110,7 +110,7 @@ func newTestEngine(t *testing.T) (*tuiEngineFactory, *engine.Engine, *session.Se
 // turn but never the assistant's response.
 func TestTUIEngineFactory_Build_DrivesAgent(t *testing.T) {
 	factory, _, sess, prov := newTestEngine(t)
-	defer sess.Close()
+	defer func() { assert.NoError(t, sess.Close()) }()
 
 	ag, err := factory.Build(sess)
 	require.NoError(t, err, "factory.Build")
@@ -160,7 +160,7 @@ func TestTUIEngineFactory_Build_UsesSessionModelOverride(t *testing.T) {
 // session's bound state is the single source of truth.
 func TestTUIEngineFactory_Build_NoDoubleAppend(t *testing.T) {
 	factory, _, sess, _ := newTestEngine(t)
-	defer sess.Close()
+	defer func() { assert.NoError(t, sess.Close()) }()
 
 	// First run.
 	ag1, err := factory.Build(sess)
@@ -201,7 +201,7 @@ func TestTUIEngineFactory_Build_NoDoubleAppend(t *testing.T) {
 // introduced and that the fix closes.
 func TestEngineSubmit_DrivesAgentAndBridgesToSession(t *testing.T) {
 	factory, _, sess, prov := newTestEngine(t)
-	defer sess.Close()
+	defer func() { assert.NoError(t, sess.Close()) }()
 
 	registry := session.NewInMemoryRegistry()
 	require.NoError(t, registry.Register(sess))
