@@ -67,6 +67,53 @@ providers:
     model: gpt-4o
 ```
 
+### Ollama (local)
+
+Workshop can use Ollama through its [OpenAI-compatible Chat Completions
+endpoint](https://docs.ollama.com/api/openai-compatibility). Check that Ollama
+is running and pull a model that supports tool calling:
+
+```bash
+ollama list
+ollama pull qwen3:8b
+```
+
+If `ollama list` cannot connect, run `ollama serve` in a separate terminal and
+leave it running. If it reports that port 11434 is already in use, Ollama is
+already serving requests.
+
+Add the `ollama` entry **inside the existing `providers:` map** in
+`~/.config/workshop/config.yaml` (or the equivalent XDG config path). Keep any
+providers already in that map. The `--provider ollama` flag selects the entry;
+it does not create one:
+
+```yaml
+providers:
+  ollama:
+    kind: openai
+    base-url: http://localhost:11434/v1
+    api-key: ollama
+    model: qwen3:8b
+    thinking-level: "off"
+```
+
+```bash
+go run ./cmd/workshop --provider ollama
+```
+
+Alternatively, set `provider: ollama` at the top level to use Ollama by
+default. Keep only one top-level `providers:` map in the file.
+
+The local Ollama server ignores the API key value, but Workshop's OpenAI
+provider requires a nonempty one. Use the exact model name shown by
+`ollama list`; tool-capable models are needed for the agent's file and shell
+actions. The `base-url` is the API root ending in `/v1`, not the full
+`/v1/chat/completions` path. If Ollama runs on another machine, replace
+`localhost` with its reachable host address.
+
+To inspect actual request prefixes and local cache reuse, see [Check prompt
+cache behavior with Ollama](docs/how-to/check-prompt-cache.md).
+
 ### Codex with a ChatGPT subscription
 
 First configure and select a provider without an API key:
