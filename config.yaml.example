@@ -53,6 +53,15 @@ providers:
   #   temperature: 0
   #   thinking-level: "off"         # default for openai-compatible
 
+  # Local Ollama example. Start Ollama, run `ollama pull qwen3:8b`, then
+  # select with `provider: ollama` or `workshop --provider ollama`.
+  # ollama:
+  #   kind: openai
+  #   base-url: "http://localhost:11434/v1"
+  #   api-key: ollama               # required by Workshop; ignored by Ollama
+  #   model: qwen3:8b               # use the exact name from `ollama list`
+  #   thinking-level: "off"
+
   # ChatGPT subscription example. Set the top-level provider to codex, then
   # run `workshop auth login`. No API key or base URL is required.
   # codex:
