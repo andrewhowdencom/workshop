@@ -36,6 +36,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSessionSetupOpenSession_AttachesConfiguredThread(t *testing.T) {
+	ctx := context.Background()
+	repo := ledger.NewMemoryRepository()
+	const threadID = "resumed-thread"
+	turn := &ledger.Turn{
+		ID:        "existing-turn",
+		Role:      ledger.RoleUser,
+		Artifacts: []artifact.Artifact{artifact.Text{Content: "persisted input"}},
+	}
+	require.NoError(t, repo.SaveTurn(ctx, threadID, turn))
+	require.NoError(t, repo.UpdateThreadTip(ctx, threadID, turn.ID))
+
+	setup := &sessionSetup{
+		cfg:  &config{threadID: threadID},
+		repo: repo,
+	}
+	sess, err := setup.openSession(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, threadID, sess.ID())
+	require.Len(t, sess.Turns(), 1)
+	assert.Equal(t, turn.ID, sess.Turns()[0].ID)
+}
+
+func TestSessionSetupOpenSession_RejectsMissingCurrentTip(t *testing.T) {
+	ctx := context.Background()
+	repo := ledger.NewMemoryRepository()
+	const threadID = "broken-thread"
+	require.NoError(t, repo.SaveTurn(ctx, threadID, &ledger.Turn{ID: "persisted-turn"}))
+	require.NoError(t, repo.UpdateThreadTip(ctx, threadID, "missing-turn"))
+
+	setup := &sessionSetup{
+		cfg:  &config{threadID: threadID},
+		repo: repo,
+	}
+	_, err := setup.openSession(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `current tip "missing-turn" is not persisted`)
+}
+
 func TestNewProvider_MissingAPIKey(t *testing.T) {
 	pc := ProviderConfig{Kind: "openai", Model: "gpt-4o"}
 	_, err := newProvider("openai-test", &pc, nil, nil)

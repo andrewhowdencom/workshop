@@ -287,11 +287,12 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		return err
 	}
 
-	// Construct the active session. TUI always creates a fresh
-	// session (TUI never attaches to an existing threadID — the
-	// `--thread` flag selects the threaded entrypoint used by
-	// stdio, not TUI).
-	sess := setup.newSession()
+	// Construct or attach the active session. Both --thread and --resume
+	// resolve to cfg.threadID before entering the app package.
+	sess, err := setup.openSession(ctx)
+	if err != nil {
+		return err
+	}
 	if err := setup.registry.Register(sess); err != nil {
 		return fmt.Errorf("register session: %w", err)
 	}
@@ -327,7 +328,7 @@ func RunTUI(ctx context.Context, opts ...Option) error {
 		_ = tuiImpl.ReloadHistory(turns, boundary) // Best-effort: ignore reload errors to avoid disrupting compaction.
 	})
 
-	return runTUIEngine(runCtx, sess, tuiImpl, setup.factory, setup.engine, setup.repo)
+	return runTUIEngine(runCtx, sess, tuiImpl, setup.factory, setup.engine, setup.repo, setup.workingDir())
 }
 
 // RunHTTP initializes and starts the HTTP web UI application.
@@ -376,14 +377,9 @@ func RunStdio(ctx context.Context, opts ...Option) error {
 	}
 
 	// Construct or attach a session.
-	var sess *session.Session
-	if cfg.threadID != "" {
-		sess, err = setup.attachSession(ctx, cfg.threadID)
-		if err != nil {
-			return fmt.Errorf("attach session: %w", err)
-		}
-	} else {
-		sess = setup.newSession()
+	sess, err := setup.openSession(ctx)
+	if err != nil {
+		return err
 	}
 	if err := setup.registry.Register(sess); err != nil {
 		return fmt.Errorf("register session: %w", err)
@@ -1021,6 +1017,20 @@ func (s *sessionSetup) newSession() *session.Session {
 	return session.New(id, thread)
 }
 
+// openSession attaches to the configured thread when one was requested, or
+// creates a fresh session otherwise. All interactive and non-interactive
+// conduits use this path so thread selection cannot diverge between them.
+func (s *sessionSetup) openSession(ctx context.Context) (*session.Session, error) {
+	if s.cfg.threadID == "" {
+		return s.newSession(), nil
+	}
+	sess, err := s.attachSession(ctx, s.cfg.threadID)
+	if err != nil {
+		return nil, fmt.Errorf("attach session: %w", err)
+	}
+	return sess, nil
+}
+
 // attachSession hydrates a thread from the durable store by ID and
 // constructs a *session.Session wrapping it. Returns an error when
 // the thread cannot be hydrated (the underlying HydrateThread
@@ -1030,12 +1040,55 @@ func (s *sessionSetup) attachSession(ctx context.Context, threadID string) (*ses
 	if err != nil {
 		return nil, fmt.Errorf("hydrate thread %s: %w", threadID, err)
 	}
+	if err := validateActiveThread(turns, tip); err != nil {
+		return nil, fmt.Errorf("hydrate thread %s: invalid journal: %w", threadID, err)
+	}
 	thread := ledger.NewThread()
 	for _, t := range turns {
 		thread.SaveTurn(t)
 	}
 	thread.SetCurrentTip(tip)
 	return session.New(threadID, thread), nil
+}
+
+// validateActiveThread verifies that the current tip resolves through persisted
+// parents to a root or an explicit compaction boundary. Without this check, a
+// journal with a missing tip silently appears as an empty TUI conversation.
+func validateActiveThread(turns map[string]*ledger.Turn, tip string) error {
+	if len(turns) == 0 {
+		return fmt.Errorf("thread has no persisted turns")
+	}
+	if tip == "" {
+		return fmt.Errorf("thread has no current tip")
+	}
+
+	visited := make(map[string]struct{})
+	for id := tip; id != ""; {
+		turn, ok := turns[id]
+		if !ok {
+			if id == tip {
+				return fmt.Errorf("current tip %q is not persisted", id)
+			}
+			return fmt.Errorf("parent turn %q is not persisted", id)
+		}
+		if _, ok := visited[id]; ok {
+			return fmt.Errorf("active turn chain contains a cycle at %q", id)
+		}
+		visited[id] = struct{}{}
+		if turn.Metadata.Control == ledger.ControlStop {
+			return nil
+		}
+		id = turn.ParentID
+	}
+	return nil
+}
+
+func (s *sessionSetup) workingDir() string {
+	if s.cfg.workingDir != "" {
+		return filepath.Clean(s.cfg.workingDir)
+	}
+	cwd, _ := os.Getwd()
+	return cwd
 }
 
 // seedMetadata writes static info-bar keys into the
@@ -1046,7 +1099,7 @@ func (s *sessionSetup) attachSession(ctx context.Context, threadID string) (*ses
 // The keys are thread_id, cwd (with home-prefix shortened to ~), git_branch
 // (or "(not in git repo)"), tui.pid, and model (from defaultSpec.Name).
 func (s *sessionSetup) seedMetadata(sess *session.Session) {
-	cwd, _ := os.Getwd()
+	cwd := s.workingDir()
 	shortCwd := cwd
 	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
 		shortCwd = "~" + strings.TrimPrefix(cwd, home)

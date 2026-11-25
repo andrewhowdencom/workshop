@@ -48,10 +48,9 @@
 // # Persistence
 //
 // runTUIEngine restores the pre-bump persistence behaviour by
-// subscribing to LifecycleEvent "done" and appending a journal
-// entry (SaveTurn + UpdateThreadTip) for the latest turn via the
-// supplied ledger.Repository. Persistence is best-effort: failures
-// are logged at warn level.
+// subscribing to LifecycleEvent "done" and appending every new turn plus
+// parent, control, and tip updates via the supplied ledger.Repository.
+// Persistence is best-effort: failures are logged at warn level.
 //
 // # Slash commands
 //
@@ -317,6 +316,83 @@ func (f *tuiEngineFactory) Close() {
 	}
 }
 
+type persistedTurnState struct {
+	parentID string
+	control  ledger.TraversalControl
+}
+
+// threadJournaler incrementally mirrors an in-memory thread into the append-only
+// repository. AllTurns has unspecified order, so persistence must inspect every
+// turn rather than treating the final slice element as the current tip.
+type threadJournaler struct {
+	repo     ledger.Repository
+	threadID string
+	turns    map[string]persistedTurnState
+}
+
+func newThreadJournaler(repo ledger.Repository, threadID string, existing []ledger.Turn) *threadJournaler {
+	turns := make(map[string]persistedTurnState, len(existing))
+	for _, turn := range existing {
+		turns[turn.ID] = persistedTurnState{
+			parentID: turn.ParentID,
+			control:  turn.Metadata.Control,
+		}
+	}
+	return &threadJournaler{repo: repo, threadID: threadID, turns: turns}
+}
+
+// Persist appends all changes observed since the previous successful call, then
+// advances the durable tip. Successful operations update the local snapshot so
+// a partial failure can be retried without duplicating completed work.
+func (j *threadJournaler) Persist(ctx context.Context, thread *ledger.Thread) error {
+	for _, current := range thread.AllTurns() {
+		previous, exists := j.turns[current.ID]
+		if !exists {
+			turn := current
+			if err := j.repo.SaveTurn(ctx, j.threadID, &turn); err != nil {
+				return fmt.Errorf("save turn %s: %w", current.ID, err)
+			}
+			j.turns[current.ID] = persistedTurnState{
+				parentID: current.ParentID,
+				control:  current.Metadata.Control,
+			}
+			continue
+		}
+		if previous.parentID != current.ParentID {
+			if err := j.repo.UpdateTurnParent(ctx, j.threadID, current.ID, current.ParentID); err != nil {
+				return fmt.Errorf("update turn %s parent: %w", current.ID, err)
+			}
+			previous.parentID = current.ParentID
+		}
+		if previous.control != current.Metadata.Control {
+			if err := j.repo.UpdateTurnControl(ctx, j.threadID, current.ID, current.Metadata.Control); err != nil {
+				j.turns[current.ID] = previous
+				return fmt.Errorf("update turn %s control: %w", current.ID, err)
+			}
+			previous.control = current.Metadata.Control
+		}
+		j.turns[current.ID] = previous
+	}
+
+	if thread.CurrentTip == "" {
+		return nil
+	}
+	if _, ok := j.turns[thread.CurrentTip]; !ok {
+		return fmt.Errorf("current tip %s is not present in thread", thread.CurrentTip)
+	}
+	if err := j.repo.UpdateThreadTip(ctx, j.threadID, thread.CurrentTip); err != nil {
+		return fmt.Errorf("update thread tip: %w", err)
+	}
+	return nil
+}
+
+func trackResumePointer(workingDir, threadID string) error {
+	if workingDir == "" {
+		return nil
+	}
+	return resume.Track(workingDir, threadID)
+}
+
 // runTUIEngine wires the TUI's session into an engine.Engine,
 // forwards the TUI's outbound Events() channel into engine.Submit,
 // and persists the thread after every turn.
@@ -335,6 +411,7 @@ func runTUIEngine(
 	factory *tuiEngineFactory,
 	eng *engine.Engine,
 	repo ledger.Repository,
+	workingDir string,
 ) error {
 	// Bind slash handlers to the session BEFORE the TUI starts so
 	// slash commands (e.g. /thinking) work on a fresh
@@ -408,19 +485,16 @@ func runTUIEngine(
 		}
 	}()
 
-	// 2. Persistence pump: best-effort journal append after every
-	// lifecycle "done" event the engine emits (one per handled
-	// event on success). Pre-migration, the manager worker persisted
-	// the entire thread on every turn; this restores that
-	// behaviour via per-turn SaveTurn + UpdateThreadTip journal
-	// entries. The save is best-effort because failing to persist
-	// is not a fatal error for an interactive TUI session — the
-	// user can retry by typing.
+	// 2. Persistence pump: best-effort journal append after every lifecycle
+	// "done" event. The journaler saves every new turn and mutation before
+	// advancing the tip; AllTurns has no ordering guarantee, so selecting one
+	// element from that slice would risk persisting a tip that does not exist.
 	//
 	// The subscription is closed when sess.Close is called below,
 	// which lets the goroutine drain. Without that, the channel
 	// stays open for the lifetime of the session and <-lifecycleDone
 	// hangs forever after the TUI exits.
+	journaler := newThreadJournaler(repo, sess.ID(), sess.Thread().AllTurns())
 	lifecycleDone := make(chan struct{})
 	go func() {
 		defer close(lifecycleDone)
@@ -429,27 +503,8 @@ func runTUIEngine(
 			if !ok || le.Phase != "done" {
 				continue
 			}
-			thread := sess.Thread()
-			tip := thread.CurrentTip
-			if tip == "" {
-				continue
-			}
-			// AllTurns returns every turn in the thread
-			// (including ones with TraversalControl = skip).
-			// The latest turn is the one whose ID matches
-			// CurrentTip — the engine advances the tip on
-			// every successful turn via step.Turn.
-			turns := thread.AllTurns()
-			if len(turns) == 0 {
-				continue
-			}
-			latest := turns[len(turns)-1]
-			if err := repo.SaveTurn(ctx, sess.ID(), &latest); err != nil {
-				slog.Warn("save turn failed", "err", err)
-				continue
-			}
-			if err := repo.UpdateThreadTip(ctx, sess.ID(), tip); err != nil {
-				slog.Warn("update thread tip failed", "err", err)
+			if err := journaler.Persist(ctx, sess.Thread()); err != nil {
+				slog.Warn("persist thread failed", "err", err)
 			}
 		}
 	}()
@@ -491,10 +546,8 @@ func runTUIEngine(
 	// code, because the user's primary intent (running workshop
 	// in this directory) succeeded.
 	if startErr == nil {
-		if cwd, _ := sess.GetMetadata("cwd"); cwd != "" {
-			if err := resume.Track(cwd, sess.ID()); err != nil {
-				slog.Warn("write resume pointer failed", "err", err)
-			}
+		if err := trackResumePointer(workingDir, sess.ID()); err != nil {
+			slog.Warn("write resume pointer failed", "err", err)
 		}
 		fmt.Fprintln(os.Stderr, resume.FormatHint())
 	}
