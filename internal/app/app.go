@@ -1121,10 +1121,17 @@ func (s *sessionSetup) seedMetadata(sess *session.Session) {
 	}
 }
 
+const skillLoadingDirective = "Load the smallest set of skills that applies to the work ahead. " +
+	"Reuse instructions already visible in the current context; do not reread them just because the user asks a follow-up. " +
+	"If needed instructions are no longer visible (for example, after compaction), reload them. " +
+	"Reread a visible skill only if you know it changed or the user asks for a refresh. " +
+	"Read reference files only when needed for the current task."
+
 // makeSystemPromptTransform builds the composable system prompt transform. It
 // concatenates the default prompt, working-directory context, available skills,
 // repository instructions, and runtime details.
 func makeSystemPromptTransform(cfg *config, skillsToolkit *skills.Toolkit, metadata metadataReader) (loop.Transform, error) {
+	skillsToolkit.SetDirective(skillLoadingDirective)
 	return systemprompt.New(
 		systemprompt.WithContentFunc(func() string { return defaultPrompt }),
 		systemprompt.WithContentFunc(makeWorkingDirContent(cfg.workingDir)),
@@ -1432,7 +1439,6 @@ func mustRegisterRaw(registry tool.Registry, name, description string, schema ma
 const defaultPrompt = "You are a terminal-based coding assistant. " +
 	"You help users write, review, refactor, and debug code across any language or framework. " +
 	"You have access to filesystem tools (read_file, write_file, edit_file, list_directory, search_files) and a bash tool for running shell commands. " +
-	"When your task matches a skill description below, call read_skill to load its detailed instructions before proceeding. " +
 	"Use these tools proactively to explore the codebase, make changes, run tests, and verify your work. " +
 	"Prefer concise explanations and actionable suggestions.\n\n" +
 	"You also have access to workspace management tools (`workspace_create`, `workspace_destroy`) for isolated git worktrees, " +
