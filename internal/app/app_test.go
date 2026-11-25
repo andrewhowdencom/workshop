@@ -1516,6 +1516,34 @@ func (m *mockSkillDiscoverer) Read(ctx context.Context, name string, path string
 	return m.read[name], nil
 }
 
+func TestMakeSystemPromptTransform_ReusesSkillInstructions(t *testing.T) {
+	const wantDirective = "Load the smallest set of skills that applies to the work ahead. " +
+		"Reuse instructions already visible in the current context; do not reread them just because the user asks a follow-up. " +
+		"If needed instructions are no longer visible (for example, after compaction), reload them. " +
+		"Reread a visible skill only if you know it changed or the user asks for a refresh. " +
+		"Read reference files only when needed for the current task."
+	const body = "Detailed instructions for git operations."
+	tk := skills.NewToolkit(&mockSkillDiscoverer{
+		meta: []skills.SkillMeta{{Name: "git", Description: "Guidelines for git operations"}},
+		read: map[string]string{"git": body},
+	})
+	sp, err := makeSystemPromptTransform(&config{}, tk, nil)
+	require.NoError(t, err)
+	result, err := sp.Transform(context.Background(), ledger.NewThread())
+	require.NoError(t, err)
+	turns := result.Turns()
+	require.Len(t, turns, 1)
+	require.Equal(t, ledger.RoleSystem, turns[0].Role)
+	require.Len(t, turns[0].Artifacts, 1)
+	text, ok := turns[0].Artifacts[0].(artifact.Text)
+	require.True(t, ok)
+
+	assert.Equal(t, 1, strings.Count(text.Content, wantDirective))
+	assert.Contains(t, text.Content, wantDirective+"\n\n- git: Guidelines for git operations")
+	assert.NotContains(t, text.Content, "When your task matches a skill description below, call read_skill", "both old directives start with this phrase")
+	assert.NotContains(t, text.Content, body)
+}
+
 func TestSystemPrompt_WithSkillsFragment(t *testing.T) {
 	mock := &mockSkillDiscoverer{
 		meta: []skills.SkillMeta{
