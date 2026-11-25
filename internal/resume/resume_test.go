@@ -33,7 +33,7 @@ func withTempXDGRoot(t *testing.T) string {
 
 func TestHashCwd_StabilityAcrossNormalization(t *testing.T) {
 	// Equivalent paths (with trailing slash, ./, repeated separators)
-	// must hash to the same value, mirroring defaultMeta's shortCwd.
+	// must hash to the same value.
 	cases := []string{
 		"/home/user/proj",
 		"/home/user/proj/",
@@ -67,6 +67,21 @@ func TestTrack_ThenResolve_RoundTrip(t *testing.T) {
 	cwd := "/home/user/proj"
 	threadID := uuid.NewString()
 	require.NoError(t, Track(cwd, threadID))
+
+	got, err := ResolveFromCwd(cwd)
+	require.NoError(t, err)
+	assert.Equal(t, threadID, got)
+}
+
+func TestResolveFromCwd_FallsBackToLegacyHomeShortenedPointer(t *testing.T) {
+	withTempXDGRoot(t)
+
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	cwd := filepath.Join(home, "project")
+	legacyCwd := "~" + strings.TrimPrefix(cwd, home)
+	threadID := uuid.NewString()
+	require.NoError(t, Track(legacyCwd, threadID))
 
 	got, err := ResolveFromCwd(cwd)
 	require.NoError(t, err)

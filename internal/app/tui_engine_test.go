@@ -34,6 +34,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/andrewhowdencom/ore/agent"
 	"github.com/andrewhowdencom/ore/artifact"
 	"github.com/andrewhowdencom/ore/engine"
@@ -42,6 +43,7 @@ import (
 	"github.com/andrewhowdencom/ore/models"
 	"github.com/andrewhowdencom/ore/provider"
 	"github.com/andrewhowdencom/ore/session"
+	"github.com/andrewhowdencom/workshop/internal/resume"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -330,6 +332,78 @@ func assertUsageProperties(t *testing.T, events <-chan loop.OutputEvent, sent, c
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for usage properties")
 	}
+}
+
+func TestTrackResumePointer_UsesAbsoluteWorkingDirectory(t *testing.T) {
+	oldDataHome := xdg.DataHome
+	xdg.DataHome = t.TempDir()
+	t.Cleanup(func() { xdg.DataHome = oldDataHome })
+
+	workingDir := t.TempDir()
+	const threadID = "00000000-0000-4000-8000-000000000001"
+	require.NoError(t, trackResumePointer(workingDir, threadID))
+
+	got, err := resume.ResolveFromCwd(workingDir)
+	require.NoError(t, err)
+	assert.Equal(t, threadID, got)
+}
+
+func TestThreadJournaler_PersistsEveryNewTurnAndTip(t *testing.T) {
+	ctx := context.Background()
+	repo := ledger.NewMemoryRepository()
+	thread := ledger.NewThread()
+	thread.Append(ledger.RoleUser, artifact.Text{Content: "question"})
+	thread.Append(ledger.RoleAssistant, artifact.Text{Content: "answer"})
+
+	journaler := newThreadJournaler(repo, "thread-id", nil)
+	require.NoError(t, journaler.Persist(ctx, thread))
+
+	turns, tip, err := repo.HydrateThread(ctx, "thread-id")
+	require.NoError(t, err)
+	assert.Len(t, turns, 2)
+	assert.Equal(t, thread.CurrentTip, tip)
+
+	hydrated := ledger.NewThread()
+	for _, turn := range turns {
+		hydrated.SaveTurn(turn)
+	}
+	hydrated.SetCurrentTip(tip)
+	require.Len(t, hydrated.Turns(), 2)
+	assert.Equal(t, ledger.RoleUser, hydrated.Turns()[0].Role)
+	assert.Equal(t, ledger.RoleAssistant, hydrated.Turns()[1].Role)
+}
+
+func TestThreadJournaler_RejectsMissingCurrentTip(t *testing.T) {
+	repo := ledger.NewMemoryRepository()
+	thread := ledger.NewThread()
+	thread.SetCurrentTip("missing-turn")
+
+	journaler := newThreadJournaler(repo, "thread-id", nil)
+	err := journaler.Persist(context.Background(), thread)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "current tip missing-turn is not present")
+}
+
+func TestThreadJournaler_PersistsParentAndControlChanges(t *testing.T) {
+	ctx := context.Background()
+	repo := ledger.NewMemoryRepository()
+	thread := ledger.NewThread()
+	thread.Append(ledger.RoleUser, artifact.Text{Content: "question"})
+	firstID := thread.CurrentTip
+	thread.Append(ledger.RoleAssistant, artifact.Text{Content: "answer"})
+	secondID := thread.CurrentTip
+
+	journaler := newThreadJournaler(repo, "thread-id", nil)
+	require.NoError(t, journaler.Persist(ctx, thread))
+
+	thread.SetParent(secondID, "")
+	thread.SetControl(firstID, ledger.ControlStop)
+	require.NoError(t, journaler.Persist(ctx, thread))
+
+	turns, _, err := repo.HydrateThread(ctx, "thread-id")
+	require.NoError(t, err)
+	assert.Equal(t, "", turns[secondID].ParentID)
+	assert.Equal(t, ledger.ControlStop, turns[firstID].Metadata.Control)
 }
 
 // TestRunTUIEngine_PumpWaitsForEvents is the focused regression

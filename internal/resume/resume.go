@@ -7,9 +7,10 @@
 //
 //	$XDG_DATA_HOME/workshop/by-cwd/<sha256hex(cwd)>
 //
-// where `cwd` is `filepath.Clean(os.Getwd())` — same normalization
-// that `defaultMeta` uses for the session's `cwd` metadata, so the
-// read and write paths agree on the key.
+// where `cwd` is the canonical absolute working directory supplied by the
+// application. Display-only shortening such as `~/project` must not affect the
+// key; ResolveFromCwd retains a fallback for pointers written by older releases
+// that accidentally used the shortened form.
 //
 // The package is intentionally tiny: it owns three IO operations
 // (read, write, hint format) and nothing else. Higher-level concerns
@@ -45,9 +46,7 @@ var errInvalidPointer = errors.New("resume pointer: invalid contents")
 // round-tripping the same normalization.
 //
 // Two distinct cwds that differ only in trailing separators, `./`
-// components, or repeated separators all hash to the same value,
-// which is the same convention the TUI's `defaultMeta` uses to seed
-// the session's `cwd` metadata.
+// components, or repeated separators all hash to the same value.
 func HashCwd(cwd string) string {
 	sum := sha256.Sum256([]byte(filepath.Clean(cwd)))
 	return hex.EncodeToString(sum[:])
@@ -87,31 +86,61 @@ func pointerPath(cwd string) (string, error) {
 // UUID — the caller should surface that distinctly (the user may
 // have corrupted the file by hand).
 //
+// Older Workshop releases accidentally keyed pointers under a home-shortened
+// path such as ~/project while lookup used the absolute path. When the canonical
+// pointer is absent, ResolveFromCwd checks that legacy key for compatibility.
+// New pointers are always written against the cwd supplied to Track.
+//
 // Other errors (e.g. permission denied on the by-cwd directory) are
 // returned verbatim.
 func ResolveFromCwd(cwd string) (string, error) {
+	id, found, err := readPointer(cwd)
+	if err != nil || found {
+		return id, err
+	}
+	legacyCwd, ok := homeShortenedPath(cwd)
+	if !ok || legacyCwd == filepath.Clean(cwd) {
+		return "", nil
+	}
+	id, _, err = readPointer(legacyCwd)
+	return id, err
+}
+
+func readPointer(cwd string) (id string, found bool, err error) {
 	path, err := pointerPath(cwd)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
+			return "", false, nil
 		}
-		return "", fmt.Errorf("read resume pointer: %w", err)
+		return "", false, fmt.Errorf("read resume pointer: %w", err)
 	}
-	id := strings.TrimSpace(string(data))
+	id = strings.TrimSpace(string(data))
 	if id == "" {
-		// Treat an empty pointer file the same as a missing one; it
-		// can only happen if a previous Track wrote zero bytes, which
-		// is not currently possible but the fallback is cheap.
-		return "", nil
+		return "", false, nil
 	}
 	if _, err := uuid.Parse(id); err != nil {
-		return "", fmt.Errorf("%w: %q", errInvalidPointer, id)
+		return "", false, fmt.Errorf("%w: %q", errInvalidPointer, id)
 	}
-	return id, nil
+	return id, true, nil
+}
+
+func homeShortenedPath(path string) (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(home, filepath.Clean(path))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	if rel == "." {
+		return "~", true
+	}
+	return filepath.Join("~", rel), true
 }
 
 // Track writes the pointer file mapping cwd -> threadID. Idempotent:
